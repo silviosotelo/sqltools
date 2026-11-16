@@ -339,6 +339,34 @@ fn load_ddl_meta(
 }
 
 #[tauri::command]
+fn list_commands() -> Vec<sqlt_app::CommandSpec> {
+    sqlt_app::registry()
+}
+
+#[tauri::command]
+fn save_workspace(workspace: sqlt_app::Workspace) -> Result<(), String> {
+    sqlt_app::workspace::save_default(&workspace).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn load_workspace() -> Result<sqlt_app::Workspace, String> {
+    sqlt_app::workspace::load_default().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn migrate_legacy_connections(
+    state: State<'_, Arc<AppState>>,
+    path: String,
+) -> Result<usize, String> {
+    let mut store = state
+        .store
+        .lock()
+        .map_err(|_| "Connection store lock poisoned".to_string())?;
+    sqlt_app::migrate::import_legacy_json(std::path::Path::new(&path), &mut store)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn format_sql(sql: String, uppercase: bool) -> String {
     sqlt_core::format::format_sql(
         &sql,
@@ -349,12 +377,24 @@ fn format_sql(sql: String, uppercase: bool) -> String {
     )
 }
 
+#[tauri::command]
+async fn check_updates(app: tauri::AppHandle) -> Result<String, String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    match updater.check().await {
+        Ok(Some(update)) => Ok(format!("Update available: {}", update.version)),
+        Ok(None) => Ok("No updates available".to_string()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
 fn main() {
     let state = AppState::new().unwrap_or_else(|error| {
         eprintln!("Could not load the connection store: {error}");
         std::process::exit(1);
     });
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Arc::new(state))
         .invoke_handler(tauri::generate_handler![
             list_connections,
@@ -377,7 +417,12 @@ fn main() {
             list_indexes,
             list_triggers,
             list_grants,
+            list_commands,
+            save_workspace,
+            load_workspace,
+            migrate_legacy_connections,
             format_sql,
+            check_updates,
             explain_plan
         ])
         .run(tauri::generate_context!())

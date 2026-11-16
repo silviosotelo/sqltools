@@ -62,6 +62,25 @@ export type ColumnInfo = {
 
 export type StatEntry = [string, string];
 
+export type CommandSpec = {
+  id: string;
+  name: string;
+  keys: string[];
+  help: string;
+  implemented: boolean;
+};
+
+export type WorkspaceFile = {
+  name: string;
+  sql: string;
+};
+
+export type Workspace = {
+  version: number;
+  files: WorkspaceFile[];
+  active: number;
+};
+
 export type ConstraintInfo = {
   name: string;
   kind: string;

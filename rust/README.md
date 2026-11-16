@@ -4,9 +4,9 @@ Rust rewrite of SQLTools (Oracle client for PL/SQL/APEX developers), with a web 
 (Tauri v2 + React). Target platforms: Windows x64, macOS Intel/Apple Silicon and
 Linux x64.
 
-Status: **P4 (MetaDictionary + Format SQL in progress)**. The C++/Qt port
-remains untouched at the repository root (branch `main`); this branch (`rust`)
-contains the new implementation.
+Status: **P4/P5 (commands, workspaces, packaging)**. The C++/Qt port remains
+untouched at the repository root (branch `main`); this branch (`rust`) contains
+the new implementation.
 
 The app can store connections (metadata in JSON, passwords only in the OS
 keyring), connect, edit SQL with CodeMirror (folding, bookmarks, autocomplete),
@@ -74,6 +74,17 @@ npx @tauri-apps/cli@^2 build
 
 Signing/notarization and per-OS installers are completed in P5; unsigned
 bundling is already verified on Windows in P0.
+
+## Packaging, updates and migration
+
+- CI builds unsigned bundles on Windows x64, macOS Intel and Linux x64
+  (`msi`/`nsis`, `dmg`/`app`, `deb`/`AppImage`).
+- The updater plugin is wired (`check_updates`), but it needs a real public key
+  and an update endpoint/release host. Signing/notarization needs certificate
+  identities. Those are external secrets, not repository code.
+- Legacy SQLTools Mac connection profiles can be imported from the
+  `connections/list` JSON array (tag/user/alias/TNS/direct/mode/read-only);
+  passwords are never imported.
 
 ## License
 

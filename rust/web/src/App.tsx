@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Editor } from "./Editor";
 import { api } from "./api";
 import { useTranslation } from "./i18n";
 import type {
   ColumnInfo,
   ColumnMeta,
+  CommandSpec,
   ConnectionConfig,
   ConstraintInfo,
   GrantInfo,
@@ -15,6 +16,7 @@ import type {
   StatEntry,
   TriggerInfo,
   Value,
+  Workspace,
 } from "./types";
 
 type ObjectTab = "columns" | "constraints" | "indexes" | "triggers" | "grants";
@@ -137,6 +139,10 @@ export default function App() {
     y: number;
   } | null>(null);
   const [stats, setStats] = useState<StatEntry[]>([]);
+  const [commands, setCommands] = useState<CommandSpec[]>([]);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState("");
+  const [paletteIndex, setPaletteIndex] = useState(0);
 
   const isConnected = Boolean(selected && connected[selected]);
 
@@ -146,6 +152,26 @@ export default function App() {
 
   useEffect(() => {
     void refresh();
+  }, []);
+
+  useEffect(() => {
+    void api.listCommands().then(setCommands);
+  }, []);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        event.shiftKey &&
+        event.key.toLowerCase() === "p"
+      ) {
+        event.preventDefault();
+        setPaletteOpen((open) => !open);
+      }
+      if (event.key === "Escape") setPaletteOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   useEffect(() => {
@@ -461,6 +487,126 @@ export default function App() {
       setStatus(String(error));
     }
   };
+  const checkUpdates = async () => {
+    try {
+      setStatus(await api.checkUpdates());
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+  const saveWorkspace = async () => {
+    try {
+      await api.saveWorkspace({
+        version: 1,
+        files: [{ name: "query.sql", sql }],
+        active: 0,
+      });
+      setStatus(t("workspaceSave"));
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const loadWorkspace = async () => {
+    try {
+      const workspace: Workspace = await api.loadWorkspace();
+      const file = workspace.files[workspace.active] ?? workspace.files[0];
+      if (file) setSql(file.sql);
+      setStatus(t("workspaceLoad"));
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const importLegacy = async () => {
+    const path = window.prompt(t("legacyPath"));
+    if (!path) return;
+    try {
+      const count = await api.migrateLegacy(path);
+      await refresh();
+      setStatus(`${count} ${t("connections")}`);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const executeCommand = (name: string) => {
+    setPaletteOpen(false);
+    switch (name) {
+      case "Session.Connect":
+        void connect();
+        break;
+      case "Session.Disconnect":
+        void disconnect();
+        break;
+      case "Session.Commit":
+        void commit();
+        break;
+      case "Session.Rollback":
+        void rollback();
+        break;
+      case "Session.Cancel":
+        void cancel();
+        break;
+      case "Session.EnableSessionStatistics":
+        void showStats();
+        break;
+      case "Script.Execute":
+      case "Script.ExecuteCurrent":
+        void run();
+        break;
+      case "Script.ExplainPlan":
+        void explain();
+        break;
+      case "Script.LoadDDL":
+        if (selectedObject) void loadDdlFor(selectedObject);
+        else setStatus(t("selectObject"));
+        break;
+      case "View.ObjectList":
+      case "View.ObjectTree":
+        void loadObjects();
+        break;
+      case "Workspace.Save":
+        void saveWorkspace();
+        break;
+      case "Workspace.Open":
+        void loadWorkspace();
+        break;
+      default:
+        setStatus(`${t("notImplemented")}: ${name || "internal"}`);
+    }
+  };
+
+  const filteredCommands = commands
+    .filter((command) => {
+      const query = paletteQuery.toLowerCase();
+      return (
+        !query ||
+        command.name.toLowerCase().includes(query) ||
+        command.id.toLowerCase().includes(query) ||
+        command.keys.some((key) => key.toLowerCase().includes(query))
+      );
+    })
+    .slice(0, 50);
+
+  const onPaletteKey = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setPaletteIndex((index) =>
+        filteredCommands.length ? (index + 1) % filteredCommands.length : 0,
+      );
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setPaletteIndex((index) =>
+        filteredCommands.length
+          ? (index - 1 + filteredCommands.length) % filteredCommands.length
+          : 0,
+      );
+    } else if (event.key === "Enter") {
+      const command = filteredCommands[paletteIndex];
+      if (command) executeCommand(command.name);
+    }
+  };
   const exportCsv = () => {
     if (!columns.length) return;
     const header = columns.map((column) => column.name).join(",");
@@ -625,6 +771,9 @@ export default function App() {
             <button onClick={() => void remove()} disabled={!selected}>
               {t("delete")}
             </button>
+            <button onClick={() => void importLegacy()}>
+              {t("importLegacy")}
+            </button>
           </div>
         </details>
 
@@ -677,6 +826,7 @@ export default function App() {
             ))}
           </div>
         </details>
+        <button onClick={() => void checkUpdates()}>{t("checkUpdates")}</button>
       </aside>
 
       <main className="main">
@@ -700,7 +850,13 @@ export default function App() {
           <button onClick={() => void showStats()} disabled={!isConnected}>
             {t("stats")}
           </button>
-          <button onClick={() => void formatSql()} disabled={!sql.trim()}>\n            {t("format")}\n          </button>\n          <button onClick={exportCsv} disabled={!columns.length}>
+          <button onClick={() => void formatSql()} disabled={!sql.trim()}>
+            {t("format")}
+          </button>
+          <button onClick={() => setPaletteOpen(true)}>{t("commandPalette")}</button>
+          <button onClick={() => void saveWorkspace()}>{t("workspaceSave")}</button>
+          <button onClick={() => void loadWorkspace()}>{t("workspaceLoad")}</button>
+          <button onClick={exportCsv} disabled={!columns.length}>
             {t("exportCsv")}
           </button>
           <span className="connection-state">
@@ -991,6 +1147,38 @@ export default function App() {
         <footer className="status">{status}</footer>
       </main>
 
+      {paletteOpen && (
+        <div
+          className="palette-backdrop"
+          onClick={() => setPaletteOpen(false)}
+        >
+          <div className="palette" onClick={(event) => event.stopPropagation()}>
+            <input
+              autoFocus
+              value={paletteQuery}
+              placeholder={t("searchCommands")}
+              onChange={(event) => {
+                setPaletteQuery(event.target.value);
+                setPaletteIndex(0);
+              }}
+              onKeyDown={onPaletteKey}
+            />
+            <div className="palette-list">
+              {filteredCommands.map((command, index) => (
+                <button
+                  key={command.id}
+                  className={index === paletteIndex ? "active" : ""}
+                  onClick={() => executeCommand(command.name)}
+                >
+                  <span>{command.name || command.id}</span>
+                  <span className="keys">{command.keys[0] ?? ""}</span>
+                  {!command.implemented && <em>{t("notImplemented")}</em>}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       {menu && (
         <>
           <div

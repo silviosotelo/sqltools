@@ -1,6 +1,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
   ColumnInfo,
+  CommandSpec,
   ConnectionConfig,
   ConstraintInfo,
   GrantInfo,
@@ -10,6 +11,7 @@ import type {
   QueryEvent,
   StatEntry,
   TriggerInfo,
+  Workspace,
 } from "./types";
 
 export const api = {
@@ -67,6 +69,13 @@ export const api = {
     invoke<string>("load_ddl_meta", { connectionId, schema, name }),
   sessionStats: (connectionId: string) =>
     invoke<StatEntry[]>("session_stats", { connectionId }),
+  listCommands: () => invoke<CommandSpec[]>("list_commands"),
+  saveWorkspace: (workspace: Workspace) =>
+    invoke<void>("save_workspace", { workspace }),
+  loadWorkspace: () => invoke<Workspace>("load_workspace"),
+  migrateLegacy: (path: string) =>
+    invoke<number>("migrate_legacy_connections", { path }),
+  checkUpdates: () => invoke<string>("check_updates"),
   formatSql: (sql: string, uppercase: boolean) =>
     invoke<string>("format_sql", { sql, uppercase }),
   listConstraints: (

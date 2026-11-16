@@ -274,6 +274,13 @@ fn default_config_path() -> PathBuf {
     }
 }
 
+pub fn config_dir() -> PathBuf {
+    default_config_path()
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
