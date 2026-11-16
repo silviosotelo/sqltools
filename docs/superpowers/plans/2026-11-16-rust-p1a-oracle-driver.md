@@ -6,6 +6,8 @@
 
 **Architecture:** `sqlt-core` (puro) + `sqlt-oracle` (driver sobre el crate `oracle`/ODPI-C) + `sqlt-cli` (harness). La app Tauri consumirá estas mismas piezas en P2.
 
+**Alcance:** P1a es un **vertical slice**, no el cierre de P1. Al final se listan los criterios que quedan para P1b.
+
 **Tech Stack:** Rust 1.100, crate `oracle` 0.6.3, Instant Client 23.5 en `C:\instantclient_23_5`, tokio solo cuando haga falta (el crate es síncrono; el wrapper async llega en P2).
 
 **Spec:** `docs/superpowers/specs/2026-11-16-rust-migration-design.md`
@@ -90,7 +92,7 @@ pub fn substitute(sql: &str, values: &HashMap<String, BindValue>) -> (String, Ve
 **Interfaces:**
 ```rust
 pub fn locate_oci_dir() -> Result<PathBuf, OciError>;                 // DPI_OCI_LIB_DIR > SQLT_OCI_DIR > PATH > candidatos
-pub fn prepare_oci_environment(dir: &Path);                            // set DPI_OCI_LIB_DIR + Path (una vez)
+pub fn prepare_oci_environment(lib_dir: &Path, config_dir: Option<&Path>) -> Result<(), OciError>; // oracle::InitParams::new().oracle_client_lib_dir(...).oracle_client_config_dir(...).init()
 pub enum ConnectTarget { Alias(String), Direct { host: String, port: u16, service: String } }
 pub enum ConnectMode { Normal, SysDba, SysOper }
 pub struct ConnectSpec { pub user: String, pub password: String, pub target: ConnectTarget, pub mode: ConnectMode, pub read_only: bool }
@@ -98,7 +100,7 @@ impl ConnectSpec { pub fn from_env() -> Result<Self, SpecError>; pub fn connect_
 ```
 
 - [ ] **Step 1: Pruebas que fallan** para prioridad de variables, candidatos con `oci.dll`/`libclntsh.*` en un temp dir, error cuando no hay cliente, `connect_string()` directo (`//host:port/service`) y alias, y parseo de `SQLT_MODE` (SYSDBA/SYSOPER).
-- [ ] **Step 2: Implementar** con `locate_oci_dir_in(...)` puro y testeable; `prepare_oci_environment` idempotente (`OnceLock`).
+- [ ] **Step 2: Implementar** con `locate_oci_dir_in(...)` puro y testeable; `prepare_oci_environment` usa `oracle::InitParams` (lib dir + `TNS_ADMIN`/config dir) una sola vez vía `OnceLock`. `SQLT_TNS_ADMIN` alimenta `oracle_client_config_dir`.
 - [ ] **Step 3: Verde + clippy + commit** (`feat(oracle): localización del Instant Client y especificación de conexión`).
 
 ---
@@ -111,22 +113,27 @@ impl ConnectSpec { pub fn from_env() -> Result<Self, SpecError>; pub fn connect_
 
 **Interfaces:**
 ```rust
-pub struct Session { /* oracle::Connection */ }
+pub struct QueryOptions { pub prefetch: u32 } // default 1000
+pub struct Session { /* Arc<oracle::Connection> */ }
 impl Session {
     pub fn open(spec: &ConnectSpec) -> Result<Session, OciError>;
-    pub fn query(&self, sql: &str) -> Result<QueryHandle, OciError>;
+    pub fn query(&self, sql: &str, opts: QueryOptions) -> Result<QueryHandle, OciError>;
     pub fn execute(&self, sql: &str) -> Result<u64, OciError>;   // filas afectadas
     pub fn commit(&self) -> Result<(), OciError>;
     pub fn rollback(&self) -> Result<(), OciError>;
-    pub fn cancel(&self) -> Result<(), OciError>;               // break_execution
     pub fn server_version(&self) -> Result<String, OciError>;
 }
-pub struct QueryHandle { /* ResultSet<'static, Row> */ }
-impl QueryHandle { pub fn columns(&self) -> &[ColumnMeta]; pub fn next_batch(&mut self, max: usize) -> Result<Batch, OciError>; }
+pub struct QueryHandle { /* ResultSet<'static, Row> + Arc<Connection> + columnas */ }
+impl QueryHandle {
+    pub fn columns(&self) -> &[ColumnMeta];
+    pub fn next_batch(&mut self, max: usize) -> Result<Batch, OciError>; // nunca más de `max` filas
+    pub fn cancel(&self) -> Result<(), OciError>;                        // break_execution desde otro hilo
+}
 ```
+`Session` es `Send + Sync` (el `Connection` del crate lo es); `QueryHandle` conserva un `Arc<Connection>` para poder cancelar mientras `next_batch` corre en otro hilo. El query se construye con `StatementBuilder::fetch_array_size(prefetch).build()?.into_result_set(&[])`.
 
-- [ ] **Step 1: Integración que falla (si hay entorno)** — `connect_y_select_dual`, `tipos_comunes` (`1`, `1.5`, `'ñ😀'`, `date '2024-02-29'`, `timestamp '2024-02-29 13:45:09.123'`, `null`), `cancelar_consulta_larga` (cancelar a los 500 ms; error ORA-01013; luego `select 1 from dual` OK), `recorrer_100k_filas_por_lotes` (que el lote respete `max`).
-- [ ] **Step 2: Implementar el mapeo** usando `row.sql_values()` + `row.column_info()`: texto → `String`; NUMBER → `String`; DATE/TIMESTAMP → `oracle::sql_type::Timestamp` + `datefmt`; RAW → `Vec<u8>`; NULL → `Value::Null`. LOBs básicos vía `get::<String>`/`Vec<u8>`; si el crate no lo permite, devolver error tipado y documentarlo (P1b).
+- [ ] **Step 1: Integración que falla (si hay entorno)** — `connect_y_select_dual`, `tipos_comunes` (`1`, `1.5`, `'ñ😀'`, `date '2024-02-29'`, `timestamp '2024-02-29 13:45:09.123'`, `null`, `clob` corto), `cancelar_consulta_larga` (cancelar a los 500 ms desde otro hilo; error ORA-01013; luego `select 1 from dual` OK), `recorrer_100k_filas_por_lotes` (cada lote ≤ `max` y prefetch respetado).
+- [ ] **Step 2: Implementar el mapeo** usando `row.sql_values()` + `row.column_info()`: texto → `String`; NUMBER → `String` (nunca `f64`); DATE/TIMESTAMP → `oracle::sql_type::Timestamp` + `datefmt`; RAW → `Vec<u8>`; LOBs cortos como texto/bytes; NULL → `Value::Null` (nunca la cadena "NULL").
 - [ ] **Step 3: Verde local con credenciales** (ver comando abajo) y commit.
 
 Environment para integración:
@@ -174,7 +181,17 @@ sqlt-cli bench "<sql>" [--runs N]
 
 ## Cierre de P1a
 
-- [ ] `cargo test --workspace` verde en Windows (unit) y CI en 3 SO.
-- [ ] Integración Oracle real: dual, tipos comunes, cancelación y 100k filas por lotes.
-- [ ] `sqlt-cli query/bench` funcionando contra `santa` o el alias elegido.
-- [ ] Sin credenciales en el repo; `.env.local` ignorado.
+- [x] `cargo test --workspace` verde en Windows (unit) y CI en 3 SO.
+- [x] Integración Oracle real: dual, tipos comunes, cancelación y 100k filas por lotes (Oracle 12.1 `desa02`, 6/6).
+- [x] `sqlt-cli query/bench` funcionando contra `desa02` (30k filas en 1,613 s = 18.595 filas/s).
+- [x] Sin credenciales en el repo; `.env.local` ignorado.
+- [x] Si no hay credenciales al momento de cerrar: marcar **BLOQUEADO / NO VERIFICADO**, nunca verde.
+
+## Lo que queda para P1b (cierre real de P1)
+
+- [ ] 25 tipos de datos del test original (`etapa1/sqlt_types_test.cpp`), incluidos BLOB/CLOB/NCLOB por locator, RAW, ROWID/UROWID, INTERVAL, JSON, colecciones y mensajes ORA.
+- [ ] Binds OCI reales (`etapa1/sqlt_bind_test.cpp`, 12 casos) además de la sustitución por literales.
+- [ ] Golden de fechas 260 000 valores × 13 formatos contra `TO_CHAR`; fallback al driver si NLS no es inglés.
+- [ ] Wallet/TLS (`my_wallet_directory`, `sqlnet.ora`, sin modificar archivos del usuario) con los 17 casos del port C++.
+- [ ] Prefetch medido (500/1000/5000/20000) y benchmark de filas/s comparable al port C++.
+- [ ] NLSPARAM/NLS_DATE_FORMAT propios y `SQLT_PREFETCH` equivalente.
