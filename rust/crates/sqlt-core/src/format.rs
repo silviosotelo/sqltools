@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Pragmatic SQL formatter. It preserves strings, q-quotes and comments,
-//! uppercases keywords, and breaks major clauses onto their own lines.
-//! The original C++ formatter is richer; this is the first P4 slice.
+//! SQL formatter: clause layout, one item per line, JOIN/ON, AND/OR, operator
+//! spacing and comma position. Golden cases come from `tests/format_test.cpp`.
+//!
+//! PL/SQL blocks use a conservative keyword/indentation pass; full PL/SQL
+//! re-indentation parity is still incremental.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FormatOptions {
     pub uppercase_keywords: bool,
     pub indent: usize,
+    pub comma_leading: bool,
 }
 
 impl Default for FormatOptions {
@@ -14,6 +17,7 @@ impl Default for FormatOptions {
         FormatOptions {
             uppercase_keywords: true,
             indent: 2,
+            comma_leading: false,
         }
     }
 }
@@ -54,6 +58,7 @@ const KEYWORDS: &[&str] = &[
     "RIGHT",
     "INNER",
     "OUTER",
+    "CROSS",
     "ON",
     "AND",
     "OR",
@@ -93,6 +98,9 @@ const KEYWORDS: &[&str] = &[
     "EXPLAIN",
     "PLAN",
     "DESCRIBE",
+    "INTO",
+    "ASC",
+    "DESC",
 ];
 
 fn is_word_char(c: char) -> bool {
@@ -197,168 +205,468 @@ fn tokenize(input: &str) -> Vec<Token> {
     tokens
 }
 
-fn clause_break(word: &str, next: Option<&str>) -> bool {
-    match word {
-        "SELECT" | "FROM" | "WHERE" | "HAVING" | "UNION" | "MINUS" | "INTERSECT" | "CONNECT"
-        | "START" | "INSERT" | "UPDATE" | "DELETE" | "VALUES" | "SET" | "RETURNING" | "MERGE"
-        | "WITH" => true,
-        "GROUP" | "ORDER" => next == Some("BY"),
-        _ => false,
+fn next_word(tokens: &[Token], index: usize) -> Option<String> {
+    tokens.get(index + 1).and_then(|token| match token {
+        Token::Word(word) => Some(word.to_ascii_uppercase()),
+        _ => None,
+    })
+}
+
+fn detect_clause(tokens: &[Token], index: usize) -> Option<(String, usize)> {
+    let Token::Word(word) = tokens.get(index)? else {
+        return None;
+    };
+    let upper = word.to_ascii_uppercase();
+    match upper.as_str() {
+        "GROUP" | "ORDER" if next_word(tokens, index).as_deref() == Some("BY") => {
+            Some((format!("{upper} BY"), 2))
+        }
+        "INSERT" if next_word(tokens, index).as_deref() == Some("INTO") => {
+            Some(("INSERT INTO".to_string(), 2))
+        }
+        "DELETE" if next_word(tokens, index).as_deref() == Some("FROM") => {
+            Some(("DELETE FROM".to_string(), 2))
+        }
+        "SELECT" | "FROM" | "WHERE" | "HAVING" | "SET" | "VALUES" | "UPDATE" | "MERGE" => {
+            Some((upper, 1))
+        }
+        _ => None,
     }
 }
 
-fn cmp_operator(op: &str) -> bool {
+fn should_space_before_paren(previous: Option<&Token>) -> bool {
     matches!(
-        op,
-        "=" | "<" | ">" | "<=" | ">=" | "<>" | "!=" | ":=" | "||"
+        previous,
+        Some(Token::Word(word))
+            if matches!(
+                word.to_ascii_uppercase().as_str(),
+                "IN" | "EXISTS" | "VALUES" | "INTO" | "FROM" | "WHERE" | "AND" | "OR" | "ON" | "SET"
+            )
     )
 }
 
-pub fn format_sql(input: &str, options: &FormatOptions) -> String {
-    let tokens = tokenize(input);
+fn render(tokens: &[Token], options: &FormatOptions) -> String {
     let mut out = String::new();
-    let mut depth = 0i32;
-    let mut need_space = false;
-    let mut line_start = true;
-    let indent = " ".repeat(options.indent);
-
-    let newline = |out: &mut String, line_start: &mut bool| {
-        while out.ends_with(' ') {
-            out.pop();
-        }
-        if !out.is_empty() {
-            out.push('\n');
-            *line_start = true;
-        }
-    };
-
+    let mut tight = false;
     for (index, token) in tokens.iter().enumerate() {
         match token {
             Token::Word(word) => {
+                if !tight {
+                    if let Some(last) = out.chars().last() {
+                        if !matches!(last, ' ' | '\n' | '(' | '.' | ':') {
+                            out.push(' ');
+                        }
+                    }
+                }
+                tight = false;
                 let upper = word.to_ascii_uppercase();
-                let next = tokens.get(index + 1).and_then(|next| match next {
-                    Token::Word(value) => Some(value.to_ascii_uppercase()),
-                    _ => None,
-                });
-                if depth == 0 && clause_break(&upper, next.as_deref()) {
-                    newline(&mut out, &mut line_start);
-                } else if depth == 0 && (upper == "AND" || upper == "OR") {
-                    newline(&mut out, &mut line_start);
-                    out.push_str(&indent);
-                    line_start = false;
-                    need_space = false;
-                }
-                if need_space && !line_start {
-                    out.push(' ');
-                }
-                if options.uppercase_keywords && KEYWORDS.contains(&upper.as_str()) {
+                let is_function = matches!(tokens.get(index + 1), Some(Token::Symbol('(')));
+                if options.uppercase_keywords && (KEYWORDS.contains(&upper.as_str()) || is_function)
+                {
                     out.push_str(&upper);
                 } else {
                     out.push_str(word);
                 }
-                need_space = true;
-                line_start = false;
             }
             Token::Text(text) => {
-                if need_space && !line_start {
-                    out.push(' ');
+                if !tight {
+                    if let Some(last) = out.chars().last() {
+                        if !matches!(last, ' ' | '\n' | '(' | '.') {
+                            out.push(' ');
+                        }
+                    }
                 }
+                tight = false;
                 out.push_str(text);
-                need_space = true;
-                line_start = false;
             }
             Token::Symbol('(') => {
-                if need_space && !line_start {
+                if should_space_before_paren(tokens.get(index.wrapping_sub(1))) {
                     out.push(' ');
                 }
                 out.push('(');
-                depth += 1;
-                need_space = false;
-                line_start = false;
             }
-            Token::Symbol(')') => {
-                depth -= 1;
-                out.push(')');
-                need_space = true;
-                line_start = false;
-            }
-            Token::Symbol(',') => {
-                out.push(',');
-                out.push(' ');
-                need_space = false;
-                line_start = false;
-            }
-            Token::Symbol(';') => {
-                out.push(';');
-                newline(&mut out, &mut line_start);
-                need_space = false;
-            }
-            Token::Symbol('.') | Token::Symbol(':') => {
-                out.push(match token {
-                    Token::Symbol('.') => '.',
-                    _ => ':',
-                });
-                need_space = false;
-                line_start = false;
-            }
-            Token::Symbol(other) => {
-                out.push(*other);
-                need_space = false;
-                line_start = false;
-            }
+            Token::Symbol(')') => out.push(')'),
+            Token::Symbol(',') => out.push_str(", "),
+            Token::Symbol(';') => out.push(';'),
+            Token::Symbol('.') => out.push('.'),
+            Token::Symbol(':') => out.push(':'),
+            Token::Symbol(other) => out.push(*other),
             Token::Operator(op) => {
-                if cmp_operator(op) {
-                    if !out.ends_with(' ') && !line_start {
+                let next_is_paren = matches!(tokens.get(index + 1), Some(Token::Symbol(')')));
+                let prev_is_open =
+                    matches!(tokens.get(index.wrapping_sub(1)), Some(Token::Symbol('(')));
+                let unary = matches!(op.as_str(), "-" | "+")
+                    && (out.is_empty()
+                        || out.ends_with('(')
+                        || out.ends_with(',')
+                        || out.ends_with(' '));
+                if unary {
+                    out.push_str(op);
+                    tight = true;
+                } else if op == "*" && (next_is_paren || prev_is_open || out.ends_with('.')) {
+                    out.push('*');
+                } else if matches!(
+                    op.as_str(),
+                    "=" | "<" | ">" | "<=" | ">=" | "<>" | "!=" | ":=" | "||"
+                ) {
+                    if !out.ends_with(' ') {
                         out.push(' ');
                     }
                     out.push_str(op);
                     out.push(' ');
-                    need_space = false;
                 } else {
-                    if need_space && !line_start {
+                    if !out.ends_with(' ') && !out.is_empty() {
                         out.push(' ');
                     }
                     out.push_str(op);
-                    need_space = true;
+                    out.push(' ');
                 }
-                line_start = false;
             }
         }
     }
-    out.trim_end().to_string()
+    out.trim().to_string()
+}
+
+fn split_commas(tokens: &[Token]) -> Vec<Vec<Token>> {
+    let mut parts = Vec::new();
+    let mut current = Vec::new();
+    let mut depth = 0i32;
+    for token in tokens {
+        match token {
+            Token::Symbol('(') => depth += 1,
+            Token::Symbol(')') => depth -= 1,
+            Token::Symbol(',') if depth == 0 => {
+                parts.push(current);
+                current = Vec::new();
+                continue;
+            }
+            _ => {}
+        }
+        current.push(token.clone());
+    }
+    parts.push(current);
+    parts.retain(|part| !part.is_empty());
+    parts
+}
+
+fn format_list(keyword: &str, body: &[Token], options: &FormatOptions) -> String {
+    let items = split_commas(body);
+    if items.len() <= 1 {
+        return format!("{keyword} {}", render(body, options));
+    }
+    let indent = " ".repeat(options.indent);
+    let mut lines = Vec::new();
+    for (index, item) in items.iter().enumerate() {
+        let text = render(item, options);
+        if options.comma_leading {
+            if index == 0 {
+                lines.push(format!("{indent}{text}"));
+            } else {
+                lines.push(format!("{indent}, {text}"));
+            }
+        } else {
+            let comma = if index + 1 < items.len() { "," } else { "" };
+            lines.push(format!("{indent}{text}{comma}"));
+        }
+    }
+    format!("{keyword}\n{}", lines.join("\n"))
+}
+
+fn format_where(body: &[Token], options: &FormatOptions) -> String {
+    let indent = " ".repeat(options.indent);
+    let mut parts: Vec<Vec<Token>> = Vec::new();
+    let mut current = Vec::new();
+    let mut depth = 0i32;
+    let mut between = false;
+    for token in body {
+        match token {
+            Token::Symbol('(') => depth += 1,
+            Token::Symbol(')') => depth -= 1,
+            Token::Word(word) if depth == 0 => {
+                let upper = word.to_ascii_uppercase();
+                if upper == "BETWEEN" {
+                    between = true;
+                } else if upper == "AND" || upper == "OR" {
+                    if between {
+                        between = false;
+                        current.push(token.clone());
+                        continue;
+                    }
+                    parts.push(current);
+                    current = vec![token.clone()];
+                    continue;
+                }
+            }
+            _ => {}
+        }
+        current.push(token.clone());
+    }
+    parts.push(current);
+    let mut out = format!("WHERE {}", render(&parts[0], options));
+    for part in parts.iter().skip(1) {
+        out.push_str(&format!("\n{indent}{}", render(part, options)));
+    }
+    out
+}
+
+fn format_from(body: &[Token], options: &FormatOptions) -> String {
+    let indent = " ".repeat(options.indent);
+    let mut joins: Vec<Vec<Token>> = Vec::new();
+    let mut current = Vec::new();
+    let mut depth = 0i32;
+    for (index, token) in body.iter().enumerate() {
+        if depth == 0 {
+            if let Token::Word(word) = token {
+                let upper = word.to_ascii_uppercase();
+                let modifier = matches!(
+                    upper.as_str(),
+                    "LEFT" | "RIGHT" | "FULL" | "INNER" | "CROSS"
+                );
+                let plain_join = upper == "JOIN"
+                    && !current.iter().any(|item| {
+                        matches!(
+                            item,
+                            Token::Word(inner)
+                                if matches!(
+                                    inner.to_ascii_uppercase().as_str(),
+                                    "LEFT" | "RIGHT" | "FULL" | "INNER" | "CROSS"
+                                )
+                        )
+                    });
+                if (modifier || plain_join) && !current.is_empty() {
+                    joins.push(current);
+                    current = Vec::new();
+                }
+            }
+        }
+        match token {
+            Token::Symbol('(') => depth += 1,
+            Token::Symbol(')') => depth -= 1,
+            _ => {}
+        }
+        current.push(token.clone());
+        let _ = index;
+    }
+    if !current.is_empty() {
+        joins.push(current);
+    }
+    if joins.is_empty() {
+        return format!("FROM {}", render(body, options));
+    }
+    let mut out = format!("FROM {}", render(&joins[0], options));
+    for join in joins.iter().skip(1) {
+        out.push_str(&format!("\n{indent}{}", render(join, options)));
+    }
+    out
+}
+
+fn format_statement(tokens: &[Token], options: &FormatOptions) -> String {
+    let mut clauses: Vec<(String, Vec<Token>)> = Vec::new();
+    let mut keyword: Option<String> = None;
+    let mut body: Vec<Token> = Vec::new();
+    let mut depth = 0i32;
+    let mut index = 0usize;
+    while index < tokens.len() {
+        if depth == 0 {
+            if let Some((clause, len)) = detect_clause(tokens, index) {
+                if let Some(previous) = keyword.take() {
+                    clauses.push((previous, body.clone()));
+                    body.clear();
+                }
+                keyword = Some(clause);
+                index += len;
+                continue;
+            }
+        }
+        if tokens[index] == Token::Symbol('(') {
+            depth += 1;
+        } else if tokens[index] == Token::Symbol(')') {
+            depth -= 1;
+        }
+        body.push(tokens[index].clone());
+        index += 1;
+    }
+    if let Some(clause) = keyword {
+        clauses.push((clause, body));
+    } else {
+        return render(tokens, options);
+    }
+
+    let mut out = Vec::new();
+    for (clause, body) in clauses {
+        let text = match clause.as_str() {
+            "SELECT" => format_list("SELECT", &body, options),
+            "GROUP BY" | "ORDER BY" => format_list(&clause, &body, options),
+            "FROM" => format_from(&body, options),
+            "WHERE" => format_where(&body, options),
+            "SET" => format_list("SET", &body, options),
+            "VALUES" => format!("VALUES {}", render(&body, options)),
+            _ => format!("{clause} {}", render(&body, options)),
+        };
+        out.push(text);
+    }
+    out.join("\n")
+}
+
+fn split_statements(tokens: &[Token]) -> Vec<Vec<Token>> {
+    let mut statements = Vec::new();
+    let mut current = Vec::new();
+    let mut depth = 0i32;
+    for token in tokens {
+        match token {
+            Token::Symbol('(') => depth += 1,
+            Token::Symbol(')') => depth -= 1,
+            Token::Symbol(';') if depth == 0 => {
+                statements.push(current);
+                current = Vec::new();
+                continue;
+            }
+            _ => {}
+        }
+        current.push(token.clone());
+    }
+    if !current.is_empty() {
+        statements.push(current);
+    }
+    statements
+}
+
+fn is_plsql(tokens: &[Token]) -> bool {
+    let first = tokens.iter().find_map(|token| match token {
+        Token::Word(word) => Some(word.to_ascii_uppercase()),
+        _ => None,
+    });
+    matches!(first.as_deref(), Some("BEGIN") | Some("DECLARE"))
+        || (first.as_deref() == Some("CREATE")
+            && tokens.iter().any(|token| {
+                matches!(
+                    token,
+                    Token::Word(word)
+                        if matches!(
+                            word.to_ascii_uppercase().as_str(),
+                            "PROCEDURE" | "FUNCTION" | "PACKAGE" | "TRIGGER" | "TYPE"
+                        )
+                )
+            }))
+}
+
+fn format_plsql(tokens: &[Token], options: &FormatOptions) -> String {
+    // Conservative pass: uppercase keywords, keep line structure and indent.
+    let mut lines: Vec<String> = Vec::new();
+    let mut current: Vec<Token> = Vec::new();
+    for token in tokens {
+        if *token == Token::Symbol(';') {
+            current.push(token.clone());
+            lines.push(render(&current, options));
+            current.clear();
+            continue;
+        }
+        if let Token::Word(word) = token {
+            let upper = word.to_ascii_uppercase();
+            if matches!(
+                upper.as_str(),
+                "BEGIN" | "DECLARE" | "END" | "IF" | "LOOP" | "EXCEPTION"
+            ) && !current.is_empty()
+            {
+                lines.push(render(&current, options));
+                current.clear();
+            }
+        }
+        current.push(token.clone());
+    }
+    if !current.is_empty() {
+        lines.push(render(&current, options));
+    }
+    lines.join("\n")
+}
+
+pub fn format_sql(input: &str, options: &FormatOptions) -> String {
+    let tokens = tokenize(input);
+    if tokens.is_empty() {
+        return String::new();
+    }
+    if is_plsql(&tokens) {
+        return format_plsql(&tokens, options);
+    }
+    let had_semicolon = input.trim_end().ends_with(';');
+    let statements = split_statements(&tokens);
+    let formatted: Vec<String> = statements
+        .iter()
+        .map(|statement| format_statement(statement, options))
+        .filter(|statement| !statement.is_empty())
+        .collect();
+    let mut out = formatted.join(";\n");
+    if had_semicolon && !out.is_empty() {
+        out.push(';');
+    }
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn standard() -> FormatOptions {
+        FormatOptions::default()
+    }
+
     #[test]
-    fn formats_a_simple_select() {
-        let sql = "select a,b from t where x=1 and y=2 order by a";
-        let formatted = format_sql(sql, &FormatOptions::default());
+    fn formats_the_cpp_standard_select() {
+        let sql = "select a.id,b.nombre,sum(c.total) from cab_pedido a join cliente b on a.id_cliente=b.id left join det_pedido c on c.id_pedido=a.id where a.estado='A' and b.activo=1 group by a.id,b.nombre order by 3 desc;";
+        let expected = "SELECT\n  a.id,\n  b.nombre,\n  SUM(c.total)\nFROM cab_pedido a\n  JOIN cliente b ON a.id_cliente = b.id\n  LEFT JOIN det_pedido c ON c.id_pedido = a.id\nWHERE a.estado = 'A'\n  AND b.activo = 1\nGROUP BY\n  a.id,\n  b.nombre\nORDER BY 3 DESC;";
+        assert_eq!(format_sql(sql, &standard()), expected);
+    }
+
+    #[test]
+    fn custom_indent_and_comma_leading() {
+        let mut options = FormatOptions {
+            indent: 4,
+            ..standard()
+        };
         assert_eq!(
-            formatted,
-            "SELECT a, b\nFROM t\nWHERE x = 1\n  AND y = 2\nORDER BY a"
+            format_sql("select a from t where x=1 and y=2", &options),
+            "SELECT a\nFROM t\nWHERE x = 1\n    AND y = 2"
+        );
+        options.indent = 2;
+        options.comma_leading = true;
+        assert_eq!(
+            format_sql("select a,b,c from t", &options),
+            "SELECT\n  a\n  , b\n  , c\nFROM t"
+        );
+    }
+
+    #[test]
+    fn between_does_not_split_the_and() {
+        assert_eq!(
+            format_sql(
+                "select 1 from t where a between 1 and 5 and b=2",
+                &standard()
+            ),
+            "SELECT 1\nFROM t\nWHERE a BETWEEN 1 AND 5\n  AND b = 2"
+        );
+    }
+
+    #[test]
+    fn operators_and_negatives() {
+        assert_eq!(
+            format_sql("select -1+2*3,a||b,count(*),t.* from t", &standard()),
+            "SELECT\n  -1 + 2 * 3,\n  a || b,\n  COUNT(*),\n  t.*\nFROM t"
         );
     }
 
     #[test]
     fn preserves_strings_and_comments() {
-        let sql = "select 'a b', q'[x;y]' from t -- comment\n where x=1";
-        let formatted = format_sql(sql, &FormatOptions::default());
-        assert!(formatted.contains("'a b'"));
-        assert!(formatted.contains("q'[x;y]'"));
-        assert!(formatted.contains("-- comment"));
-        assert!(formatted.contains("WHERE x = 1"));
+        let sql = "select 'a,b  from' x, \"Mi Col\" -- nota, from\nfrom t";
+        let formatted = format_sql(sql, &standard());
+        assert!(formatted.contains("'a,b  from'"));
+        assert!(formatted.contains("\"Mi Col\""));
+        assert!(formatted.contains("-- nota, from"));
+        assert!(formatted.contains("FROM t"));
     }
 
     #[test]
-    fn is_idempotent_for_simple_sql() {
-        let first = format_sql(
-            "select a,b from t where x=1 and y=2",
-            &FormatOptions::default(),
-        );
-        let second = format_sql(&first, &FormatOptions::default());
-        assert_eq!(first, second);
+    fn is_idempotent() {
+        let first = format_sql("select a,b from t where x=1 and y=2", &standard());
+        assert_eq!(format_sql(&first, &standard()), first);
     }
 }

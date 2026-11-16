@@ -502,6 +502,37 @@ export default function App() {
       setStatus(String(error));
     }
   };
+  const newFile = () => {
+    setSql("");
+    setColumns([]);
+    setRows([]);
+    setPanel("results");
+    setStatus("");
+  };
+
+  const reconnect = async () => {
+    if (!selected) return;
+    try {
+      await api.disconnect(selected);
+      const version = await api.connect(selected);
+      setConnected((current) => ({ ...current, [selected]: version }));
+      setTables(await api.listTableNames(selected));
+      setStatus(`${t("connected")}: ${version}`);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const refreshObjectCache = async () => {
+    columnCache.current.clear();
+    if (!isConnected) return;
+    try {
+      setTables(await api.listTableNames(selected));
+      setStatus(t("refresh"));
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
   const checkUpdates = async () => {
     try {
       setStatus(await api.checkUpdates());
@@ -548,6 +579,15 @@ export default function App() {
   const executeCommand = (name: string) => {
     setPaletteOpen(false);
     switch (name) {
+      case "File.New":
+        newFile();
+        break;
+      case "Session.Reconnect":
+        void reconnect();
+        break;
+      case "Session.RefreshObjectCache":
+        void refreshObjectCache();
+        break;
       case "Session.Connect":
         void connect();
         break;

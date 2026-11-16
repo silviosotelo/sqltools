@@ -402,6 +402,7 @@ fn format_sql(sql: String, uppercase: bool) -> String {
         &sqlt_core::format::FormatOptions {
             uppercase_keywords: uppercase,
             indent: 2,
+            comma_leading: false,
         },
     )
 }
