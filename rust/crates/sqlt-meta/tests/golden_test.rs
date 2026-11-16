@@ -21,6 +21,7 @@ fn column(
         nullable,
         data_default: data_default.to_string(),
         comments: None,
+        virtual_column: false,
     }
 }
 
@@ -121,4 +122,41 @@ fn indexes_constraints_comments_grants() {
     assert!(output.contains("COMMENT ON TABLE cliente IS 'Tabla de clientes';\n\n"));
     assert!(output.contains("COMMENT ON COLUMN cliente.ci IS 'Cédula';\n"));
     assert!(output.contains("GRANT SELECT, UPDATE ON cliente TO reporte;\n"));
+}
+
+#[test]
+fn temporary_table_clause() {
+    let mut table = Table::new("APP", "TMP_ROWS");
+    table.columns = vec![column("A", "NUMBER", 22, 10, 0, true, "")];
+    table.temporary = Some(sqlt_meta::TemporaryDuration::Preserve);
+    let expected = "CREATE GLOBAL TEMPORARY TABLE tmp_rows (\n  a NUMBER(10,0) NULL\n)\n  ON COMMIT PRESERVE ROWS\n/\n\n";
+    assert_eq!(table.write_definition(&settings(false)), expected);
+    table.temporary = Some(sqlt_meta::TemporaryDuration::Delete);
+    assert!(table
+        .write_definition(&settings(false))
+        .contains("  ON COMMIT DELETE ROWS\n"));
+}
+
+#[test]
+fn cache_clause() {
+    let mut table = Table::new("APP", "CACHED");
+    table.columns = vec![column("A", "NUMBER", 22, 10, 0, true, "")];
+    table.cache = true;
+    let expected = "CREATE TABLE cached (\n  a NUMBER(10,0) NULL\n)\n  CACHE\n/\n\n";
+    assert_eq!(table.write_definition(&settings(false)), expected);
+}
+
+#[test]
+fn virtual_column_uses_as_expression() {
+    let mut table = Table::new("APP", "EMP");
+    table.columns = vec![
+        column("SALARIO", "NUMBER", 22, 10, 2, true, ""),
+        column("DOBLE", "NUMBER", 22, 10, 2, true, "salario * 2"),
+    ];
+    table.columns[1].virtual_column = true;
+    let ddl = table.write_definition(&settings(false));
+    assert!(
+        ddl.contains("  doble   NUMBER(10,2) AS (salario * 2) NULL\n"),
+        "{ddl}"
+    );
 }

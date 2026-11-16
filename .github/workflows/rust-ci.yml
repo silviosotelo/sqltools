@@ -94,8 +94,18 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
       - run: npm ci --prefix rust/web
       - run: npm --prefix rust/web run build
-      - run: npx --yes @tauri-apps/cli@^2 build
+      # The Linux AppImage step downloads AppRun from GitHub; a reset there
+      # failed the job even though deb/rpm were already built.
+      - name: Build bundles
+        shell: bash
         working-directory: rust/desktop
+        run: |
+          for attempt in 1 2 3; do
+            npx --yes @tauri-apps/cli@^2 build && exit 0
+            echo "tauri build failed (attempt $attempt); retrying in 15s"
+            sleep 15
+          done
+          exit 1
       - uses: actions/upload-artifact@v4
         with:
           name: sqltools-${{ matrix.os }}

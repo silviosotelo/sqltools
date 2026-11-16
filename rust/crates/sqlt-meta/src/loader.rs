@@ -273,8 +273,9 @@ pub fn load_table(
     let columns = fetch_rows(
         session,
         "select column_name, data_type, data_length, data_precision, data_scale, \
-         nullable, data_default from all_tab_columns \
-         where owner = :1 and table_name = :2 order by column_id",
+         nullable, data_default, virtual_column from all_tab_cols \
+         where owner = :1 and table_name = :2 and hidden_column = 'NO' \
+         order by column_id",
         &[&schema, &name],
         options,
     )?;
@@ -292,12 +293,13 @@ pub fn load_table(
             nullable: cell(&row, 5) == "Y",
             data_default,
             comments: None,
+            virtual_column: cell(&row, 7) == "YES",
         });
     }
     let storage = fetch_rows(
         session,
-        "select tablespace_name, next_extent from all_tables \
-         where owner = :1 and table_name = :2",
+        "select tablespace_name, next_extent, temporary, duration, cache \
+         from all_tables where owner = :1 and table_name = :2",
         &[&schema, &name],
         options,
     )?;
@@ -310,6 +312,13 @@ pub fn load_table(
         if next > 0 {
             table.next_extent = Some(next);
         }
+        if cell(row, 2) == "Y" {
+            table.temporary = Some(match cell(row, 3).as_str() {
+                "SYS$TRANSACTION" => crate::TemporaryDuration::Delete,
+                _ => crate::TemporaryDuration::Preserve,
+            });
+        }
+        table.cache = cell(row, 4) == "Y";
     }
     load_comments(session, schema, name, options, &mut table)?;
     load_indexes(session, schema, name, options, &mut table)?;

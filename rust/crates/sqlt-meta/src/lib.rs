@@ -44,6 +44,9 @@ pub struct TabColumn {
     pub nullable: bool,
     pub data_default: String,
     pub comments: Option<String>,
+    /// `ALL_TAB_COLUMNS.virtual_column = 'YES'`; `data_default` holds the
+    /// expression, rendered as ` AS (expr)` by `MetaObjects.cpp`.
+    pub virtual_column: bool,
 }
 
 impl TabColumn {
@@ -57,8 +60,17 @@ impl TabColumn {
             nullable: true,
             data_default: String::new(),
             comments: None,
+            virtual_column: false,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TemporaryDuration {
+    /// `ON COMMIT PRESERVE ROWS`
+    Preserve,
+    /// `ON COMMIT DELETE ROWS`
+    Delete,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,6 +108,10 @@ pub struct Table {
     pub columns: Vec<TabColumn>,
     pub tablespace: Option<String>,
     pub next_extent: Option<i64>,
+    /// `None` for a permanent table; `ALL_TABLES.duration` otherwise.
+    pub temporary: Option<TemporaryDuration>,
+    /// `ALL_TABLES.cache = 'Y'` adds a `CACHE` line after the storage clause.
+    pub cache: bool,
     pub comments: Option<String>,
     pub indexes: Vec<Index>,
     pub constraints: Vec<Constraint>,
@@ -111,6 +127,8 @@ impl Table {
             columns: Vec::new(),
             tablespace: None,
             next_extent: None,
+            temporary: None,
+            cache: false,
             comments: None,
             indexes: Vec::new(),
             constraints: Vec::new(),
@@ -157,21 +175,36 @@ impl Table {
         }
     }
 
-    fn column_null_text(column: &TabColumn) -> String {
-        if !column.nullable {
-            "NOT NULL".to_string()
+    /// `MetaObjects::Table::writeColumns`: virtual columns use ` AS (expr)`,
+    /// defaults use ` DEFAULT expr`, and the nullability is always appended.
+    fn column_qualifier(column: &TabColumn) -> String {
+        let mut out = String::new();
+        if column.virtual_column {
+            out.push_str(&format!("AS ({})", column.data_default));
         } else if !column.data_default.is_empty() {
-            format!("DEFAULT {} NULL", column.data_default)
-        } else {
-            "NULL".to_string()
+            out.push_str(&format!("DEFAULT {}", column.data_default));
         }
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        if column.nullable {
+            out.push_str("NULL");
+        } else {
+            out.push_str("NOT NULL");
+        }
+        out
     }
 
     pub fn write_definition(&self, settings: &WriteSettings) -> String {
         let lower = settings.lower_db_name;
         let table_name = Table::display_name(&self.name, lower);
+        let temporary = if self.temporary.is_some() {
+            "GLOBAL TEMPORARY "
+        } else {
+            ""
+        };
         if self.columns.is_empty() {
-            return format!("CREATE TABLE {table_name} (\n)\n/\n\n");
+            return format!("CREATE {temporary}TABLE {table_name} (\n)\n/\n\n");
         }
         let max_name = self
             .columns
@@ -181,7 +214,7 @@ impl Table {
             .unwrap_or(0);
         let types: Vec<String> = self.columns.iter().map(Table::column_type).collect();
         let max_type = types.iter().map(String::len).max().unwrap_or(0);
-        let mut out = format!("CREATE TABLE {table_name} (\n");
+        let mut out = format!("CREATE {temporary}TABLE {table_name} (\n");
         for (index, column) in self.columns.iter().enumerate() {
             let display = Table::display_name(&column.name, lower);
             let raw_len = Table::raw_name_len(&column.name);
@@ -195,14 +228,21 @@ impl Table {
             out.push_str(&format!(
                 "  {display}{name_pad}{}{type_pad}{}{comma}\n",
                 types[index],
-                Table::column_null_text(column)
+                Table::column_qualifier(column)
             ));
         }
 
         let storage =
             settings.storage_clause && (self.tablespace.is_some() || self.next_extent.is_some());
-        if storage {
-            out.push_str(")\n");
+        out.push_str(")\n");
+        // `MetaObjects::Table::WriteDefinition`: a temporary table replaces the
+        // storage clause with ON COMMIT, then CACHE is printed either way.
+        if let Some(duration) = self.temporary {
+            out.push_str(match duration {
+                TemporaryDuration::Preserve => "  ON COMMIT PRESERVE ROWS\n",
+                TemporaryDuration::Delete => "  ON COMMIT DELETE ROWS\n",
+            });
+        } else if storage {
             if let Some(tablespace) = &self.tablespace {
                 out.push_str(&format!(
                     "  TABLESPACE {}\n",
@@ -219,8 +259,9 @@ impl Table {
                 out.push_str(&format!("    NEXT       {value}\n"));
                 out.push_str("  )\n");
             }
-        } else {
-            out.push_str(")\n");
+        }
+        if self.cache {
+            out.push_str("  CACHE\n");
         }
         out.push_str("/\n\n");
         out
