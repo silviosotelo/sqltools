@@ -88,6 +88,18 @@ export type FileText = {
   eol: string;
 };
 
+export type UpdateInfo = {
+  version: string;
+  currentVersion: string;
+  notes: string | null;
+  date: string | null;
+};
+
+export type UpdateProgress = {
+  downloaded: number;
+  total: number | null;
+};
+
 export type FormatOptions = {
   indent: number;
   useTabs: boolean;

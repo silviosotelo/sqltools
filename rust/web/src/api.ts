@@ -13,6 +13,8 @@ import type {
   QueryEvent,
   StatEntry,
   TriggerInfo,
+  UpdateInfo,
+  UpdateProgress,
   Workspace,
 } from "./types";
 
@@ -100,7 +102,12 @@ export const api = {
     sql: string,
     maxRows: number,
   ) => invoke<string>("export_csv", { connectionId, sql, maxRows }),
-  checkUpdates: () => invoke<string>("check_updates"),
+  checkUpdate: () => invoke<UpdateInfo | null>("check_update"),
+  installUpdate: (onProgress: (progress: UpdateProgress) => void) => {
+    const channel = new Channel<UpdateProgress>();
+    channel.onmessage = onProgress;
+    return invoke<void>("install_update", { channel });
+  },
   formatSql: (sql: string, uppercase: boolean) =>
     invoke<string>("format_sql", { sql, uppercase }),
   formatSqlWith: (sql: string, options: FormatOptions) =>

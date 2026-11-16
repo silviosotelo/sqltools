@@ -520,15 +520,63 @@ fn delete_format_profile(name: String) -> Result<(), String> {
     sqlt_app::profiles::delete_profile(&name).map_err(|e| e.to_string())
 }
 
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateInfo {
+    version: String,
+    current_version: String,
+    notes: Option<String>,
+    date: Option<String>,
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateProgress {
+    downloaded: u64,
+    total: Option<u64>,
+}
+
 #[tauri::command]
-async fn check_updates(app: tauri::AppHandle) -> Result<String, String> {
+async fn check_update(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, String> {
     use tauri_plugin_updater::UpdaterExt;
     let updater = app.updater().map_err(|e| e.to_string())?;
     match updater.check().await {
-        Ok(Some(update)) => Ok(format!("Update available: {}", update.version)),
-        Ok(None) => Ok("No updates available".to_string()),
+        Ok(Some(update)) => Ok(Some(UpdateInfo {
+            version: update.version.clone(),
+            current_version: update.current_version.clone(),
+            notes: update.body.clone(),
+            date: update.date.map(|date| date.to_string()),
+        })),
+        Ok(None) => Ok(None),
         Err(error) => Err(error.to_string()),
     }
+}
+
+#[tauri::command]
+async fn install_update(
+    app: tauri::AppHandle,
+    channel: tauri::ipc::Channel<UpdateProgress>,
+) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    let update = updater
+        .check()
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "No update is available".to_string())?;
+    update
+        .download_and_install(
+            move |downloaded, total| {
+                let _ = channel.send(UpdateProgress {
+                    downloaded: downloaded as u64,
+                    total,
+                });
+            },
+            || {},
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 fn main() {
@@ -580,7 +628,8 @@ fn main() {
             save_format_profile,
             load_format_profile,
             delete_format_profile,
-            check_updates,
+            check_update,
+            install_update,
             explain_plan
         ])
         .run(tauri::generate_context!())

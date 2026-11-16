@@ -18,6 +18,7 @@ import type {
   QueryEvent,
   StatEntry,
   TriggerInfo,
+  UpdateInfo,
   Value,
   Workspace,
 } from "./types";
@@ -167,6 +168,8 @@ export default function App() {
   );
   const [showStatus, setShowStatus] = useState(true);
   const [showConnections, setShowConnections] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [installing, setInstalling] = useState(false);
   const [commands, setCommands] = useState<CommandSpec[]>([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState("");
@@ -795,9 +798,34 @@ export default function App() {
   };
   const checkUpdates = async () => {
     try {
-      setStatus(await api.checkUpdates());
+      const info = await api.checkUpdate();
+      setUpdateInfo(info);
+      setStatus(
+        info
+          ? `${t("updateAvailable")}: ${info.version}`
+          : t("updateNone"),
+      );
     } catch (error) {
       setStatus(String(error));
+    }
+  };
+
+  const installUpdate = async () => {
+    setInstalling(true);
+    try {
+      await api.installUpdate((progress) => {
+        setStatus(
+          `${t("updateProgress")}: ${progress.downloaded}${
+            progress.total ? ` / ${progress.total}` : ""
+          }`,
+        );
+      });
+      setStatus(t("updateInstalled"));
+      setUpdateInfo(null);
+    } catch (error) {
+      setStatus(String(error));
+    } finally {
+      setInstalling(false);
     }
   };
   const saveWorkspace = async () => {
@@ -1436,6 +1464,17 @@ export default function App() {
             <Icon name="commands" />
           </button>
           <span className="toolbar-spacer" />
+          {updateInfo && (
+            <button
+              className="tb"
+              title={`${t("installUpdate")}: ${updateInfo.version}`}
+              aria-label={t("installUpdate")}
+              onClick={() => void installUpdate()}
+              disabled={installing}
+            >
+              <Icon name="update" />
+            </button>
+          )}
           <button
             className="tb"
             title={t("checkUpdates")}
