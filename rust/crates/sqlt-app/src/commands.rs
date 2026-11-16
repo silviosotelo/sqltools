@@ -132,12 +132,15 @@ const IMPLEMENTED: &[&str] = &[
     "Edit.GoTo",
     "Edit.DatetimeStamp",
     "Script.ExecuteFromCursor",
+    "Script.HaltOnError",
     "Script.ExecuteCurrentAlt",
     "Script.QuickQuery",
     "Script.LoadDDLWithDbmsMetadata",
     "Script.FindObject",
     "View.StatusBar",
+    "View.Snippets",
     "Help.AboutOpenEditor",
+    "Help.SqlHelp",
     "View.History",
     "View.Properties",
     "Script.QuickCount",
@@ -148,6 +151,8 @@ const IMPLEMENTED: &[&str] = &[
     "File.SaveAll",
     "File.Reload",
     "File.CopyFileLocation",
+    "File.ShowFileLocation",
+    "File.Exit",
     "File.Close",
     "File.CloseAll",
     "File.New",
@@ -245,7 +250,7 @@ mod tests {
                 .iter()
                 .filter(|command| command.implemented)
                 .count(),
-            150
+            155
         );
     }
 }

@@ -12,6 +12,8 @@ pub enum ScriptEvent {
     Batch(Batch),
     /// `DBMS_OUTPUT` lines drained after a statement.
     Output(Vec<String>),
+    /// A statement failed while `halt_on_error` is off; the script continues.
+    StatementError(String),
 }
 
 /// Statements that produce a result set. Everything else (DML, DDL, PL/SQL)
@@ -26,20 +28,54 @@ fn returns_rows(sql: &str) -> bool {
 }
 
 /// Result of a script run. `last_rows` is what the grid shows; `total_rows`
-/// sums every statement. Stops on the first error.
+/// sums every statement; `errors` counts failed statements when
+/// `halt_on_error` is off.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScriptOutcome {
     pub total_rows: usize,
     pub last_rows: usize,
+    pub errors: usize,
 }
 
-/// Runs the whole script, or only the statement at `offset` (UTF-16 position).
+/// Runs the whole script, or only the statement at `offset` (UTF-16 position),
+/// stopping on the first error.
 pub fn run_script<F>(
     session: &Session,
     sql: &str,
     options: QueryOptions,
     max_rows: usize,
     offset: Option<usize>,
+    emit: F,
+) -> Result<ScriptOutcome, String>
+where
+    F: FnMut(ScriptEvent),
+{
+    run_script_with(session, sql, options, max_rows, offset, true, emit)
+}
+
+/// Like `run_script`, but with `halt_on_error` off the remaining statements
+/// still run; each failure is emitted as `ScriptEvent::StatementError`.
+pub fn run_script_continue<F>(
+    session: &Session,
+    sql: &str,
+    options: QueryOptions,
+    max_rows: usize,
+    offset: Option<usize>,
+    emit: F,
+) -> Result<ScriptOutcome, String>
+where
+    F: FnMut(ScriptEvent),
+{
+    run_script_with(session, sql, options, max_rows, offset, false, emit)
+}
+
+fn run_script_with<F>(
+    session: &Session,
+    sql: &str,
+    options: QueryOptions,
+    max_rows: usize,
+    offset: Option<usize>,
+    halt_on_error: bool,
     mut emit: F,
 ) -> Result<ScriptOutcome, String>
 where
@@ -63,6 +99,7 @@ where
 
     let mut total = 0usize;
     let mut last_rows = 0usize;
+    let mut errors = 0usize;
     for statement in statements {
         // `close()` interrupts an active OCI call, but between statements there
         // is nothing to break: re-check so a closed session runs no more work.
@@ -82,7 +119,12 @@ where
                 if !session.is_closed() {
                     let _ = session.dbms_output_lines(1000);
                 }
-                return Err(error);
+                if halt_on_error {
+                    return Err(error);
+                }
+                emit(ScriptEvent::StatementError(error));
+                errors += 1;
+                continue;
             }
         };
         total += statement_rows;
@@ -94,6 +136,7 @@ where
     Ok(ScriptOutcome {
         total_rows: total,
         last_rows,
+        errors,
     })
 }
 

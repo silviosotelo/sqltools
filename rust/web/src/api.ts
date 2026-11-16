@@ -32,6 +32,7 @@ export const api = {
     sql: string,
     maxRows: number,
     offset: number | null,
+    haltOnError: boolean,
     onEvent: (event: QueryEvent) => void,
   ) => {
     const channel = new Channel<QueryEvent>();
@@ -41,9 +42,14 @@ export const api = {
       sql,
       maxRows,
       offset,
+      haltOnError,
       channel,
     });
   },
+  exitApp: () => invoke<void>("exit_app"),
+  revealFileLocation: (path: string) =>
+    invoke<void>("reveal_file_location", { path }),
+  openSqlHelp: () => invoke<void>("open_sql_help"),
   toggleReadOnly: (id: string) => invoke<boolean>("toggle_read_only", { id }),
   enableDbmsOutput: (connectionId: string) =>
     invoke<void>("enable_dbms_output", { connectionId }),

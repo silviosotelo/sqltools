@@ -14,13 +14,25 @@ enum QueryEvent {
     Columns(Vec<ColumnMeta>),
     Batch(Batch),
     Output(Vec<String>),
+    StatementError(String),
     Done {
         #[serde(rename = "rows")]
         rows: usize,
         #[serde(rename = "elapsedMs")]
         elapsed_ms: u64,
+        errors: usize,
     },
     Error(String),
+}
+
+fn query_event(event: sqlt_app::script::ScriptEvent) -> QueryEvent {
+    use sqlt_app::script::ScriptEvent;
+    match event {
+        ScriptEvent::Columns(columns) => QueryEvent::Columns(columns),
+        ScriptEvent::Batch(batch) => QueryEvent::Batch(batch),
+        ScriptEvent::Output(lines) => QueryEvent::Output(lines),
+        ScriptEvent::StatementError(message) => QueryEvent::StatementError(message),
+    }
 }
 
 #[tauri::command]
@@ -105,9 +117,10 @@ fn execute(
     sql: String,
     max_rows: usize,
     offset: Option<usize>,
+    halt_on_error: bool,
     channel: Channel<QueryEvent>,
 ) -> Result<(), String> {
-    use sqlt_app::script::{run_script, ScriptEvent};
+    use sqlt_app::script::{run_script, run_script_continue};
 
     let session = state.session(&connection_id)?;
     let options = state.query_options(&connection_id);
@@ -118,14 +131,14 @@ fn execute(
         .unwrap_or_default();
     tauri::async_runtime::spawn_blocking(move || {
         let started = Instant::now();
-        let outcome = run_script(&session, &sql, options, max_rows, offset, |event| {
-            let payload = match event {
-                ScriptEvent::Columns(columns) => QueryEvent::Columns(columns),
-                ScriptEvent::Batch(batch) => QueryEvent::Batch(batch),
-                ScriptEvent::Output(lines) => QueryEvent::Output(lines),
-            };
-            channel.send(payload).ok();
-        });
+        let emit = |event| {
+            channel.send(query_event(event)).ok();
+        };
+        let outcome = if halt_on_error {
+            run_script(&session, &sql, options, max_rows, offset, emit)
+        } else {
+            run_script_continue(&session, &sql, options, max_rows, offset, emit)
+        };
         let elapsed_ms = started.elapsed().as_millis() as u64;
         let rows = outcome.as_ref().map(|script| script.last_rows).unwrap_or(0);
         let error = outcome.as_ref().err().cloned();
@@ -143,6 +156,7 @@ fn execute(
                     .send(QueryEvent::Done {
                         rows: script.last_rows,
                         elapsed_ms,
+                        errors: script.errors,
                     })
                     .ok();
             }
@@ -580,6 +594,71 @@ fn delete_format_profile(name: String) -> Result<(), String> {
     sqlt_app::profiles::delete_profile(&name).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn exit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
+const SQL_HELP_URL: &str = "https://docs.oracle.com/en/database/oracle/oracle-database/12.2/sqlrf/";
+
+#[cfg(target_os = "windows")]
+fn reveal_target(path: &str) -> (String, Vec<String>) {
+    ("explorer".to_string(), vec![format!("/select,{path}")])
+}
+
+#[cfg(target_os = "macos")]
+fn reveal_target(path: &str) -> (String, Vec<String>) {
+    ("open".to_string(), vec!["-R".to_string(), path.to_string()])
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn reveal_target(path: &str) -> (String, Vec<String>) {
+    let parent = std::path::Path::new(path)
+        .parent()
+        .map(|dir| dir.display().to_string())
+        .unwrap_or_else(|| path.to_string());
+    ("xdg-open".to_string(), vec![parent])
+}
+
+#[cfg(target_os = "windows")]
+fn browser_target(url: &str) -> (String, Vec<String>) {
+    (
+        "rundll32".to_string(),
+        vec!["url.dll,FileProtocolHandler".to_string(), url.to_string()],
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn browser_target(url: &str) -> (String, Vec<String>) {
+    ("open".to_string(), vec![url.to_string()])
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn browser_target(url: &str) -> (String, Vec<String>) {
+    ("xdg-open".to_string(), vec![url.to_string()])
+}
+
+fn spawn_target(target: (String, Vec<String>)) -> Result<(), String> {
+    std::process::Command::new(target.0)
+        .args(target.1)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn reveal_file_location(path: String) -> Result<(), String> {
+    if path.trim().is_empty() {
+        return Err("No file is open".to_string());
+    }
+    spawn_target(reveal_target(&path))
+}
+
+#[tauri::command]
+fn open_sql_help() -> Result<(), String> {
+    spawn_target(browser_target(SQL_HELP_URL))
+}
+
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateInfo {
@@ -695,6 +774,9 @@ fn main() {
             delete_format_profile,
             check_update,
             install_update,
+            exit_app,
+            reveal_file_location,
+            open_sql_help,
             explain_plan
         ])
         .run(tauri::generate_context!())

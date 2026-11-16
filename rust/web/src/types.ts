@@ -22,7 +22,11 @@ export type QueryEvent =
   | { type: "columns"; data: ColumnMeta[] }
   | { type: "batch"; data: Batch }
   | { type: "output"; data: string[] }
-  | { type: "done"; data: { rows: number; elapsedMs: number } }
+  | { type: "statementerror"; data: string }
+  | {
+      type: "done";
+      data: { rows: number; elapsedMs: number; errors: number };
+    }
   | { type: "error"; data: string };
 
 export type ConnectionConfig = {

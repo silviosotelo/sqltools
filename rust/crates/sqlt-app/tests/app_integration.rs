@@ -200,6 +200,7 @@ fn runs_multi_statement_scripts() {
             ScriptEvent::Columns(_) => result_sets += 1,
             ScriptEvent::Batch(batch) => rows += batch.rows.len(),
             ScriptEvent::Output(_) => {}
+            ScriptEvent::StatementError(_) => {}
         },
     )
     .expect("script");
@@ -546,5 +547,49 @@ fn closing_on_the_last_output_fails_the_script() {
     let error = result.expect_err("a close after the last drain must fail the script");
     assert!(error.contains("closed"), "{error}");
     assert_eq!(outputs, 1, "the drained lines are still delivered");
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+#[ignore = "requires a real Oracle connection"]
+fn continue_after_error_runs_the_remaining_statements() {
+    use sqlt_app::script::{run_script, run_script_continue, ScriptEvent};
+
+    let user = std::env::var("SQLT_USER").expect("SQLT_USER");
+    let password = std::env::var("SQLT_PASS").expect("SQLT_PASS");
+    let alias = std::env::var("SQLT_ALIAS").expect("SQLT_ALIAS");
+    let path = std::env::temp_dir().join(format!("sqlt-app-continue-{}.json", std::process::id()));
+    let _ = fs::remove_file(&path);
+    let mut store = ConnectionStore::new(path.clone());
+    let mut config = ConnectionConfig::new("Continue", &user);
+    config.alias = Some(alias);
+    config.tns_admin = std::env::var("SQLT_TNS_ADMIN").ok();
+    config.oci_dir = std::env::var("SQLT_OCI_DIR").ok();
+    store.upsert(config.clone()).unwrap();
+    store.set_password(&config.id, &password).unwrap();
+    let state = AppState::with_store(store);
+    state.connect(&config.id).expect("connect");
+    let session = state.session(&config.id).expect("session");
+    let options = state.query_options(&config.id);
+    let sql = "select * from sqlt_no_such_table; select 1 n from dual";
+
+    let mut statement_errors = 0usize;
+    let mut rows = 0usize;
+    let outcome = run_script_continue(&session, sql, options, 0, None, |event| match event {
+        ScriptEvent::StatementError(_) => statement_errors += 1,
+        ScriptEvent::Batch(batch) => rows += batch.rows.len(),
+        _ => {}
+    })
+    .expect("continue after error");
+    assert_eq!(outcome.errors, 1);
+    assert_eq!(outcome.last_rows, 1);
+    assert_eq!(rows, 1);
+    assert_eq!(statement_errors, 1);
+
+    let halted = run_script(&session, sql, options, 0, None, |_| {});
+    assert!(
+        halted.is_err(),
+        "halt_on_error must stop at the first failure"
+    );
     let _ = fs::remove_file(path);
 }

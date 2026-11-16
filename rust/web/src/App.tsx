@@ -171,6 +171,9 @@ export default function App() {
   const [showConnections, setShowConnections] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [installing, setInstalling] = useState(false);
+  const [haltOnError, setHaltOnError] = useState(true);
+  const [snippetsOpen, setSnippetsOpen] = useState(false);
+  const [snippetNames, setSnippetNames] = useState<string[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<"file" | "app">("app");
   const [commands, setCommands] = useState<CommandSpec[]>([]);
@@ -342,25 +345,40 @@ export default function App() {
     setStatus("");
     setPanel("results");
     try {
-      await api.execute(selected, text, 5000, offset, (event: QueryEvent) => {
-        if (event.type === "columns") {
-          // Each statement of a script replaces the grid with its own result.
-          setColumns(event.data);
-          setRows([]);
-        } else if (event.type === "batch") {
-          setRows((current) => [...current, ...event.data.rows]);
-        } else if (event.type === "output") {
-          setOutput((current) => [...current, ...event.data]);
-          setPanel("output");
-        } else if (event.type === "done") {
-          setRunning(false);
-          const label = event.data.rows === 1 ? t("row") : t("rows");
-          setStatus(`${event.data.rows} ${label} · ${event.data.elapsedMs} ms`);
-        } else {
-          setRunning(false);
-          setStatus(event.data);
-        }
-      });
+      await api.execute(
+        selected,
+        text,
+        5000,
+        offset,
+        haltOnError,
+        (event: QueryEvent) => {
+          if (event.type === "columns") {
+            // Each statement of a script replaces the grid with its own result.
+            setColumns(event.data);
+            setRows([]);
+          } else if (event.type === "batch") {
+            setRows((current) => [...current, ...event.data.rows]);
+          } else if (event.type === "output") {
+            setOutput((current) => [...current, ...event.data]);
+            setPanel("output");
+          } else if (event.type === "statementerror") {
+            setOutput((current) => [...current, `${t("error")}: ${event.data}`]);
+            setPanel("output");
+          } else if (event.type === "done") {
+            setRunning(false);
+            const label = event.data.rows === 1 ? t("row") : t("rows");
+            const errors = event.data.errors
+              ? ` · ${event.data.errors} ${t("errors")}`
+              : "";
+            setStatus(
+              `${event.data.rows} ${label} · ${event.data.elapsedMs} ms${errors}`,
+            );
+          } else {
+            setRunning(false);
+            setStatus(event.data);
+          }
+        },
+      );
     } catch (error) {
       setRunning(false);
       setStatus(String(error));
@@ -890,6 +908,30 @@ export default function App() {
     }
   };
 
+  const openSnippets = async () => {
+    try {
+      setSnippetNames(await api.listTemplates());
+      setSnippetsOpen(true);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const insertSnippet = async (name: string) => {
+    try {
+      const template = await api.loadTemplate(name);
+      if (!template) {
+        setStatus(`${t("templateMissing")}: ${name}`);
+        return;
+      }
+      editorRef.current?.insertText(template.body);
+      setSnippetsOpen(false);
+      setStatus(`${t("templateExpanded")}: ${name}`);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
   const expandTemplate = async () => {
     const name = window.prompt(t("templateName"));
     if (!name) return;
@@ -1309,6 +1351,31 @@ export default function App() {
       case "Edit.PermanentSettings":
         setSettingsSection("app");
         setSettingsOpen(true);
+        break;
+      case "Script.HaltOnError": {
+        const next = !haltOnError;
+        setHaltOnError(next);
+        setStatus(`${t("haltOnError")}: ${next ? t("on") : t("off")}`);
+        break;
+      }
+      case "File.Exit":
+        if (!confirmDiscard()) break;
+        void api.exitApp();
+        break;
+      case "File.ShowFileLocation":
+        if (!filePath) {
+          setStatus(t("noFile"));
+          break;
+        }
+        void api
+          .revealFileLocation(filePath)
+          .catch((error) => setStatus(String(error)));
+        break;
+      case "Help.SqlHelp":
+        void api.openSqlHelp().catch((error) => setStatus(String(error)));
+        break;
+      case "View.Snippets":
+        void openSnippets();
         break;
       case "Edit.ColumnSelection":
       case "Edit.StreamSelection":
@@ -2282,6 +2349,16 @@ export default function App() {
                 </select>
               </label>
             )}
+            {settingsSection === "app" && (
+              <label className="check-inline">
+                <input
+                  type="checkbox"
+                  checked={haltOnError}
+                  onChange={(event) => setHaltOnError(event.target.checked)}
+                />
+                {t("haltOnError")}
+              </label>
+            )}
             <fieldset className="settings-eol">
               <legend>{t("lineEnding")}</legend>
               {(
@@ -2304,6 +2381,36 @@ export default function App() {
             </fieldset>
             <div className="row">
               <button className="plain" onClick={() => setSettingsOpen(false)}>
+                {t("close")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {snippetsOpen && (
+        <div
+          className="palette-backdrop"
+          onClick={() => setSnippetsOpen(false)}
+        >
+          <div
+            className="settings-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2>{t("snippets")}</h2>
+            {snippetNames.length === 0 ? (
+              <p className="no-results">{t("noTemplates")}</p>
+            ) : (
+              <div className="palette-list">
+                {snippetNames.map((name) => (
+                  <button key={name} onClick={() => void insertSnippet(name)}>
+                    <span>{name}</span>
+                    <span className="keys">{t("insert")}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="row">
+              <button className="plain" onClick={() => setSnippetsOpen(false)}>
                 {t("close")}
               </button>
             </div>
