@@ -457,7 +457,13 @@ fn is_lob_type(oratype: &OracleType) -> bool {
 /// full `to_string()` of the inner value before the budget writer sees it, so
 /// they must be summarized up front instead.
 fn needs_summary_type(oratype: &OracleType) -> bool {
-    is_lob_type(oratype) || matches!(oratype, OracleType::Object(_))
+    // `XMLTYPE` attributes/elements are converted through a full `Char` value,
+    // so they must be summarized before the crate's `Display` reads them.
+    is_lob_type(oratype)
+        || matches!(
+            oratype,
+            OracleType::Object(_) | OracleType::Xml | OracleType::RefCursor
+        )
 }
 
 fn collection_summary(object_type: &oracle::sql_type::ObjectType, size: i32) -> String {
@@ -645,4 +651,14 @@ mod tests {
         assert!(matches!(error, OciError::Wallet(_)));
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+#[test]
+fn xmltype_and_lobs_are_summarized_not_rendered() {
+    assert!(needs_summary_type(&OracleType::Xml));
+    assert!(needs_summary_type(&OracleType::CLOB));
+    assert!(needs_summary_type(&OracleType::LongRaw));
+    assert!(needs_summary_type(&OracleType::RefCursor));
+    assert!(!needs_summary_type(&OracleType::Varchar2(4000)));
+    assert!(!needs_summary_type(&OracleType::Number(10, 0)));
 }
