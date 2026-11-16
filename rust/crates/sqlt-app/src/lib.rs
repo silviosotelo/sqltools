@@ -4,6 +4,7 @@
 pub mod catalog;
 pub mod commands;
 pub mod export;
+pub mod fileio;
 pub mod migrate;
 pub mod profiles;
 pub mod script;

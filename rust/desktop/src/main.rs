@@ -340,51 +340,56 @@ fn list_commands() -> Vec<sqlt_app::CommandSpec> {
 }
 
 #[tauri::command]
-fn read_sql_file(path: String) -> Result<String, String> {
-    let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).to_string())
+fn read_sql_file(path: String) -> Result<sqlt_app::fileio::FileText, String> {
+    sqlt_app::fileio::read_sql_file(&path)
 }
 
 #[tauri::command]
-fn write_sql_file(path: String, text: String) -> Result<(), String> {
-    std::fs::write(&path, text).map_err(|e| e.to_string())
+fn write_sql_file(path: String, text: String, eol: String) -> Result<(), String> {
+    sqlt_app::fileio::write_sql_file(&path, &text, &eol)
+}
+
+fn dialog_path(path: tauri_plugin_dialog::FilePath) -> Option<String> {
+    path.into_path().ok().map(|path| path.display().to_string())
 }
 
 #[tauri::command]
-fn pick_sql_file(app: tauri::AppHandle) -> Result<Option<String>, String> {
+async fn pick_sql_file(app: tauri::AppHandle) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
-    let Some(path) = app
-        .dialog()
+    let (sender, mut receiver) = tauri::async_runtime::channel(1);
+    app.dialog()
         .file()
         .add_filter("SQL", &["sql", "pls", "pks", "pkb", "txt"])
-        .blocking_pick_file()
-    else {
-        return Ok(None);
-    };
-    let path = path
-        .into_path()
-        .map_err(|_| "Unsupported file location".to_string())?;
-    Ok(Some(path.display().to_string()))
+        .pick_file(move |path| {
+            let _ = sender.try_send(path);
+        });
+    let chosen = receiver
+        .recv()
+        .await
+        .ok_or_else(|| "File dialog closed unexpectedly".to_string())?;
+    Ok(chosen.and_then(dialog_path))
 }
 
 #[tauri::command]
-fn pick_sql_save_path(
+async fn pick_sql_save_path(
     app: tauri::AppHandle,
     suggested: Option<String>,
 ) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
+    let (sender, mut receiver) = tauri::async_runtime::channel(1);
     let mut dialog = app.dialog().file().add_filter("SQL", &["sql", "txt"]);
     if let Some(name) = suggested.as_deref() {
         let file_name = name.rsplit(['\\', '/']).next().unwrap_or(name);
         dialog = dialog.set_file_name(file_name);
     }
-    let Some(path) = dialog.blocking_save_file() else {
-        return Ok(None);
-    };
-    let path = path
-        .into_path()
-        .map_err(|_| "Unsupported file location".to_string())?;
-    Ok(Some(path.display().to_string()))
+    dialog.save_file(move |path| {
+        let _ = sender.try_send(path);
+    });
+    let chosen = receiver
+        .recv()
+        .await
+        .ok_or_else(|| "File dialog closed unexpectedly".to_string())?;
+    Ok(chosen.and_then(dialog_path))
 }
 
 #[tauri::command]

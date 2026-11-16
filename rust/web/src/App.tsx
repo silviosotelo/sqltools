@@ -130,7 +130,9 @@ export default function App() {
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [password, setPassword] = useState("");
   const [sql, setSql] = useState("select * from dual");
+  const [cleanSql, setCleanSql] = useState("select * from dual");
   const [filePath, setFilePath] = useState("");
+  const [fileEol, setFileEol] = useState("\n");
   const [columns, setColumns] = useState<ColumnMeta[]>([]);
   const [rows, setRows] = useState<Value[][]>([]);
   const [scrollTop, setScrollTop] = useState(0);
@@ -609,9 +611,16 @@ export default function App() {
       setStatus(String(error));
     }
   };
+  const dirty = sql !== cleanSql;
+
+  const confirmDiscard = () => !dirty || window.confirm(t("discardChanges"));
+
   const newFile = () => {
+    if (!confirmDiscard()) return;
     setSql("");
+    setCleanSql("");
     setFilePath("");
+    setFileEol("\n");
     setColumns([]);
     setRows([]);
     setPanel("results");
@@ -619,12 +628,15 @@ export default function App() {
   };
 
   const openFile = async () => {
+    if (!confirmDiscard()) return;
     try {
       const path = await api.pickSqlFile();
       if (!path) return;
-      const text = await api.readSqlFile(path);
-      setSql(text);
+      const file = await api.readSqlFile(path);
+      setSql(file.text);
+      setCleanSql(file.text);
       setFilePath(path);
+      setFileEol(file.eol);
       setStatus(path);
     } catch (error) {
       setStatus(String(error));
@@ -639,8 +651,9 @@ export default function App() {
         if (!picked) return;
         path = picked;
       }
-      await api.writeSqlFile(path, sql);
+      await api.writeSqlFile(path, sql, fileEol);
       setFilePath(path);
+      setCleanSql(sql);
       setStatus(path);
     } catch (error) {
       setStatus(String(error));
@@ -652,8 +665,12 @@ export default function App() {
       setStatus(t("noFile"));
       return;
     }
+    if (!confirmDiscard()) return;
     try {
-      setSql(await api.readSqlFile(filePath));
+      const file = await api.readSqlFile(filePath);
+      setSql(file.text);
+      setCleanSql(file.text);
+      setFileEol(file.eol);
       setStatus(filePath);
     } catch (error) {
       setStatus(String(error));
@@ -688,6 +705,7 @@ export default function App() {
   };
 
   const pasteWorkspace = async () => {
+    if (!confirmDiscard()) return;
     try {
       const text = await navigator.clipboard.readText();
       const workspace = JSON.parse(text) as Workspace;
@@ -697,6 +715,7 @@ export default function App() {
         return;
       }
       setSql(file.sql);
+      setCleanSql(file.sql);
       setStatus(t("workspaceLoad"));
     } catch (error) {
       setStatus(String(error));
@@ -767,10 +786,14 @@ export default function App() {
   };
 
   const loadWorkspace = async () => {
+    if (!confirmDiscard()) return;
     try {
       const workspace: Workspace = await api.loadWorkspace();
       const file = workspace.files[workspace.active] ?? workspace.files[0];
-      if (file) setSql(file.sql);
+      if (file) {
+        setSql(file.sql);
+        setCleanSql(file.sql);
+      }
       setStatus(t("workspaceLoad"));
     } catch (error) {
       setStatus(String(error));
@@ -1597,7 +1620,10 @@ export default function App() {
           <div className="editor-shell">
             <div className="editor-tabbar">
               <div className="editor-tab">
-                <span>{filePath ? filePath.split(/[\\/]/).pop() : "SQL"}</span>
+                <span>
+                  {dirty ? "*" : ""}
+                  {filePath ? filePath.split(/[\\/]/).pop() : "SQL"}
+                </span>
                 <span className="tab-conn">
                   {isConnected
                     ? `${draft.user}${draft.alias ? `@${draft.alias}` : ""}`

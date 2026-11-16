@@ -4,6 +4,7 @@ import type {
   CommandSpec,
   ConnectionConfig,
   ConstraintInfo,
+  FileText,
   FormatOptions,
   GrantInfo,
   HistoryEntry,
@@ -82,9 +83,9 @@ export const api = {
   pickSqlFile: () => invoke<string | null>("pick_sql_file"),
   pickSqlSavePath: (suggested: string | null) =>
     invoke<string | null>("pick_sql_save_path", { suggested }),
-  readSqlFile: (path: string) => invoke<string>("read_sql_file", { path }),
-  writeSqlFile: (path: string, text: string) =>
-    invoke<void>("write_sql_file", { path, text }),
+  readSqlFile: (path: string) => invoke<FileText>("read_sql_file", { path }),
+  writeSqlFile: (path: string, text: string, eol: string) =>
+    invoke<void>("write_sql_file", { path, text, eol }),
   saveWorkspace: (workspace: Workspace) =>
     invoke<void>("save_workspace", { workspace }),
   loadWorkspace: () => invoke<Workspace>("load_workspace"),

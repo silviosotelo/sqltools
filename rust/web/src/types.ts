@@ -83,6 +83,11 @@ export type Workspace = {
 
 export type KeywordCase = "Upper" | "Lower" | "Keep";
 
+export type FileText = {
+  text: string;
+  eol: string;
+};
+
 export type FormatOptions = {
   indent: number;
   useTabs: boolean;

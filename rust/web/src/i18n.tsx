@@ -75,6 +75,7 @@ const translations = {
     typeSynonym: "Sinónimos",
     findObject: "Buscar objeto",
     noFile: "No hay archivo abierto",
+    discardChanges: "Hay cambios sin guardar. ¿Descartarlos?",
     noResults: "Ejecutá una consulta para ver resultados.",
     constraints: "Restricciones",
     indexes: "Índices",
@@ -171,6 +172,7 @@ const translations = {
     typeSynonym: "Synonyms",
     findObject: "Find object",
     noFile: "No file is open",
+    discardChanges: "There are unsaved changes. Discard them?",
 
     noResults: "Run a query to see results.",
     constraints: "Constraints",
