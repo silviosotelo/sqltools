@@ -4,14 +4,16 @@ Reescritura en Rust de SQLTools (cliente Oracle para PL/SQL/APEX), con UI web
 (Tauri v2 + React) y objetivo multiplataforma: Windows x64, macOS Intel/Apple
 Silicon y Linux x64.
 
-Estado: **P0 (bootstrap)**. El port C++/Qt sigue intacto en la raíz del repo
+Estado: **P1a (motor Oracle)**. El port C++/Qt sigue intacto en la raíz del repo
 (rama `main`); esta rama (`rust`) contiene la implementación nueva.
 
 ## Estructura
 
 ```
 rust/
-  crates/sqlt-core/   # lógica pura (partidor de sentencias, formato, binds...)
+crates/sqlt-core/    # lógica pura (partidor de sentencias, formato, binds...)
+  crates/sqlt-oracle/  # driver Oracle (ODPI-C), sesiones, lotes, cancelación
+  crates/sqlt-cli/     # harness headless: diag, query, bench
   desktop/            # shell Tauri v2
   web/                # frontend React + TypeScript + Vite
 ```
