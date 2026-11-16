@@ -143,3 +143,67 @@ fn catalog_and_ddl() {
     drop(store);
     let _ = fs::remove_file(path);
 }
+
+#[test]
+#[ignore = "requires OS keyring and a real Oracle connection"]
+fn runs_multi_statement_scripts() {
+    use sqlt_app::script::{run_script, ScriptEvent};
+
+    let user = std::env::var("SQLT_USER").expect("SQLT_USER");
+    let password = std::env::var("SQLT_PASS").expect("SQLT_PASS");
+    let alias = std::env::var("SQLT_ALIAS").expect("SQLT_ALIAS");
+    let tns_admin = std::env::var("SQLT_TNS_ADMIN").ok();
+    let oci_dir = std::env::var("SQLT_OCI_DIR").ok();
+
+    let path = std::env::temp_dir().join(format!("sqlt-app-script-{}.json", std::process::id()));
+    let _ = fs::remove_file(&path);
+    let mut store = ConnectionStore::new(path.clone());
+    let mut config = ConnectionConfig::new("Script", &user);
+    config.alias = Some(alias);
+    config.tns_admin = tns_admin;
+    config.oci_dir = oci_dir;
+    store.upsert(config.clone()).unwrap();
+    store.set_password(&config.id, &password).unwrap();
+
+    let state = AppState::with_store(store);
+    state.connect(&config.id).expect("connect");
+    let session = state.session(&config.id).expect("session");
+    let options = state.query_options(&config.id);
+
+    let mut result_sets = 0usize;
+    let mut rows = 0usize;
+    let outcome = run_script(
+        &session,
+        "select 1 n from dual; select 2 n from dual",
+        options,
+        0,
+        None,
+        |event| match event {
+            ScriptEvent::Columns(_) => result_sets += 1,
+            ScriptEvent::Batch(batch) => rows += batch.rows.len(),
+        },
+    )
+    .expect("script");
+    assert_eq!(result_sets, 2);
+    assert_eq!(rows, 2);
+    assert_eq!(outcome.total_rows, 2);
+    assert_eq!(outcome.last_rows, 1);
+
+    let sql = "select 1 from dual; select 2 from dual";
+    let offset = sql.find("2 from").expect("offset") + 2;
+    let outcome = run_script(&session, sql, options, 0, Some(offset), |_| {})
+        .expect("statement under cursor");
+    assert_eq!(outcome.last_rows, 1);
+
+    // `execute` reports the OCI row count, which is 1 for an anonymous block.
+    let affected = run_script(&session, "begin null; end;", options, 0, None, |_| {})
+        .expect("anonymous block");
+    eprintln!("anonymous block affected: {}", affected.last_rows);
+
+    eprintln!("script: {result_sets} result sets, {rows} rows");
+    state.disconnect(&config.id).unwrap();
+    let store = state.store.lock().unwrap();
+    let _ = store.delete_password(&config.id);
+    drop(store);
+    let _ = fs::remove_file(path);
+}

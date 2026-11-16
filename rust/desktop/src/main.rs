@@ -81,8 +81,11 @@ fn execute(
     connection_id: String,
     sql: String,
     max_rows: usize,
+    offset: Option<usize>,
     channel: Channel<QueryEvent>,
 ) -> Result<(), String> {
+    use sqlt_app::script::{run_script, ScriptEvent};
+
     let session = state.session(&connection_id)?;
     let options = state.query_options(&connection_id);
     let state = state.inner().clone();
@@ -92,32 +95,15 @@ fn execute(
         .unwrap_or_default();
     tauri::async_runtime::spawn_blocking(move || {
         let started = Instant::now();
-        let outcome = (|| -> Result<usize, String> {
-            let mut handle = session.query(&sql, options).map_err(|e| e.to_string())?;
-            channel
-                .send(QueryEvent::Columns(handle.columns().to_vec()))
-                .ok();
-            let mut total = 0usize;
-            loop {
-                let want = if max_rows == 0 {
-                    500
-                } else {
-                    (max_rows - total).min(500)
-                };
-                if want == 0 {
-                    break;
-                }
-                let batch = handle.next_batch(want).map_err(|e| e.to_string())?;
-                if batch.rows.is_empty() {
-                    break;
-                }
-                total += batch.rows.len();
-                channel.send(QueryEvent::Batch(batch)).ok();
-            }
-            Ok(total)
-        })();
+        let outcome = run_script(&session, &sql, options, max_rows, offset, |event| {
+            let payload = match event {
+                ScriptEvent::Columns(columns) => QueryEvent::Columns(columns),
+                ScriptEvent::Batch(batch) => QueryEvent::Batch(batch),
+            };
+            channel.send(payload).ok();
+        });
         let elapsed_ms = started.elapsed().as_millis() as u64;
-        let rows = outcome.as_ref().copied().unwrap_or(0);
+        let rows = outcome.as_ref().map(|script| script.last_rows).unwrap_or(0);
         let error = outcome.as_ref().err().cloned();
         state.record(HistoryEntry {
             connection_id,
@@ -128,8 +114,13 @@ fn execute(
             started_at,
         });
         match outcome {
-            Ok(rows) => {
-                channel.send(QueryEvent::Done { rows, elapsed_ms }).ok();
+            Ok(script) => {
+                channel
+                    .send(QueryEvent::Done {
+                        rows: script.last_rows,
+                        elapsed_ms,
+                    })
+                    .ok();
             }
             Err(message) => {
                 channel.send(QueryEvent::Error(message)).ok();

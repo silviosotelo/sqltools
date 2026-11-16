@@ -5,7 +5,7 @@
   "identifier": "com.sqltools.rust",
   "build": {
     "frontendDist": "../web/dist",
-    "devUrl": "http://localhost:1420"
+    "beforeBuildCommand": "npm --prefix web run build"
   },
   "app": {
     "windows": [

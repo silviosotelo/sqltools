@@ -89,3 +89,18 @@ bundling is already verified on Windows in P0.
 ## License
 
 GPLv3. See `LICENSE` at the repository root and `NOTICE` in this directory.
+
+## Running the desktop app
+
+`cargo build -p sqlt-desktop` embeds `web/dist` and does not need a dev server.
+After changing the frontend, rebuild it first:
+
+```bash
+npm --prefix web run build
+cargo build -p sqlt-desktop
+```
+
+`npx @tauri-apps/cli@^2 build` also runs `npm --prefix web run build`
+(`beforeBuildCommand`), so the installers always contain the current UI.
+Debugging through WebView2 DevTools is possible with
+`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`.

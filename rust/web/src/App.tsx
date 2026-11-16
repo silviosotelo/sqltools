@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+
 import { Editor, type EditorHandle } from "./Editor";
 import { api } from "./api";
+import { Icon } from "./icons";
 import { useTranslation } from "./i18n";
 import type {
   ColumnInfo,
@@ -37,6 +39,17 @@ type Draft = {
 };
 
 type Panel = "results" | "history" | "plan" | "object" | "stats";
+
+const objectTypes = [
+  { value: "", key: "typeAll" },
+  { value: "TABLE", key: "typeTable" },
+  { value: "VIEW", key: "typeView" },
+  { value: "PACKAGE", key: "typePackage" },
+  { value: "PROCEDURE", key: "typeProcedure" },
+  { value: "FUNCTION", key: "typeFunction" },
+  { value: "TRIGGER", key: "typeTrigger" },
+  { value: "SEQUENCE", key: "typeSequence" },
+] as const;
 
 const ROW_HEIGHT = 24;
 const OVERSCAN = 8;
@@ -126,6 +139,7 @@ export default function App() {
   const [panel, setPanel] = useState<Panel>("results");
   const [schema, setSchema] = useState("");
   const [objectType, setObjectType] = useState("");
+  const [objectFilter, setObjectFilter] = useState("");
   const [objects, setObjects] = useState<ObjectInfo[]>([]);
   const [selectedObject, setSelectedObject] = useState<ObjectInfo | null>(null);
   const [objectColumns, setObjectColumns] = useState<ColumnInfo[]>([]);
@@ -146,6 +160,7 @@ export default function App() {
     null,
   );
   const [showStatus, setShowStatus] = useState(true);
+  const [showConnections, setShowConnections] = useState(false);
   const [commands, setCommands] = useState<CommandSpec[]>([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState("");
@@ -160,6 +175,10 @@ export default function App() {
   useEffect(() => {
     void refresh();
   }, []);
+
+  useEffect(() => {
+    if (connections.length === 0) setShowConnections(true);
+  }, [connections.length]);
 
   useEffect(() => {
     void api.listCommands().then(setCommands);
@@ -232,6 +251,7 @@ export default function App() {
       setPassword("");
       await refresh();
       setSelected(draft.id);
+      setShowConnections(false);
       setStatus(t("save"));
     } catch (error) {
       setStatus(String(error));
@@ -266,6 +286,7 @@ export default function App() {
       setConnected((current) => ({ ...current, [selected]: version }));
       setStatus(`${t("connected")}: ${version}`);
       setTables(await api.listTableNames(selected));
+      setShowConnections(false);
     } catch (error) {
       setStatus(String(error));
     }
@@ -291,7 +312,7 @@ export default function App() {
     }
   };
 
-  const run = async (text = sql) => {
+  const run = async (text = sql, offset: number | null = null) => {
     if (!isConnected) {
       setStatus(t("noConnection"));
       return;
@@ -303,14 +324,17 @@ export default function App() {
     setStatus("");
     setPanel("results");
     try {
-      await api.execute(selected, text, 5000, (event: QueryEvent) => {
+      await api.execute(selected, text, 5000, offset, (event: QueryEvent) => {
         if (event.type === "columns") {
+          // Each statement of a script replaces the grid with its own result.
           setColumns(event.data);
+          setRows([]);
         } else if (event.type === "batch") {
           setRows((current) => [...current, ...event.data.rows]);
         } else if (event.type === "done") {
           setRunning(false);
-          setStatus(`${event.data.rows} ${t("rows")} · ${event.data.elapsedMs} ms`);
+          const label = event.data.rows === 1 ? t("row") : t("rows");
+          setStatus(`${event.data.rows} ${label} · ${event.data.elapsedMs} ms`);
         } else {
           setRunning(false);
           setStatus(event.data);
@@ -386,7 +410,7 @@ export default function App() {
     }
   };
 
-  const loadObjects = async () => {
+  const loadObjects = async (type: string = objectType) => {
     if (!isConnected) {
       setStatus(t("noConnection"));
       return;
@@ -396,13 +420,17 @@ export default function App() {
         await api.listObjects(
           selected,
           schema.trim() || null,
-          objectType.trim() || null,
+          type.trim() || null,
         ),
       );
-      setPanel("object");
     } catch (error) {
       setStatus(String(error));
     }
+  };
+
+  const chooseType = (type: string) => {
+    setObjectType(type);
+    if (isConnected) void loadObjects(type);
   };
 
   const qualified = (object: ObjectInfo) =>
@@ -747,8 +775,10 @@ export default function App() {
         void showStats();
         break;
       case "Script.Execute":
-      case "Script.ExecuteCurrent":
         void run();
+        break;
+      case "Script.ExecuteCurrent":
+        void run(sql, editorRef.current?.cursorOffset() ?? null);
         break;
       case "Script.ExplainPlan":
         void explain();
@@ -988,6 +1018,7 @@ export default function App() {
   };
 
   const filteredCommands = commands
+    .filter((command) => command.name)
     .filter((command) => {
       const query = paletteQuery.toLowerCase();
       return (
@@ -1044,18 +1075,201 @@ export default function App() {
   const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
   const end = Math.min(rows.length, start + VISIBLE_ROWS + OVERSCAN * 2);
 
+  const shownObjects = objects.filter(
+    (object) =>
+      !objectFilter ||
+      object.name.toLowerCase().includes(objectFilter.toLowerCase()),
+  );
+
   return (
     <div className="app">
-      <aside className="sidebar">
-        <div className="brand">
-          <strong>{t("app.title")}</strong>
-          <span>{t("app.subtitle")}</span>
+      <header className="topbar">
+        <div className="toolbar">
+          <div className="brand-inline">
+            <Icon name="database" size={18} />
+            <strong>{t("app.title")}</strong>
+            <span className="brand-sub">{t("app.subtitle")}</span>
+          </div>
+          <span className="tb-sep" />
+          <button
+            className="tb"
+            title={t("execute")}
+            aria-label={t("execute")}
+            onClick={() => void run()}
+            disabled={!isConnected || running}
+          >
+            <Icon name="run" />
+          </button>
+          <button
+            className="tb"
+            title={t("cancel")}
+            aria-label={t("cancel")}
+            onClick={() => void cancel()}
+            disabled={!running}
+          >
+            <Icon name="stop" />
+          </button>
+          <button
+            className="tb"
+            title={t("commit")}
+            aria-label={t("commit")}
+            onClick={() => void commit()}
+            disabled={!isConnected}
+          >
+            <Icon name="commit" />
+          </button>
+          <button
+            className="tb"
+            title={t("rollback")}
+            aria-label={t("rollback")}
+            onClick={() => void rollback()}
+            disabled={!isConnected}
+          >
+            <Icon name="rollback" />
+          </button>
+          <span className="tb-sep" />
+          <button
+            className="tb"
+            title={t("format")}
+            aria-label={t("format")}
+            onClick={() => void formatSql()}
+            disabled={!sql.trim()}
+          >
+            <Icon name="format" />
+          </button>
+          <button
+            className="tb"
+            title={t("history")}
+            aria-label={t("history")}
+            onClick={() => void showHistory()}
+          >
+            <Icon name="history" />
+          </button>
+          <button
+            className="tb"
+            title={t("explain")}
+            aria-label={t("explain")}
+            onClick={() => void explain()}
+            disabled={!isConnected}
+          >
+            <Icon name="plan" />
+          </button>
+          <button
+            className="tb"
+            title={t("stats")}
+            aria-label={t("stats")}
+            onClick={() => void showStats()}
+            disabled={!isConnected}
+          >
+            <Icon name="stats" />
+          </button>
+          <button
+            className="tb"
+            title={t("exportCsv")}
+            aria-label={t("exportCsv")}
+            onClick={() => void exportCsv()}
+            disabled={!columns.length && !isConnected}
+          >
+            <Icon name="export" />
+          </button>
+          <span className="tb-sep" />
+          <button
+            className="tb"
+            title={t("workspaceSave")}
+            aria-label={t("workspaceSave")}
+            onClick={() => void saveWorkspace()}
+          >
+            <Icon name="save" />
+          </button>
+          <button
+            className="tb"
+            title={t("workspaceLoad")}
+            aria-label={t("workspaceLoad")}
+            onClick={() => void loadWorkspace()}
+          >
+            <Icon name="open" />
+          </button>
+          <button
+            className="tb"
+            title={t("commandPalette")}
+            aria-label={t("commandPalette")}
+            onClick={() => setPaletteOpen(true)}
+          >
+            <Icon name="commands" />
+          </button>
+          <span className="toolbar-spacer" />
+          <button
+            className="tb"
+            title={t("checkUpdates")}
+            aria-label={t("checkUpdates")}
+            onClick={() => void checkUpdates()}
+          >
+            <Icon name="update" />
+          </button>
         </div>
 
-        <label className="language">
-          {t("app.language")}
+        <div className="toolbar">
           <select
+            className="connection-select"
+            value={selected}
+            aria-label={t("connections")}
+            onChange={(event) => selectConnection(event.target.value)}
+          >
+            <option value="">—</option>
+            {connections.map((connection) => (
+              <option key={connection.id} value={connection.id}>
+                {connection.label} ({connection.user})
+              </option>
+            ))}
+          </select>
+          <button
+            className="tb"
+            title={t("connect")}
+            aria-label={t("connect")}
+            onClick={() => void connect()}
+            disabled={!selected || isConnected}
+          >
+            <Icon name="connect" />
+          </button>
+          <button
+            className="tb"
+            title={t("disconnect")}
+            aria-label={t("disconnect")}
+            onClick={() => void disconnect()}
+            disabled={!isConnected}
+          >
+            <Icon name="disconnect" />
+          </button>
+          <label className="check-inline">
+            <input
+              type="checkbox"
+              checked={draft.readOnly}
+              onChange={(event) => update("readOnly", event.target.checked)}
+            />
+            {t("readOnly")}
+          </label>
+          <button
+            className="tb"
+            title={t("refresh")}
+            aria-label={t("refresh")}
+            onClick={() => void refreshObjectCache()}
+            disabled={!isConnected}
+          >
+            <Icon name="refresh" />
+          </button>
+          <button
+            className={showConnections ? "tb active" : "tb"}
+            title={t("connections")}
+            aria-label={t("connections")}
+            onClick={() => setShowConnections((visible) => !visible)}
+          >
+            <Icon name="settings" />
+          </button>
+          <span className="toolbar-spacer" />
+          <select
+            className="language-select"
             value={language}
+            aria-label={t("app.language")}
             onChange={(event) =>
               setLanguage(event.target.value as "es" | "en")
             }
@@ -1063,535 +1277,575 @@ export default function App() {
             <option value="es">Español</option>
             <option value="en">English</option>
           </select>
-        </label>
-
-        <h2>{t("connections")}</h2>
-        <select
-          className="connection-select"
-          value={selected}
-          onChange={(event) => selectConnection(event.target.value)}
-        >
-          <option value="">—</option>
-          {connections.map((connection) => (
-            <option key={connection.id} value={connection.id}>
-              {connection.label} ({connection.user})
-              {connected[connection.id] ? " ✓" : ""}
-            </option>
-          ))}
-        </select>
-        <div className="row">
-          <button onClick={() => void connect()} disabled={!selected}>
-            {t("connect")}
-          </button>
-          <button onClick={() => void disconnect()} disabled={!isConnected}>
-            {t("disconnect")}
-          </button>
+          <span
+            className={isConnected ? "connection-chip on" : "connection-chip"}
+            title={isConnected ? connected[selected] : t("noConnection")}
+          >
+            {isConnected
+              ? `${t("connected")}: ${draft.user}${
+                  draft.alias ? `@${draft.alias}` : ""
+                }`
+              : t("noConnection")}
+          </span>
         </div>
+      </header>
 
-        <details open>
-          <summary>{t("newConnection")}</summary>
-          <label>
-            {t("label")}
-            <input
-              value={draft.label}
-              onChange={(event) => update("label", event.target.value)}
-            />
-          </label>
-          <label>
-            {t("user")}
-            <input
-              value={draft.user}
-              onChange={(event) => update("user", event.target.value)}
-            />
-          </label>
-          <label>
-            {t("password")}
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-            />
-          </label>
-          <label>
-            {t("alias")}
-            <input
-              value={draft.alias}
-              onChange={(event) => update("alias", event.target.value)}
-            />
-          </label>
-          <label>
-            {t("connectString")}
-            <input
-              value={draft.connect}
-              placeholder="//host:1521/service"
-              onChange={(event) => update("connect", event.target.value)}
-            />
-          </label>
-          <label>
-            {t("tnsAdmin")}
-            <input
-              value={draft.tnsAdmin}
-              onChange={(event) => update("tnsAdmin", event.target.value)}
-            />
-          </label>
-          <label>
-            {t("ociDir")}
-            <input
-              value={draft.ociDir}
-              onChange={(event) => update("ociDir", event.target.value)}
-            />
-          </label>
-          <label>
-            {t("mode")}
-            <select
-              value={draft.mode}
-              onChange={(event) =>
-                update("mode", event.target.value as Draft["mode"])
-              }
-            >
-              <option value="NORMAL">NORMAL</option>
-              <option value="SYSDBA">SYSDBA</option>
-              <option value="SYSOPER">SYSOPER</option>
-            </select>
-          </label>
-          <div className="row">
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={draft.readOnly}
-                onChange={(event) => update("readOnly", event.target.checked)}
-              />
-              {t("readOnly")}
-            </label>
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={draft.savePassword}
-                onChange={(event) =>
-                  update("savePassword", event.target.checked)
-                }
-              />
-              {t("savePassword")}
-            </label>
-          </div>
-          <label>
-            {t("prefetch")}
-            <input
-              type="number"
-              min={1}
-              value={draft.prefetch}
-              onChange={(event) =>
-                update("prefetch", Number(event.target.value) || 1000)
-              }
-            />
-          </label>
-          <div className="row">
-            <button onClick={() => void save()}>{t("save")}</button>
-            <button onClick={() => void remove()} disabled={!selected}>
-              {t("delete")}
-            </button>
-            <button onClick={() => void importLegacy()}>
-              {t("importLegacy")}
-            </button>
-          </div>
-        </details>
-
-        <details open>
-          <summary>{t("objects")}</summary>
-          <label>
-            {t("schema")}
+      <div className="body">
+        <aside className="objects-panel">
+          <div className="panel-title">{t("objects")}</div>
+          <div className="object-filter">
             <input
               value={schema}
-              placeholder="(current)"
+              placeholder={t("schema")}
+              title={t("schema")}
               onChange={(event) => setSchema(event.target.value)}
             />
-          </label>
-          <label>
-            {t("objectType")}
-            <select
-              value={objectType}
-              onChange={(event) => setObjectType(event.target.value)}
+            <input
+              value={objectFilter}
+              placeholder={t("filter")}
+              title={t("filter")}
+              onChange={(event) => setObjectFilter(event.target.value)}
+            />
+            <button
+              className="tb"
+              title={t("loadObjects")}
+              aria-label={t("loadObjects")}
+              onClick={() => void loadObjects()}
+              disabled={!isConnected}
             >
-              <option value="">{t("allTypes")}</option>
-              <option value="TABLE">TABLE</option>
-              <option value="VIEW">VIEW</option>
-              <option value="PACKAGE">PACKAGE</option>
-              <option value="PROCEDURE">PROCEDURE</option>
-              <option value="FUNCTION">FUNCTION</option>
-              <option value="TRIGGER">TRIGGER</option>
-              <option value="SEQUENCE">SEQUENCE</option>
-            </select>
-          </label>
-          <button onClick={() => void loadObjects()} disabled={!isConnected}>
-            {t("loadObjects")}
-          </button>
-          <div className="object-list">
-            {objects.map((object) => (
+              <Icon name="refresh" />
+            </button>
+          </div>
+          <div className="type-grid">
+            {objectTypes.map((type) => (
               <button
-                key={`${object.objectType}-${object.name}`}
+                key={type.value || "all"}
                 className={
-                  selectedObject?.name === object.name ? "object active" : "object"
+                  objectType === type.value ? "type-button active" : "type-button"
                 }
-                title={object.status}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  setMenu({ object, x: event.clientX, y: event.clientY });
-                }}
-                onClick={() => void openObject(object)}
+                onClick={() => chooseType(type.value)}
+                disabled={!isConnected}
               >
-                {object.name}
-                <span>{object.objectType}</span>
+                {t(type.key)}
               </button>
             ))}
           </div>
-        </details>
-
-        <details open>
-          <summary>{t("formatterProfiles")}</summary>
-          <label>
-            {t("profile")}
-            <select
-              value={profile}
-              onChange={(event) => void selectProfile(event.target.value)}
-            >
-              <option value="">{t("defaultProfile")}</option>
-              {profiles.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="row">
-            <button onClick={() => void saveProfile()}>{t("saveProfile")}</button>
-            <button onClick={() => void deleteProfile()} disabled={!profile}>
-              {t("deleteProfile")}
-            </button>
-          </div>
-        </details>
-
-        <button onClick={() => void checkUpdates()}>{t("checkUpdates")}</button>
-      </aside>
-
-      <main className="main">
-        <header className="toolbar">
-          <button onClick={() => void run()} disabled={!isConnected || running}>
-            {t("execute")}
-          </button>
-          <button onClick={() => void cancel()} disabled={!running}>
-            {t("cancel")}
-          </button>
-          <button onClick={() => void commit()} disabled={!isConnected}>
-            {t("commit")}
-          </button>
-          <button onClick={() => void rollback()} disabled={!isConnected}>
-            {t("rollback")}
-          </button>
-          <button onClick={() => void showHistory()}>{t("history")}</button>
-          <button onClick={() => void explain()} disabled={!isConnected}>
-            {t("explain")}
-          </button>
-          <button onClick={() => void showStats()} disabled={!isConnected}>
-            {t("stats")}
-          </button>
-          <button onClick={() => void formatSql()} disabled={!sql.trim()}>
-            {t("format")}
-          </button>
-          <button onClick={() => setPaletteOpen(true)}>{t("commandPalette")}</button>
-          <button onClick={() => void saveWorkspace()}>{t("workspaceSave")}</button>
-          <button onClick={() => void loadWorkspace()}>{t("workspaceLoad")}</button>
-          <button onClick={() => void exportCsv()} disabled={!columns.length && !isConnected}>
-            {t("exportCsv")}
-          </button>
-          <span className="connection-state">
-            {isConnected ? `${t("connected")}: ${connected[selected]}` : t("noConnection")}
-          </span>
-        </header>
-
-        <Editor
-          ref={editorRef}
-          initialValue={sql}
-          tables={tables}
-          loadColumns={loadColumnsFor}
-          onChange={setSql}
-          onExecute={(text) => void run(text)}
-        />
-
-        <nav className="tabs">
-          <button
-            className={panel === "results" ? "active" : ""}
-            onClick={() => setPanel("results")}
-          >
-            {t("results")}
-          </button>
-          <button
-            className={panel === "history" ? "active" : ""}
-            onClick={() => void showHistory()}
-          >
-            {t("history")}
-          </button>
-          <button
-            className={panel === "plan" ? "active" : ""}
-            onClick={() => setPanel("plan")}
-          >
-            {t("plan")}
-          </button>
-          <button
-            className={panel === "object" ? "active" : ""}
-            onClick={() => setPanel("object")}
-          >
-            {t("object")}
-          </button>
-          <button
-            className={panel === "stats" ? "active" : ""}
-            onClick={() => void showStats()}
-          >
-            {t("stats")}
-          </button>
-          <span className="hint">{t("bookmarkHint")}</span>
-        </nav>
-
-        <section className="content">
-          {panel === "results" && (
-            <div
-              className="results"
-              onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
-            >
-              <table>
-                <thead>
-                  <tr>
-                    {columns.map((column) => (
-                      <th key={column.name} title={column.typeName}>
-                        {column.name}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {start > 0 && (
-                    <tr className="spacer" style={{ height: start * ROW_HEIGHT }}>
-                      <td colSpan={Math.max(columns.length, 1)} />
-                    </tr>
-                  )}
-                  {rows.slice(start, end).map((row, index) => (
-                    <tr key={start + index} style={{ height: ROW_HEIGHT }}>
-                      {row.map((value, columnIndex) => (
-                        <td
-                          key={columnIndex}
-                          className={value.kind === "null" ? "null" : ""}
-                        >
-                          {cellText(value)}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                  {end < rows.length && (
-                    <tr
-                      className="spacer"
-                      style={{ height: (rows.length - end) * ROW_HEIGHT }}
-                    >
-                      <td colSpan={Math.max(columns.length, 1)} />
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-              <p className="hint">
-                {rows.length} {t("rows")}
-              </p>
-            </div>
-          )}
-
-          {panel === "history" && (
-            <div className="history">
-              {historyEntries.map((entry, index) => (
-                <button
-                  key={index}
-                  className="history-row"
-                  onClick={() => setSql(entry.sql)}
-                >
-                  <span>{new Date(entry.startedAt * 1000).toLocaleString()}</span>
-                  <code>{entry.sql}</code>
-                  <span>
-                    {entry.rows} {t("rows")} · {entry.elapsedMs} ms
-                    {entry.error ? ` · ${entry.error}` : ""}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {panel === "plan" && <pre className="plan">{plan}</pre>}
-
-          {panel === "object" && (
-            <div className="object-panel">
-              {selectedObject ? (
-                <>
-                  <header className="object-header">
-                    <strong>{selectedObject.name}</strong>
-                    <span>{selectedObject.objectType}</span>
-                    <button onClick={() => void loadDdlFor(selectedObject)}>
-                      {t("loadDdl")}
-                    </button>
-                  </header>
-                  <nav className="object-tabs">
-                    {(
-                      [
-                        "columns",
-                        "constraints",
-                        "indexes",
-                        "triggers",
-                        "grants",
-                      ] as ObjectTab[]
-                    ).map((tab) => (
-                      <button
-                        key={tab}
-                        className={objectTab === tab ? "active" : ""}
-                        onClick={() => void loadDetail(tab)}
-                      >
-                        {t(tab)}
-                      </button>
-                    ))}
-                  </nav>
-                  {objectTab === "columns" &&
-                    (objectColumns.length > 0 ? (
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>{t("columns")}</th>
-                            <th>{t("dataType")}</th>
-                            <th>{t("nullable")}</th>
-                            <th>{t("defaultValue")}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {objectColumns.map((column) => (
-                            <tr key={column.name}>
-                              <td>{column.name}</td>
-                              <td>{column.dataType}</td>
-                              <td>{column.nullable ? "Y" : "N"}</td>
-                              <td>{column.dataDefault ?? ""}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    ) : (
-                      <p className="hint">{selectedObject.status}</p>
-                    ))}
-                  {objectTab === "constraints" && (
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>{t("constraints")}</th>
-                          <th>{t("objectType")}</th>
-                          <th>Status</th>
-                          <th>{t("columns")}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {constraints.map((constraint) => (
-                          <tr key={constraint.name}>
-                            <td>{constraint.name}</td>
-                            <td>{constraint.kind}</td>
-                            <td>{constraint.status}</td>
-                            <td>{constraint.columns.join(", ")}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                  {objectTab === "indexes" && (
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>{t("indexes")}</th>
-                          <th>{t("uniqueness")}</th>
-                          <th>Status</th>
-                          <th>{t("columns")}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {indexes.map((index) => (
-                          <tr key={index.name}>
-                            <td>{index.name}</td>
-                            <td>{index.uniqueness}</td>
-                            <td>{index.status}</td>
-                            <td>{index.columns.join(", ")}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                  {objectTab === "triggers" && (
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>{t("triggers")}</th>
-                          <th>{t("objectType")}</th>
-                          <th>{t("event")}</th>
-                          <th>Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {triggers.map((trigger) => (
-                          <tr key={trigger.name}>
-                            <td>{trigger.name}</td>
-                            <td>{trigger.triggerType}</td>
-                            <td>{trigger.event}</td>
-                            <td>{trigger.status}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                  {objectTab === "grants" && (
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>{t("grantee")}</th>
-                          <th>{t("privilege")}</th>
-                          <th>{t("grantable")}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {grants.map((grant, index) => (
-                          <tr key={`${grant.grantee}-${index}`}>
-                            <td>{grant.grantee}</td>
-                            <td>{grant.privilege}</td>
-                            <td>{grant.grantable ? "Y" : "N"}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                </>
-              ) : (
-                <p className="hint">{t("selectObject")}</p>
-              )}
-            </div>
-          )}
-
-          {panel === "stats" && (
-            <table>
+          <div className="object-scroll">
+            <table className="object-table">
               <thead>
                 <tr>
-                  <th>{t("stats")}</th>
-                  <th>Value</th>
+                  <th>{t("name")}</th>
+                  <th>{t("objectType")}</th>
                 </tr>
               </thead>
               <tbody>
-                {stats.map(([name, value]) => (
-                  <tr key={name}>
-                    <td>{name}</td>
-                    <td>{value}</td>
+                {shownObjects.map((object) => (
+                  <tr
+                    key={`${object.objectType}-${object.name}`}
+                    className={
+                      selectedObject?.name === object.name &&
+                      selectedObject?.objectType === object.objectType
+                        ? "active"
+                        : ""
+                    }
+                    title={object.status}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      setMenu({ object, x: event.clientX, y: event.clientY });
+                    }}
+                    onClick={() => void openObject(object)}
+                  >
+                    <td>{object.name}</td>
+                    <td>{object.objectType}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          )}
-        </section>
+          </div>
 
-        {showStatus && <footer className="status">{status}</footer>}
-      </main>
+          <details
+            className="side-section"
+            open={showConnections}
+            onToggle={(event) => setShowConnections(event.currentTarget.open)}
+          >
+            <summary>{t("connections")}</summary>
+            <div className="section-body">
+              <label className="field-row">
+                <span>{t("label")}</span>
+                <input
+                  value={draft.label}
+                  onChange={(event) => update("label", event.target.value)}
+                />
+              </label>
+              <label className="field-row">
+                <span>{t("user")}</span>
+                <input
+                  value={draft.user}
+                  onChange={(event) => update("user", event.target.value)}
+                />
+              </label>
+              <label className="field-row">
+                <span>{t("password")}</span>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                />
+              </label>
+              <label className="field-row">
+                <span>{t("alias")}</span>
+                <input
+                  value={draft.alias}
+                  onChange={(event) => update("alias", event.target.value)}
+                />
+              </label>
+              <label className="field-row">
+                <span>{t("connectString")}</span>
+                <input
+                  value={draft.connect}
+                  placeholder="//host:1521/service"
+                  onChange={(event) => update("connect", event.target.value)}
+                />
+              </label>
+              <label className="field-row">
+                <span>{t("tnsAdmin")}</span>
+                <input
+                  value={draft.tnsAdmin}
+                  onChange={(event) => update("tnsAdmin", event.target.value)}
+                />
+              </label>
+              <label className="field-row">
+                <span>{t("ociDir")}</span>
+                <input
+                  value={draft.ociDir}
+                  onChange={(event) => update("ociDir", event.target.value)}
+                />
+              </label>
+              <label className="field-row">
+                <span>{t("mode")}</span>
+                <select
+                  value={draft.mode}
+                  onChange={(event) =>
+                    update("mode", event.target.value as Draft["mode"])
+                  }
+                >
+                  <option value="NORMAL">NORMAL</option>
+                  <option value="SYSDBA">SYSDBA</option>
+                  <option value="SYSOPER">SYSOPER</option>
+                </select>
+              </label>
+              <label className="field-row">
+                <span>{t("prefetch")}</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={draft.prefetch}
+                  onChange={(event) =>
+                    update("prefetch", Number(event.target.value) || 1000)
+                  }
+                />
+              </label>
+              <label className="check-inline">
+                <input
+                  type="checkbox"
+                  checked={draft.savePassword}
+                  onChange={(event) =>
+                    update("savePassword", event.target.checked)
+                  }
+                />
+                {t("savePassword")}
+              </label>
+              <div className="row">
+                <button className="plain" onClick={() => void save()}>
+                  {t("save")}
+                </button>
+                <button
+                  className="plain"
+                  onClick={() => void remove()}
+                  disabled={!selected}
+                >
+                  {t("delete")}
+                </button>
+                <button className="plain" onClick={() => void importLegacy()}>
+                  {t("importLegacy")}
+                </button>
+              </div>
+            </div>
+          </details>
+
+          <details className="side-section">
+            <summary>{t("formatterProfiles")}</summary>
+            <div className="section-body">
+              <label className="field-row">
+                <span>{t("profile")}</span>
+                <select
+                  value={profile}
+                  onChange={(event) => void selectProfile(event.target.value)}
+                >
+                  <option value="">{t("defaultProfile")}</option>
+                  {profiles.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="row">
+                <button className="plain" onClick={() => void saveProfile()}>
+                  {t("saveProfile")}
+                </button>
+                <button
+                  className="plain"
+                  onClick={() => void deleteProfile()}
+                  disabled={!profile}
+                >
+                  {t("deleteProfile")}
+                </button>
+              </div>
+            </div>
+          </details>
+        </aside>
+
+        <main className="workspace">
+          <div className="editor-shell">
+            <div className="editor-tabbar">
+              <div className="editor-tab">
+                <span>SQL</span>
+                <span className="tab-conn">
+                  {isConnected
+                    ? `${draft.user}${draft.alias ? `@${draft.alias}` : ""}`
+                    : t("noConnection")}
+                </span>
+              </div>
+            </div>
+            <Editor
+              ref={editorRef}
+              initialValue={sql}
+              tables={tables}
+              loadColumns={loadColumnsFor}
+              onChange={setSql}
+              onExecute={(text, offset) => void run(text, offset)}
+            />
+          </div>
+
+          <div className="panel-bar">
+            <nav className="tabs">
+              <button
+                className={panel === "results" ? "active" : ""}
+                onClick={() => setPanel("results")}
+              >
+                {t("results")}
+              </button>
+              <button
+                className={panel === "history" ? "active" : ""}
+                onClick={() => void showHistory()}
+              >
+                {t("history")}
+              </button>
+              <button
+                className={panel === "plan" ? "active" : ""}
+                onClick={() => setPanel("plan")}
+              >
+                {t("plan")}
+              </button>
+              <button
+                className={panel === "object" ? "active" : ""}
+                onClick={() => setPanel("object")}
+              >
+                {t("object")}
+              </button>
+              <button
+                className={panel === "stats" ? "active" : ""}
+                onClick={() => void showStats()}
+              >
+                {t("stats")}
+              </button>
+            </nav>
+            <button
+              className="tb"
+              title={t("exportCsv")}
+              aria-label={t("exportCsv")}
+              onClick={() => void exportCsv()}
+              disabled={!columns.length && !isConnected}
+            >
+              <Icon name="export" />
+            </button>
+            <button
+              className="tb"
+              title={t("clear")}
+              aria-label={t("clear")}
+              onClick={() => {
+                setRows([]);
+                setColumns([]);
+                setStatus("");
+              }}
+            >
+              <Icon name="clear" />
+            </button>
+            <span className="hint">{t("bookmarkHint")}</span>
+          </div>
+
+          <section className="content">
+            {panel === "results" && (
+              <div
+                className="results"
+                onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+              >
+                {columns.length === 0 ? (
+                  <p className="no-results">{t("noResults")}</p>
+                ) : (
+                <table className="grid">
+                  <thead>
+                    <tr>
+                      <th className="row-number">#</th>
+                      {columns.map((column) => (
+                        <th key={column.name} title={column.typeName}>
+                          {column.name}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {start > 0 && (
+                      <tr
+                        className="spacer"
+                        style={{ height: start * ROW_HEIGHT }}
+                      >
+                        <td colSpan={Math.max(columns.length + 1, 1)} />
+                      </tr>
+                    )}
+                    {rows.slice(start, end).map((row, index) => (
+                      <tr key={start + index} style={{ height: ROW_HEIGHT }}>
+                        <td className="row-number">{start + index + 1}</td>
+                        {row.map((value, columnIndex) => (
+                          <td
+                            key={columnIndex}
+                            className={value.kind === "null" ? "null" : ""}
+                          >
+                            {cellText(value)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                    {end < rows.length && (
+                      <tr
+                        className="spacer"
+                        style={{ height: (rows.length - end) * ROW_HEIGHT }}
+                      >
+                        <td colSpan={Math.max(columns.length + 1, 1)} />
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+                )}
+              </div>
+            )}
+
+            {panel === "history" && (
+              <div className="history">
+                {historyEntries.map((entry, index) => (
+                  <button
+                    key={index}
+                    className="history-row"
+                    onClick={() => setSql(entry.sql)}
+                  >
+                    <span>
+                      {new Date(entry.startedAt * 1000).toLocaleString()}
+                    </span>
+                    <code>{entry.sql}</code>
+                    <span>
+                      {entry.rows} {entry.rows === 1 ? t("row") : t("rows")} ·{" "}
+                      {entry.elapsedMs} ms
+                      {entry.error ? ` · ${entry.error}` : ""}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {panel === "plan" && <pre className="plan">{plan}</pre>}
+
+            {panel === "object" && (
+              <div className="object-panel">
+                {selectedObject ? (
+                  <>
+                    <header className="object-header">
+                      <strong>{selectedObject.name}</strong>
+                      <span>{selectedObject.objectType}</span>
+                      <button
+                        className="plain"
+                        onClick={() => void loadDdlFor(selectedObject)}
+                      >
+                        {t("loadDdl")}
+                      </button>
+                    </header>
+                    <nav className="object-tabs">
+                      {(
+                        [
+                          "columns",
+                          "constraints",
+                          "indexes",
+                          "triggers",
+                          "grants",
+                        ] as ObjectTab[]
+                      ).map((tab) => (
+                        <button
+                          key={tab}
+                          className={objectTab === tab ? "active" : ""}
+                          onClick={() => void loadDetail(tab)}
+                        >
+                          {t(tab)}
+                        </button>
+                      ))}
+                    </nav>
+                    {objectTab === "columns" &&
+                      (objectColumns.length > 0 ? (
+                        <table className="grid">
+                          <thead>
+                            <tr>
+                              <th>{t("columns")}</th>
+                              <th>{t("dataType")}</th>
+                              <th>{t("nullable")}</th>
+                              <th>{t("defaultValue")}</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {objectColumns.map((column) => (
+                              <tr key={column.name}>
+                                <td>{column.name}</td>
+                                <td>{column.dataType}</td>
+                                <td>{column.nullable ? "Y" : "N"}</td>
+                                <td>{column.dataDefault ?? ""}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : (
+                        <p className="hint">{selectedObject.status}</p>
+                      ))}
+                    {objectTab === "constraints" && (
+                      <table className="grid">
+                        <thead>
+                          <tr>
+                            <th>{t("constraints")}</th>
+                            <th>{t("objectType")}</th>
+                            <th>Status</th>
+                            <th>{t("columns")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {constraints.map((constraint) => (
+                            <tr key={constraint.name}>
+                              <td>{constraint.name}</td>
+                              <td>{constraint.kind}</td>
+                              <td>{constraint.status}</td>
+                              <td>{constraint.columns.join(", ")}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                    {objectTab === "indexes" && (
+                      <table className="grid">
+                        <thead>
+                          <tr>
+                            <th>{t("indexes")}</th>
+                            <th>{t("uniqueness")}</th>
+                            <th>Status</th>
+                            <th>{t("columns")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {indexes.map((index) => (
+                            <tr key={index.name}>
+                              <td>{index.name}</td>
+                              <td>{index.uniqueness}</td>
+                              <td>{index.status}</td>
+                              <td>{index.columns.join(", ")}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                    {objectTab === "triggers" && (
+                      <table className="grid">
+                        <thead>
+                          <tr>
+                            <th>{t("triggers")}</th>
+                            <th>{t("objectType")}</th>
+                            <th>{t("event")}</th>
+                            <th>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {triggers.map((trigger) => (
+                            <tr key={trigger.name}>
+                              <td>{trigger.name}</td>
+                              <td>{trigger.triggerType}</td>
+                              <td>{trigger.event}</td>
+                              <td>{trigger.status}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                    {objectTab === "grants" && (
+                      <table className="grid">
+                        <thead>
+                          <tr>
+                            <th>{t("grantee")}</th>
+                            <th>{t("privilege")}</th>
+                            <th>{t("grantable")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {grants.map((grant, index) => (
+                            <tr key={`${grant.grantee}-${index}`}>
+                              <td>{grant.grantee}</td>
+                              <td>{grant.privilege}</td>
+                              <td>{grant.grantable ? "Y" : "N"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </>
+                ) : (
+                  <p className="hint">{t("selectObject")}</p>
+                )}
+              </div>
+            )}
+
+            {panel === "stats" && (
+              <table className="grid">
+                <thead>
+                  <tr>
+                    <th>{t("stats")}</th>
+                    <th>Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stats.map(([name, value]) => (
+                    <tr key={name}>
+                      <td>{name}</td>
+                      <td>{value}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
+
+          {showStatus && (
+            <footer className="status-bar">
+              <span>{status}</span>
+              <span className="status-right">
+                {isConnected ? t("connected") : t("noConnection")}
+              </span>
+            </footer>
+          )}
+        </main>
+      </div>
 
       {paletteOpen && (
         <div
@@ -1616,7 +1870,7 @@ export default function App() {
                   className={index === paletteIndex ? "active" : ""}
                   onClick={() => executeCommand(command.name)}
                 >
-                  <span>{command.name || command.id}</span>
+                  <span>{command.name}</span>
                   <span className="keys">{command.keys[0] ?? ""}</span>
                   {!command.implemented && <em>{t("notImplemented")}</em>}
                 </button>

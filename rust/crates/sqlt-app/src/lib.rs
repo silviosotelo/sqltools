@@ -6,6 +6,7 @@ pub mod commands;
 pub mod export;
 pub mod migrate;
 pub mod profiles;
+pub mod script;
 pub mod state;
 pub mod store;
 pub mod workspace;

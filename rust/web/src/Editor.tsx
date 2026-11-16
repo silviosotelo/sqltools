@@ -45,7 +45,7 @@ type Props = {
   tables: string[];
   loadColumns: (table: string) => Promise<string[]>;
   onChange: (value: string) => void;
-  onExecute: (sql: string) => void;
+  onExecute: (sql: string, offset: number | null) => void;
 };
 
 class BookmarkMarker extends GutterMarker {
@@ -172,6 +172,7 @@ export type EditorHandle = {
   goToLine: () => void;
   timestamp: () => void;
   textFromCursor: () => string;
+  cursorOffset: () => number;
   toggleAllFolds: () => void;
   collapseRegion: () => void;
   expandRegion: () => void;
@@ -619,6 +620,11 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
       if (!editor) return "";
       return editor.state.sliceDoc(editor.state.selection.main.head);
     },
+    cursorOffset: () => {
+      const editor = view.current;
+      if (!editor) return 0;
+      return editor.state.selection.main.head;
+    },
     toggleAllFolds: () => {
       const editor = view.current;
       if (!editor) return;
@@ -755,10 +761,11 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
             {
               key: "Mod-Enter",
               run: (current) => {
-                const { from, to } = current.state.selection.main;
+                const { from, to, head } = current.state.selection.main;
                 const selected = current.state.sliceDoc(from, to);
                 callbacks.current.onExecute(
                   selected || current.state.doc.toString(),
+                  selected ? null : head,
                 );
                 return true;
               },

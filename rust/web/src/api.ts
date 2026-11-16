@@ -27,11 +27,18 @@ export const api = {
     connectionId: string,
     sql: string,
     maxRows: number,
+    offset: number | null,
     onEvent: (event: QueryEvent) => void,
   ) => {
     const channel = new Channel<QueryEvent>();
     channel.onmessage = onEvent;
-    return invoke<void>("execute", { connectionId, sql, maxRows, channel });
+    return invoke<void>("execute", {
+      connectionId,
+      sql,
+      maxRows,
+      offset,
+      channel,
+    });
   },
   toggleReadOnly: (id: string) => invoke<boolean>("toggle_read_only", { id }),
   cancel: (id: string) => invoke<void>("cancel", { id }),
