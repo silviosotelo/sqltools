@@ -202,6 +202,11 @@ impl Session {
         let mut lines = Vec::new();
         let mut truncated = 0usize;
         loop {
+            // A close can arrive while draining; stop instead of keeping the
+            // disconnect waiting for the rest of the buffer.
+            if self.is_closed() {
+                break;
+            }
             let Ok(mut stmt) = self
                 .conn
                 .statement("begin dbms_output.get_line(:1, :2); end;")

@@ -504,3 +504,47 @@ fn closing_after_the_first_batch_stops_the_select() {
     assert_eq!(batches, 1, "no further batch may be fetched after closing");
     let _ = fs::remove_file(path);
 }
+
+#[test]
+#[ignore = "requires a real Oracle connection"]
+fn closing_on_the_last_output_fails_the_script() {
+    use sqlt_app::script::{run_script, ScriptEvent};
+    use std::sync::Arc;
+
+    let user = std::env::var("SQLT_USER").expect("SQLT_USER");
+    let password = std::env::var("SQLT_PASS").expect("SQLT_PASS");
+    let alias = std::env::var("SQLT_ALIAS").expect("SQLT_ALIAS");
+    let path = std::env::temp_dir().join(format!("sqlt-app-last-{}.json", std::process::id()));
+    let _ = fs::remove_file(&path);
+    let mut store = ConnectionStore::new(path.clone());
+    let mut config = ConnectionConfig::new("Last", &user);
+    config.alias = Some(alias);
+    config.tns_admin = std::env::var("SQLT_TNS_ADMIN").ok();
+    config.oci_dir = std::env::var("SQLT_OCI_DIR").ok();
+    store.upsert(config.clone()).unwrap();
+    store.set_password(&config.id, &password).unwrap();
+    let state = AppState::with_store(store);
+    state.connect(&config.id).expect("connect");
+    let session = state.session(&config.id).expect("session");
+    session.enable_dbms_output().expect("enable dbms_output");
+
+    let closing = Arc::clone(&session);
+    let mut outputs = 0usize;
+    let result = run_script(
+        &session,
+        "begin dbms_output.put_line('only'); end;",
+        state.query_options(&config.id),
+        0,
+        None,
+        |event| {
+            if let ScriptEvent::Output(_) = event {
+                outputs += 1;
+                closing.close();
+            }
+        },
+    );
+    let error = result.expect_err("a close after the last drain must fail the script");
+    assert!(error.contains("closed"), "{error}");
+    assert_eq!(outputs, 1, "the drained lines are still delivered");
+    let _ = fs::remove_file(path);
+}

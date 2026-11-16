@@ -88,6 +88,9 @@ where
         total += statement_rows;
         last_rows = statement_rows;
     }
+    if session.is_closed() {
+        return Err("The connection was closed".to_string());
+    }
     Ok(ScriptOutcome {
         total_rows: total,
         last_rows,
@@ -146,9 +149,16 @@ where
     // session was closed, so the close does not wait on a full drain.
     if !session.is_closed() {
         let lines = session.dbms_output_lines(1000).unwrap_or_default();
+        // The drain can observe the close; do not emit or report success then.
+        if session.is_closed() {
+            return Err("The connection was closed".to_string());
+        }
         if !lines.is_empty() {
             emit(ScriptEvent::Output(lines));
         }
+    }
+    if session.is_closed() {
+        return Err("The connection was closed".to_string());
     }
     Ok(statement_rows)
 }
