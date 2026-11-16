@@ -403,6 +403,7 @@ fn format_sql(sql: String, uppercase: bool) -> String {
             uppercase_keywords: uppercase,
             indent: 2,
             comma_leading: false,
+            style: sqlt_core::format::FormatStyle::Standard,
         },
     )
 }

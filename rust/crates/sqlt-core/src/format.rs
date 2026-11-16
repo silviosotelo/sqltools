@@ -6,10 +6,17 @@
 //! re-indentation parity is still incremental.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormatStyle {
+    Standard,
+    River,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FormatOptions {
     pub uppercase_keywords: bool,
     pub indent: usize,
     pub comma_leading: bool,
+    pub style: FormatStyle,
 }
 
 impl Default for FormatOptions {
@@ -18,6 +25,7 @@ impl Default for FormatOptions {
             uppercase_keywords: true,
             indent: 2,
             comma_leading: false,
+            style: FormatStyle::Standard,
         }
     }
 }
@@ -349,10 +357,41 @@ fn split_commas(tokens: &[Token]) -> Vec<Vec<Token>> {
     parts
 }
 
+fn river_prefix(keyword: &str) -> String {
+    match keyword {
+        "SELECT" => "SELECT ".to_string(),
+        "GROUP BY" => " GROUP BY ".to_string(),
+        "ORDER BY" => " ORDER BY ".to_string(),
+        "SET" => "  SET ".to_string(),
+        _ => format!("{keyword} "),
+    }
+}
+
 fn format_list(keyword: &str, body: &[Token], options: &FormatOptions) -> String {
     let items = split_commas(body);
+    let river = options.style == FormatStyle::River;
+    let prefix = if river {
+        river_prefix(keyword)
+    } else {
+        format!("{keyword} ")
+    };
     if items.len() <= 1 {
-        return format!("{keyword} {}", render(body, options));
+        return format!("{prefix}{}", render(body, options));
+    }
+    if river {
+        let pad = " ".repeat(prefix.len());
+        let mut out = prefix.clone();
+        for (index, item) in items.iter().enumerate() {
+            if index > 0 {
+                out.push('\n');
+                out.push_str(&pad);
+            }
+            out.push_str(&render(item, options));
+            if index + 1 < items.len() {
+                out.push(',');
+            }
+        }
+        return out;
     }
     let indent = " ".repeat(options.indent);
     let mut lines = Vec::new();
@@ -402,15 +441,38 @@ fn format_where(body: &[Token], options: &FormatOptions) -> String {
         current.push(token.clone());
     }
     parts.push(current);
-    let mut out = format!("WHERE {}", render(&parts[0], options));
+    let river = options.style == FormatStyle::River;
+    let prefix = if river { " WHERE " } else { "WHERE " };
+    let and_indent = if river { "   " } else { &indent };
+    let mut out = format!("{prefix}{}", render(&parts[0], options));
     for part in parts.iter().skip(1) {
-        out.push_str(&format!("\n{indent}{}", render(part, options)));
+        out.push_str(&format!("\n{and_indent}{}", render(part, options)));
     }
     out
 }
 
 fn format_from(body: &[Token], options: &FormatOptions) -> String {
     let indent = " ".repeat(options.indent);
+    let river = options.style == FormatStyle::River;
+    let prefix = if river { "  FROM " } else { "FROM " };
+    if body.first() == Some(&Token::Symbol('('))
+        && body.last() == Some(&Token::Symbol(')'))
+        && body.len() >= 2
+    {
+        let inner = &body[1..body.len() - 1];
+        let starts_select = inner
+            .iter()
+            .any(|token| matches!(token, Token::Word(word) if word.eq_ignore_ascii_case("select")));
+        if starts_select {
+            let formatted = format_statement(inner, options);
+            let indented = formatted
+                .lines()
+                .map(|line| format!("{indent}{line}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            return format!("{prefix}(\n{indented}\n)");
+        }
+    }
     let mut joins: Vec<Vec<Token>> = Vec::new();
     let mut current = Vec::new();
     let mut depth = 0i32;
@@ -451,11 +513,12 @@ fn format_from(body: &[Token], options: &FormatOptions) -> String {
         joins.push(current);
     }
     if joins.is_empty() {
-        return format!("FROM {}", render(body, options));
+        return format!("{prefix}{}", render(body, options));
     }
-    let mut out = format!("FROM {}", render(&joins[0], options));
+    let join_indent = if river { "  ".to_string() } else { indent };
+    let mut out = format!("{prefix}{}", render(&joins[0], options));
     for join in joins.iter().skip(1) {
-        out.push_str(&format!("\n{indent}{}", render(join, options)));
+        out.push_str(&format!("\n{join_indent}{}", render(join, options)));
     }
     out
 }
@@ -627,6 +690,28 @@ mod tests {
         let sql = "select a.id,b.nombre,sum(c.total) from cab_pedido a join cliente b on a.id_cliente=b.id left join det_pedido c on c.id_pedido=a.id where a.estado='A' and b.activo=1 group by a.id,b.nombre order by 3 desc;";
         let expected = "SELECT\n  a.id,\n  b.nombre,\n  SUM(c.total)\nFROM cab_pedido a\n  JOIN cliente b ON a.id_cliente = b.id\n  LEFT JOIN det_pedido c ON c.id_pedido = a.id\nWHERE a.estado = 'A'\n  AND b.activo = 1\nGROUP BY\n  a.id,\n  b.nombre\nORDER BY 3 DESC;";
         assert_eq!(format_sql(sql, &standard()), expected);
+    }
+
+    #[test]
+    fn river_style_matches_cpp() {
+        let sql = "select a.id,b.nombre,sum(c.total) from cab_pedido a join cliente b on a.id_cliente=b.id left join det_pedido c on c.id_pedido=a.id where a.estado='A' and b.activo=1 group by a.id,b.nombre order by 3 desc;";
+        let options = FormatOptions {
+            style: FormatStyle::River,
+            ..standard()
+        };
+        let expected = "SELECT a.id,\n       b.nombre,\n       SUM(c.total)\n  FROM cab_pedido a\n  JOIN cliente b ON a.id_cliente = b.id\n  LEFT JOIN det_pedido c ON c.id_pedido = a.id\n WHERE a.estado = 'A'\n   AND b.activo = 1\n GROUP BY a.id,\n          b.nombre\n ORDER BY 3 DESC;";
+        assert_eq!(format_sql(sql, &options), expected);
+    }
+
+    #[test]
+    fn formats_from_subquery() {
+        assert_eq!(
+            format_sql(
+                "select x from (select id x from t where a in (1,2)) where x>0",
+                &standard()
+            ),
+            "SELECT x\nFROM (\n  SELECT id x\n  FROM t\n  WHERE a IN (1, 2)\n)\nWHERE x > 0"
+        );
     }
 
     #[test]
