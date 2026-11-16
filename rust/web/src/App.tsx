@@ -49,6 +49,8 @@ const objectTypes = [
   { value: "FUNCTION", key: "typeFunction" },
   { value: "TRIGGER", key: "typeTrigger" },
   { value: "SEQUENCE", key: "typeSequence" },
+  { value: "TYPE", key: "typeType" },
+  { value: "SYNONYM", key: "typeSynonym" },
 ] as const;
 
 const ROW_HEIGHT = 24;
