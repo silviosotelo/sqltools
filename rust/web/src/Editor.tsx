@@ -3,10 +3,13 @@ import { autocompletion, type CompletionContext } from "@codemirror/autocomplete
 import {
   copyLineDown,
   cursorMatchingBracket,
+  defaultKeymap,
   deleteCharForward,
   deleteGroupBackward,
   deleteGroupForward,
   deleteLine,
+  history,
+  historyKeymap,
   indentLess,
   indentMore,
   redo,
@@ -16,12 +19,23 @@ import {
   undo,
 } from "@codemirror/commands";
 import {
+  closeBrackets,
+  closeBracketsKeymap,
+  completionKeymap,
+} from "@codemirror/autocomplete";
+import {
+  bracketMatching,
+  defaultHighlightStyle,
   foldAll,
   foldCode,
   foldEffect,
   foldable,
+  foldGutter,
+  foldKeymap,
   foldedRanges,
   getIndentUnit,
+  indentOnInput,
+  syntaxHighlighting,
   toggleFold,
   unfoldAll,
   unfoldCode,
@@ -29,8 +43,10 @@ import {
 import {
   findNext,
   findPrevious,
+  highlightSelectionMatches,
   openSearchPanel,
   SearchQuery,
+  searchKeymap,
   setSearchQuery,
 } from "@codemirror/search";
 import { sql, StandardSQL } from "@codemirror/lang-sql";
@@ -47,12 +63,18 @@ import {
   GutterMarker,
   ViewPlugin,
   WidgetType,
+  drawSelection,
+  dropCursor,
   gutter,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+  highlightSpecialChars,
   keymap,
+  lineNumbers,
+  rectangularSelection,
   type DecorationSet,
   type ViewUpdate,
 } from "@codemirror/view";
-import { basicSetup } from "codemirror";
 
 type Props = {
   initialValue: string;
@@ -243,6 +265,31 @@ const indentGuides = ViewPlugin.fromClass(
   { decorations: (plugin) => plugin.decorations },
 );
 
+const editorSetup = [
+  lineNumbers(),
+  highlightActiveLineGutter(),
+  highlightSpecialChars(),
+  history(),
+  foldGutter(),
+  drawSelection(),
+  dropCursor(),
+  EditorState.allowMultipleSelections.of(true),
+  indentOnInput(),
+  syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+  bracketMatching(),
+  closeBrackets(),
+  highlightActiveLine(),
+  highlightSelectionMatches(),
+  keymap.of([
+    ...closeBracketsKeymap,
+    ...defaultKeymap,
+    ...searchKeymap,
+    ...historyKeymap,
+    ...foldKeymap,
+    ...completionKeymap,
+  ]),
+];
+
 type DisplayFlags = { spaces: boolean; guides: boolean };
 
 function displayExtensions(flags: DisplayFlags) {
@@ -322,6 +369,7 @@ export type EditorHandle = {
   toggleRuler: () => void;
   toggleVisibleSpaces: () => void;
   toggleIndentGuides: () => void;
+  setSelectionMode: (mode: "column" | "stream" | "toggle") => boolean;
   wordAtCursor: () => string;
 };
 
@@ -429,6 +477,10 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
   const view = useRef<EditorView | null>(null);
   const display = useRef<DisplayState>({
     flags: { spaces: false, guides: false },
+    compartment: new Compartment(),
+  });
+  const selection = useRef({
+    rectangular: false,
     compartment: new Compartment(),
   });
   const callbacks = useRef({ onChange, onExecute, tables, loadColumns });
@@ -940,6 +992,19 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
         ),
       });
     },
+    setSelectionMode: (mode) => {
+      const editor = view.current;
+      if (!editor) return false;
+      const current = selection.current;
+      current.rectangular =
+        mode === "toggle" ? !current.rectangular : mode === "column";
+      editor.dispatch({
+        effects: current.compartment.reconfigure(
+          current.rectangular ? rectangularSelection() : [],
+        ),
+      });
+      return current.rectangular;
+    },
     wordAtCursor: () => {
       const editor = view.current;
       if (!editor) return "";
@@ -961,12 +1026,15 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
       state: EditorState.create({
         doc: initialValue,
         extensions: [
-          basicSetup,
+          editorSetup,
           bookmarkField,
           slotField,
           bookmarkGutter,
           display.current.compartment.of(
             displayExtensions(display.current.flags),
+          ),
+          selection.current.compartment.of(
+            selection.current.rectangular ? rectangularSelection() : [],
           ),
           sql({ dialect: StandardSQL, upperCaseKeywords: true }),
           autocompletion({

@@ -64,6 +64,9 @@ const IMPLEMENTED: &[&str] = &[
     "Edit.OpenFileUnderCursor",
     "Edit.VisibleSpaces",
     "Edit.IndentGuide",
+    "Edit.ColumnSelection",
+    "Edit.StreamSelection",
+    "Edit.ToggleSelectionMode",
     "Workspace.SaveQuick",
     "Workspace.SaveAs",
     "Workspace.OpenAutosaved",
@@ -232,7 +235,7 @@ mod tests {
                 .iter()
                 .filter(|command| command.implemented)
                 .count(),
-            137
+            140
         );
     }
 }

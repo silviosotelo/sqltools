@@ -1200,6 +1200,23 @@ export default function App() {
       case "Edit.VisibleSpaces":
         editorRef.current?.toggleVisibleSpaces();
         break;
+      case "Edit.ColumnSelection":
+      case "Edit.StreamSelection":
+      case "Edit.ToggleSelectionMode": {
+        const mode =
+          name === "Edit.ColumnSelection"
+            ? "column"
+            : name === "Edit.StreamSelection"
+              ? "stream"
+              : "toggle";
+        const rectangular = editorRef.current?.setSelectionMode(mode);
+        setStatus(
+          `${t("selectionMode")}: ${
+            rectangular ? t("columnSelection") : t("streamSelection")
+          }`,
+        );
+        break;
+      }
       case "Edit.IndentGuide":
         editorRef.current?.toggleIndentGuides();
         break;
