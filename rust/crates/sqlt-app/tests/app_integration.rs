@@ -103,6 +103,17 @@ fn catalog_and_ddl() {
         triggers.len(),
         grants.len()
     );
+    if let Some(target) = tables
+        .iter()
+        .find(|table| table.eq_ignore_ascii_case("ACTIVO_FIJO"))
+    {
+        let full =
+            catalog::load_table_ddl_meta(&session, None, target, options).expect("full meta ddl");
+        assert!(full.contains("GRANT "), "{full}");
+        assert!(full.contains("ALTER TABLE "), "{full}");
+        assert!(full.contains("CREATE OR REPLACE TRIGGER "), "{full}");
+        eprintln!("meta full {target}: {} bytes", full.len());
+    }
     match catalog::session_stats(&session, options) {
         Ok(stats) => {
             assert!(!stats.is_empty());

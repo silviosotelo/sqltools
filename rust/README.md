@@ -4,9 +4,9 @@ Rust rewrite of SQLTools (Oracle client for PL/SQL/APEX developers), with a web 
 (Tauri v2 + React). Target platforms: Windows x64, macOS Intel/Apple Silicon and
 Linux x64.
 
-Status: **P4 (Format SQL started)**. The C++/Qt port remains untouched at the
-repository root (branch `main`); this branch (`rust`) contains the new
-implementation.
+Status: **P4 (MetaDictionary + Format SQL in progress)**. The C++/Qt port
+remains untouched at the repository root (branch `main`); this branch (`rust`)
+contains the new implementation.
 
 The app can store connections (metadata in JSON, passwords only in the OS
 keyring), connect, edit SQL with CodeMirror (folding, bookmarks, autocomplete),

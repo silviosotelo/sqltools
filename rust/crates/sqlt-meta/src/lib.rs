@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! First slice of the SQLTools MetaDictionary port: table and trigger DDL in
-//! the same layout as the Windows C++ implementation.
+//! SQLTools MetaDictionary port (incremental): table, index, constraint,
+//! trigger, comment and grant DDL with the Windows C++ layout.
 //!
-//! Golden source: `tests/meta_test.cpp`. The full Loader/MetaObjects port is
-//! incremental; this covers CREATE TABLE columns/storage and trigger headers.
+//! Golden source: `tests/meta_test.cpp` plus the formatting rules in
+//! `src/MetaDictionary/MetaObjects.cpp`.
 
 pub mod loader;
 
@@ -12,6 +12,11 @@ pub struct WriteSettings {
     pub generate_prompts: bool,
     pub storage_clause: bool,
     pub lower_db_name: bool,
+    pub comments: bool,
+    pub grants: bool,
+    pub indexes: bool,
+    pub constraints: bool,
+    pub triggers: bool,
 }
 
 impl Default for WriteSettings {
@@ -20,6 +25,11 @@ impl Default for WriteSettings {
             generate_prompts: false,
             storage_clause: true,
             lower_db_name: true,
+            comments: true,
+            grants: true,
+            indexes: true,
+            constraints: true,
+            triggers: true,
         }
     }
 }
@@ -33,6 +43,7 @@ pub struct TabColumn {
     pub scale: i64,
     pub nullable: bool,
     pub data_default: String,
+    pub comments: Option<String>,
 }
 
 impl TabColumn {
@@ -45,8 +56,37 @@ impl TabColumn {
             scale: 0,
             nullable: true,
             data_default: String::new(),
+            comments: None,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Index {
+    pub name: String,
+    pub unique: bool,
+    pub bitmap: bool,
+    pub columns: Vec<String>,
+    pub tablespace: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Constraint {
+    pub name: String,
+    /// Oracle constraint type: C, P, U or R.
+    pub kind: char,
+    pub columns: Vec<String>,
+    pub condition: Option<String>,
+    pub ref_table: Option<String>,
+    pub ref_columns: Vec<String>,
+    pub delete_rule: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Grant {
+    pub grantee: String,
+    pub privileges: Vec<String>,
+    pub grantable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,6 +96,11 @@ pub struct Table {
     pub columns: Vec<TabColumn>,
     pub tablespace: Option<String>,
     pub next_extent: Option<i64>,
+    pub comments: Option<String>,
+    pub indexes: Vec<Index>,
+    pub constraints: Vec<Constraint>,
+    pub triggers: Vec<Trigger>,
+    pub grants: Vec<Grant>,
 }
 
 impl Table {
@@ -66,10 +111,15 @@ impl Table {
             columns: Vec::new(),
             tablespace: None,
             next_extent: None,
+            comments: None,
+            indexes: Vec::new(),
+            constraints: Vec::new(),
+            triggers: Vec::new(),
+            grants: Vec::new(),
         }
     }
 
-    fn display_name(name: &str, lower: bool) -> String {
+    pub(crate) fn display_name(name: &str, lower: bool) -> String {
         if name.starts_with('"') && name.ends_with('"') {
             name.to_string()
         } else if lower {
@@ -175,6 +225,209 @@ impl Table {
         out.push_str("/\n\n");
         out
     }
+
+    fn write_comments(&self, settings: &WriteSettings) -> String {
+        let table = Table::display_name(&self.name, settings.lower_db_name);
+        let lower = settings.lower_db_name;
+        let mut out = String::new();
+        if let Some(comment) = &self.comments {
+            out.push_str(&format!(
+                "COMMENT ON TABLE {table} IS {};\n\n",
+                quote_sql(comment)
+            ));
+        }
+        for column in &self.columns {
+            if let Some(comment) = &column.comments {
+                out.push_str(&format!(
+                    "COMMENT ON COLUMN {table}.{} IS {};\n",
+                    Table::display_name(&column.name, lower),
+                    quote_sql(comment)
+                ));
+            }
+        }
+        if self.columns.iter().any(|column| column.comments.is_some()) {
+            out.push('\n');
+        }
+        out
+    }
+
+    fn write_grants(&self, settings: &WriteSettings) -> String {
+        let table = Table::display_name(&self.name, settings.lower_db_name);
+        let mut out = String::new();
+        for grant in &self.grants {
+            let mut privileges = grant.privileges.clone();
+            privileges.sort();
+            out.push_str(&format!(
+                "GRANT {} ON {table} TO {}{};\n",
+                privileges.join(", "),
+                Table::display_name(&grant.grantee, settings.lower_db_name),
+                if grant.grantable {
+                    " WITH GRANT OPTION"
+                } else {
+                    ""
+                }
+            ));
+        }
+        out
+    }
+
+    pub fn write_full(&self, settings: &WriteSettings) -> String {
+        let mut out = String::new();
+        out.push_str(&self.write_definition(settings));
+        if settings.indexes {
+            for index in &self.indexes {
+                out.push_str(&index.write(self, settings));
+            }
+        }
+        if settings.constraints {
+            for kind in ['C', 'P', 'U', 'R'] {
+                for constraint in self.constraints.iter().filter(|c| c.kind == kind) {
+                    out.push_str(&constraint.write(self, settings));
+                }
+            }
+        }
+        if settings.triggers {
+            for trigger in &self.triggers {
+                out.push_str(&trigger.write(settings));
+            }
+        }
+        if settings.comments {
+            out.push_str(&self.write_comments(settings));
+        }
+        if settings.grants {
+            out.push_str(&self.write_grants(settings));
+        }
+        out
+    }
+}
+
+fn quote_sql(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "''"))
+}
+
+impl Index {
+    pub fn write(&self, table: &Table, settings: &WriteSettings) -> String {
+        let lower = settings.lower_db_name;
+        let kind = if self.bitmap {
+            "BITMAP "
+        } else if self.unique {
+            "UNIQUE "
+        } else {
+            ""
+        };
+        let mut out = format!(
+            "CREATE {kind}INDEX {}\n  ON {} (\n",
+            Table::display_name(&self.name, lower),
+            Table::display_name(&table.name, lower)
+        );
+        for (index, column) in self.columns.iter().enumerate() {
+            out.push_str(&format!(
+                "    {}{}\n",
+                Table::display_name(column, lower),
+                if index + 1 < self.columns.len() {
+                    ","
+                } else {
+                    ""
+                }
+            ));
+        }
+        out.push_str("  )\n");
+        if let Some(tablespace) = &self.tablespace {
+            out.push_str(&format!(
+                "  TABLESPACE {}\n",
+                Table::display_name(tablespace, lower)
+            ));
+        }
+        out.push_str("/\n\n");
+        out
+    }
+}
+
+impl Constraint {
+    fn kind_text(&self) -> &'static str {
+        match self.kind {
+            'P' => "PRIMARY KEY",
+            'U' => "UNIQUE",
+            'R' => "FOREIGN KEY",
+            _ => "CHECK",
+        }
+    }
+
+    pub fn write(&self, table: &Table, settings: &WriteSettings) -> String {
+        let lower = settings.lower_db_name;
+        let mut out = format!(
+            "ALTER TABLE {}\n  ADD CONSTRAINT {} {} (\n",
+            Table::display_name(&table.name, lower),
+            Table::display_name(&self.name, lower),
+            self.kind_text()
+        );
+        if self.kind == 'C' {
+            if let Some(condition) = &self.condition {
+                out.push_str(&format!("    {condition}\n"));
+            }
+        } else {
+            for (index, column) in self.columns.iter().enumerate() {
+                out.push_str(&format!(
+                    "    {}{}\n",
+                    Table::display_name(column, lower),
+                    if index + 1 < self.columns.len() {
+                        ","
+                    } else {
+                        ""
+                    }
+                ));
+            }
+        }
+        if self.kind == 'R' {
+            if let Some(ref_table) = &self.ref_table {
+                out.push_str(&format!(
+                    "  ) REFERENCES {} (\n",
+                    Table::display_name(ref_table, lower)
+                ));
+                for (index, column) in self.ref_columns.iter().enumerate() {
+                    out.push_str(&format!(
+                        "    {}{}\n",
+                        Table::display_name(column, lower),
+                        if index + 1 < self.ref_columns.len() {
+                            ","
+                        } else {
+                            ""
+                        }
+                    ));
+                }
+                out.push_str("  )");
+                if let Some(rule) = &self.delete_rule {
+                    if rule == "CASCADE" || rule == "SET NULL" {
+                        out.push_str(&format!(" ON DELETE {rule}"));
+                    }
+                }
+                out.push('\n');
+            }
+        } else {
+            out.push_str("  )\n");
+        }
+        out.push_str("/\n\n");
+        out
+    }
+}
+
+impl Grant {
+    pub fn write(&self, table: &Table, settings: &WriteSettings) -> String {
+        let lower = settings.lower_db_name;
+        let mut privileges = self.privileges.clone();
+        privileges.sort();
+        format!(
+            "GRANT {} ON {} TO {}{};\n",
+            privileges.join(", "),
+            Table::display_name(&table.name, lower),
+            Table::display_name(&self.grantee, lower),
+            if self.grantable {
+                " WITH GRANT OPTION"
+            } else {
+                ""
+            }
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -220,7 +473,7 @@ impl Trigger {
             out.push('\n');
         }
         out.push_str(&self.trigger_body);
-        out.push('\n');
+        out.push_str("\n/\n\n");
         out
     }
 }

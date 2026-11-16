@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Ported from tests/meta_test.cpp. The strings are the Windows SQLTools output.
+// Ported from tests/meta_test.cpp plus formatting rules from MetaObjects.cpp.
 
-use sqlt_meta::{TabColumn, Table, Trigger, WriteSettings};
+use sqlt_meta::{Constraint, Grant, Index, TabColumn, Table, Trigger, WriteSettings};
 
 fn column(
     name: &str,
@@ -20,6 +20,7 @@ fn column(
         scale,
         nullable,
         data_default: data_default.to_string(),
+        comments: None,
     }
 }
 
@@ -42,6 +43,7 @@ fn settings(storage: bool) -> WriteSettings {
         generate_prompts: false,
         storage_clause: storage,
         lower_db_name: true,
+        ..WriteSettings::default()
     }
 }
 
@@ -80,4 +82,43 @@ fn trigger_header_matches_windows() {
         header,
         "CREATE OR REPLACE TRIGGER cliente_desp_trig\nAFTER INSERT OR DELETE OR UPDATE ON cliente\nREFERENCING NEW AS NEW OLD AS OLD\n"
     );
+}
+
+#[test]
+fn indexes_constraints_comments_grants() {
+    let mut table = table();
+    table.comments = Some("Tabla de clientes".to_string());
+    table.columns[1].comments = Some("Cédula".to_string());
+    table.indexes.push(Index {
+        name: "IDX_CLIENTE_CI".to_string(),
+        unique: true,
+        bitmap: false,
+        columns: vec!["CI".to_string()],
+        tablespace: None,
+    });
+    table.constraints.push(Constraint {
+        name: "PK_CLIENTE".to_string(),
+        kind: 'P',
+        columns: vec!["ID_CLIENTE".to_string()],
+        condition: None,
+        ref_table: None,
+        ref_columns: Vec::new(),
+        delete_rule: None,
+    });
+    table.grants.push(Grant {
+        grantee: "REPORTE".to_string(),
+        privileges: vec!["SELECT".to_string(), "UPDATE".to_string()],
+        grantable: false,
+    });
+
+    let output = table.write_full(&settings(false));
+    assert!(
+        output.contains("CREATE UNIQUE INDEX idx_cliente_ci\n  ON cliente (\n    ci\n  )\n/\n\n")
+    );
+    assert!(output.contains(
+        "ALTER TABLE cliente\n  ADD CONSTRAINT pk_cliente PRIMARY KEY (\n    id_cliente\n  )\n/\n\n"
+    ));
+    assert!(output.contains("COMMENT ON TABLE cliente IS 'Tabla de clientes';\n\n"));
+    assert!(output.contains("COMMENT ON COLUMN cliente.ci IS 'Cédula';\n"));
+    assert!(output.contains("GRANT SELECT, UPDATE ON cliente TO reporte;\n"));
 }
