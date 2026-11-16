@@ -1169,6 +1169,12 @@ export default function App() {
       case "Edit.Ruler":
         editorRef.current?.toggleRuler();
         break;
+      case "Edit.VisibleSpaces":
+        editorRef.current?.toggleVisibleSpaces();
+        break;
+      case "Edit.IndentGuide":
+        editorRef.current?.toggleIndentGuides();
+        break;
       case "Workspace.SaveQuick":
         void saveWorkspace();
         break;

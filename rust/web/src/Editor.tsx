@@ -34,12 +34,22 @@ import {
   setSearchQuery,
 } from "@codemirror/search";
 import { sql, StandardSQL } from "@codemirror/lang-sql";
-import { EditorState, RangeSet, StateEffect, StateField } from "@codemirror/state";
 import {
+  Compartment,
+  EditorState,
+  RangeSet,
+  StateEffect,
+  StateField,
+} from "@codemirror/state";
+import {
+  Decoration,
   EditorView,
   GutterMarker,
+  ViewPlugin,
+  WidgetType,
   gutter,
   keymap,
+  type DecorationSet,
   type ViewUpdate,
 } from "@codemirror/view";
 import { basicSetup } from "codemirror";
@@ -129,6 +139,119 @@ const bookmarkGutter = gutter({
   },
 });
 
+class SpaceMarker extends WidgetType {
+  constructor(readonly tab: boolean) {
+    super();
+  }
+  eq(other: SpaceMarker) {
+    return other.tab === this.tab;
+  }
+  toDOM() {
+    const marker = document.createElement("span");
+    marker.className = this.tab ? "cm-tab" : "cm-space";
+    marker.textContent = this.tab ? "→" : "·";
+    return marker;
+  }
+  ignoreEvent() {
+    return true;
+  }
+}
+
+class IndentGuide extends WidgetType {
+  toDOM() {
+    const guide = document.createElement("span");
+    guide.className = "cm-indent-guide";
+    return guide;
+  }
+  ignoreEvent() {
+    return true;
+  }
+}
+
+const spaceMarker = new SpaceMarker(false);
+const tabMarker = new SpaceMarker(true);
+const guideMarker = new IndentGuide();
+
+function buildWhitespaceDecorations(view: EditorView): DecorationSet {
+  const ranges: ReturnType<Decoration["range"]>[] = [];
+  for (const { from, to } of view.visibleRanges) {
+    const text = view.state.sliceDoc(from, to);
+    for (let index = 0; index < text.length; index += 1) {
+      const char = text[index];
+      if (char === " " || char === "\t") {
+        ranges.push(
+          Decoration.replace({
+            widget: char === "\t" ? tabMarker : spaceMarker,
+          }).range(from + index, from + index + 1),
+        );
+      }
+    }
+  }
+  return Decoration.set(ranges, true);
+}
+
+const visibleSpaces = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+    constructor(view: EditorView) {
+      this.decorations = buildWhitespaceDecorations(view);
+    }
+    update(update: ViewUpdate) {
+      if (update.docChanged || update.viewportChanged) {
+        this.decorations = buildWhitespaceDecorations(update.view);
+      }
+    }
+  },
+  { decorations: (plugin) => plugin.decorations },
+);
+
+function buildIndentGuides(view: EditorView): DecorationSet {
+  const ranges: ReturnType<Decoration["range"]>[] = [];
+  const unit = getIndentUnit(view.state);
+  for (const { from, to } of view.visibleRanges) {
+    let position = from;
+    while (position <= to) {
+      const line = view.state.doc.lineAt(position);
+      let spaces = 0;
+      while (spaces < line.text.length && line.text[spaces] === " ") spaces += 1;
+      for (let level = unit; level <= spaces; level += unit) {
+        ranges.push(
+          Decoration.widget({ widget: guideMarker, side: 1 }).range(
+            line.from + level,
+          ),
+        );
+      }
+      if (line.to + 1 > to) break;
+      position = line.to + 1;
+    }
+  }
+  return Decoration.set(ranges, true);
+}
+
+const indentGuides = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+    constructor(view: EditorView) {
+      this.decorations = buildIndentGuides(view);
+    }
+    update(update: ViewUpdate) {
+      if (update.docChanged || update.viewportChanged) {
+        this.decorations = buildIndentGuides(update.view);
+      }
+    }
+  },
+  { decorations: (plugin) => plugin.decorations },
+);
+
+type DisplayFlags = { spaces: boolean; guides: boolean };
+
+function displayExtensions(flags: DisplayFlags) {
+  return [
+    ...(flags.spaces ? [visibleSpaces] : []),
+    ...(flags.guides ? [indentGuides] : []),
+  ];
+}
+
 export type EditorHandle = {
   undo: () => void;
   redo: () => void;
@@ -197,7 +320,14 @@ export type EditorHandle = {
   foldToLevel: (level: number) => void;
   toggleSyntaxGutter: () => void;
   toggleRuler: () => void;
+  toggleVisibleSpaces: () => void;
+  toggleIndentGuides: () => void;
   wordAtCursor: () => string;
+};
+
+type DisplayState = {
+  flags: DisplayFlags;
+  compartment: Compartment;
 };
 
 const keywords = [
@@ -297,6 +427,10 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
 }: Props, ref) {
   const host = useRef<HTMLDivElement | null>(null);
   const view = useRef<EditorView | null>(null);
+  const display = useRef<DisplayState>({
+    flags: { spaces: false, guides: false },
+    compartment: new Compartment(),
+  });
   const callbacks = useRef({ onChange, onExecute, tables, loadColumns });
   callbacks.current = { onChange, onExecute, tables, loadColumns };
 
@@ -784,6 +918,28 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
       if (!editor) return;
       editor.dom.classList.toggle("show-ruler");
     },
+    toggleVisibleSpaces: () => {
+      const editor = view.current;
+      if (!editor) return;
+      const current = display.current;
+      current.flags = { ...current.flags, spaces: !current.flags.spaces };
+      editor.dispatch({
+        effects: current.compartment.reconfigure(
+          displayExtensions(current.flags),
+        ),
+      });
+    },
+    toggleIndentGuides: () => {
+      const editor = view.current;
+      if (!editor) return;
+      const current = display.current;
+      current.flags = { ...current.flags, guides: !current.flags.guides };
+      editor.dispatch({
+        effects: current.compartment.reconfigure(
+          displayExtensions(current.flags),
+        ),
+      });
+    },
     wordAtCursor: () => {
       const editor = view.current;
       if (!editor) return "";
@@ -809,6 +965,9 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
           bookmarkField,
           slotField,
           bookmarkGutter,
+          display.current.compartment.of(
+            displayExtensions(display.current.flags),
+          ),
           sql({ dialect: StandardSQL, upperCaseKeywords: true }),
           autocompletion({
             override: [

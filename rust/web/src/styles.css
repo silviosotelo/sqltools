@@ -777,3 +777,24 @@ tr.spacer td {
     transparent 80ch
   );
 }
+
+.cm-space {
+  display: inline-block;
+  width: 1ch;
+  text-align: center;
+  color: #c0c0c0;
+}
+
+.cm-tab {
+  display: inline-block;
+  width: 1ch;
+  color: #b0b0b0;
+}
+
+.cm-indent-guide {
+  display: inline-block;
+  width: 0;
+  height: 1.35em;
+  border-left: 1px solid #e2e2e2;
+  vertical-align: top;
+}
