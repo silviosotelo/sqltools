@@ -77,8 +77,11 @@ where
             Ok(rows) => rows,
             Err(error) => {
                 // Discard the failed statement's output so it cannot leak into
-                // the next execution; draining is never fatal.
-                let _ = session.dbms_output_lines(1000);
+                // the next execution; draining is never fatal. A closed session
+                // is not drained: the disconnect would wait for nothing.
+                if !session.is_closed() {
+                    let _ = session.dbms_output_lines(1000);
+                }
                 return Err(error);
             }
         };
@@ -119,6 +122,11 @@ where
             if want == 0 {
                 break;
             }
+            // A Batch callback can close the session; do not ask for another
+            // batch (or report success) on a closed connection.
+            if session.is_closed() {
+                return Err("The connection was closed".to_string());
+            }
             let batch = handle.next_batch(want).map_err(|e| e.to_string())?;
             if batch.rows.is_empty() {
                 break;
@@ -134,10 +142,13 @@ where
         statement_rows = affected as usize;
     }
     // Draining output is auxiliary: never turn a successful statement into an
-    // error because the DBMS_OUTPUT buffer could not be read.
-    let lines = session.dbms_output_lines(1000).unwrap_or_default();
-    if !lines.is_empty() {
-        emit(ScriptEvent::Output(lines));
+    // error because the DBMS_OUTPUT buffer could not be read. Skip it when the
+    // session was closed, so the close does not wait on a full drain.
+    if !session.is_closed() {
+        let lines = session.dbms_output_lines(1000).unwrap_or_default();
+        if !lines.is_empty() {
+            emit(ScriptEvent::Output(lines));
+        }
     }
     Ok(statement_rows)
 }

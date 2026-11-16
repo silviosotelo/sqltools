@@ -459,3 +459,48 @@ fn closing_between_statements_stops_the_script() {
     assert_eq!(outputs, vec!["first".to_string()], "{outputs:?}");
     let _ = fs::remove_file(path);
 }
+
+#[test]
+#[ignore = "requires a real Oracle connection"]
+fn closing_after_the_first_batch_stops_the_select() {
+    use sqlt_app::script::{run_script, ScriptEvent};
+    use std::sync::Arc;
+
+    let user = std::env::var("SQLT_USER").expect("SQLT_USER");
+    let password = std::env::var("SQLT_PASS").expect("SQLT_PASS");
+    let alias = std::env::var("SQLT_ALIAS").expect("SQLT_ALIAS");
+    let path = std::env::temp_dir().join(format!("sqlt-app-batch-{}.json", std::process::id()));
+    let _ = fs::remove_file(&path);
+    let mut store = ConnectionStore::new(path.clone());
+    let mut config = ConnectionConfig::new("Batch", &user);
+    config.alias = Some(alias);
+    config.tns_admin = std::env::var("SQLT_TNS_ADMIN").ok();
+    config.oci_dir = std::env::var("SQLT_OCI_DIR").ok();
+    store.upsert(config.clone()).unwrap();
+    store.set_password(&config.id, &password).unwrap();
+    let state = AppState::with_store(store);
+    state.connect(&config.id).expect("connect");
+    let session = state.session(&config.id).expect("session");
+
+    let closing = Arc::clone(&session);
+    let mut batches = 0usize;
+    let result = run_script(
+        &session,
+        "select object_name from all_objects where rownum <= 2000",
+        state.query_options(&config.id),
+        0,
+        None,
+        |event| {
+            if let ScriptEvent::Batch(_) = event {
+                batches += 1;
+                if batches == 1 {
+                    closing.close();
+                }
+            }
+        },
+    );
+    let error = result.expect_err("a closed session must stop the fetch");
+    assert!(error.contains("closed"), "{error}");
+    assert_eq!(batches, 1, "no further batch may be fetched after closing");
+    let _ = fs::remove_file(path);
+}
