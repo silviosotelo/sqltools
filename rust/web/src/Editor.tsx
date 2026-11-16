@@ -370,6 +370,9 @@ export type EditorHandle = {
   toggleVisibleSpaces: () => void;
   toggleIndentGuides: () => void;
   setSelectionMode: (mode: "column" | "stream" | "toggle") => boolean;
+  justifyColumn: (mode: "left" | "right" | "center") => void;
+  insertColumn: () => void;
+  insertColumnNumbers: () => void;
   wordAtCursor: () => string;
 };
 
@@ -1004,6 +1007,71 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
         ),
       });
       return current.rectangular;
+    },
+    justifyColumn: (mode) => {
+      const editor = view.current;
+      if (!editor) return;
+      const selection = editor.state.selection.main;
+      const start = editor.state.doc.lineAt(selection.from).number;
+      const end = editor.state.doc.lineAt(selection.to).number;
+      const lines: string[] = [];
+      for (let number = start; number <= end; number += 1) {
+        lines.push(editor.state.doc.line(number).text);
+      }
+      const trimmed = lines.map((line) => line.trim());
+      const width = Math.max(...trimmed.map((line) => line.length));
+      const justified = trimmed.map((line) => {
+        const pad = width - line.length;
+        if (mode === "right") return " ".repeat(pad) + line;
+        if (mode === "center") {
+          const left = Math.floor(pad / 2);
+          return " ".repeat(left) + line + " ".repeat(pad - left);
+        }
+        return line;
+      });
+      editor.dispatch({
+        changes: {
+          from: editor.state.doc.line(start).from,
+          to: editor.state.doc.line(end).to,
+          insert: justified.join("\n"),
+        },
+      });
+    },
+    insertColumn: () => {
+      const editor = view.current;
+      if (!editor) return;
+      const selection = editor.state.selection.main;
+      const start = editor.state.doc.lineAt(selection.from).number;
+      const end = editor.state.doc.lineAt(selection.to).number;
+      const line = editor.state.doc.lineAt(selection.head);
+      const column = selection.head - line.from;
+      const changes = [];
+      for (let number = start; number <= end; number += 1) {
+        const target = editor.state.doc.line(number);
+        changes.push({
+          from: target.from + Math.min(column, target.length),
+          insert: " ",
+        });
+      }
+      editor.dispatch({ changes });
+    },
+    insertColumnNumbers: () => {
+      const editor = view.current;
+      if (!editor) return;
+      const selection = editor.state.selection.main;
+      const start = editor.state.doc.lineAt(selection.from).number;
+      const end = editor.state.doc.lineAt(selection.to).number;
+      const line = editor.state.doc.lineAt(selection.head);
+      const column = selection.head - line.from;
+      const changes = [];
+      for (let number = start; number <= end; number += 1) {
+        const target = editor.state.doc.line(number);
+        changes.push({
+          from: target.from + Math.min(column, target.length),
+          insert: `${number - start + 1} `,
+        });
+      }
+      editor.dispatch({ changes });
     },
     wordAtCursor: () => {
       const editor = view.current;

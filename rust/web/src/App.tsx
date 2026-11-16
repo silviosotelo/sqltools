@@ -1228,6 +1228,21 @@ export default function App() {
       case "Edit.VisibleSpaces":
         editorRef.current?.toggleVisibleSpaces();
         break;
+      case "Edit.ColumnLeftJustify":
+        editorRef.current?.justifyColumn("left");
+        break;
+      case "Edit.ColumnRightJustify":
+        editorRef.current?.justifyColumn("right");
+        break;
+      case "Edit.ColumnCenterJustify":
+        editorRef.current?.justifyColumn("center");
+        break;
+      case "Edit.ColumnInsert":
+        editorRef.current?.insertColumn();
+        break;
+      case "Edit.ColumnInsertNumber":
+        editorRef.current?.insertColumnNumbers();
+        break;
       case "Edit.ColumnSelection":
       case "Edit.StreamSelection":
       case "Edit.ToggleSelectionMode": {
