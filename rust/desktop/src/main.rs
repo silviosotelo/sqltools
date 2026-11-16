@@ -77,14 +77,19 @@ fn disconnect(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String>
 }
 
 #[tauri::command]
-fn enable_dbms_output(
+async fn enable_dbms_output(
     state: State<'_, Arc<AppState>>,
     connection_id: String,
 ) -> Result<(), String> {
-    state
-        .session(&connection_id)?
-        .enable_dbms_output()
-        .map_err(|e| e.to_string())
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let session = state.session(&connection_id)?;
+        // Wait for a running script: the buffer belongs to the whole session.
+        let _guard = session.lock_execution();
+        session.enable_dbms_output().map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -154,13 +159,29 @@ fn toggle_read_only(state: State<'_, Arc<AppState>>, id: String) -> Result<bool,
 }
 
 #[tauri::command]
-fn commit(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
-    state.session(&id)?.commit().map_err(|e| e.to_string())
+async fn commit(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let session = state.session(&id)?;
+        // Commit waits for the running statement so it cannot commit halfway
+        // through a script.
+        let _guard = session.lock_execution();
+        session.commit().map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn rollback(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
-    state.session(&id)?.rollback().map_err(|e| e.to_string())
+async fn rollback(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let session = state.session(&id)?;
+        let _guard = session.lock_execution();
+        session.rollback().map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

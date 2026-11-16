@@ -1462,7 +1462,7 @@ export default function App() {
             title={t("commit")}
             aria-label={t("commit")}
             onClick={() => void commit()}
-            disabled={!isConnected}
+            disabled={!isConnected || running}
           >
             <Icon name="commit" />
           </button>
@@ -1471,7 +1471,7 @@ export default function App() {
             title={t("rollback")}
             aria-label={t("rollback")}
             onClick={() => void rollback()}
-            disabled={!isConnected}
+            disabled={!isConnected || running}
           >
             <Icon name="rollback" />
           </button>
