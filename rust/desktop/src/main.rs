@@ -398,6 +398,35 @@ fn save_workspace(workspace: sqlt_app::Workspace) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn save_workspace_to(path: String, workspace: sqlt_app::Workspace) -> Result<(), String> {
+    sqlt_app::workspace::save_to(std::path::Path::new(&path), &workspace).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn pick_workspace_save_path(
+    app: tauri::AppHandle,
+    suggested: Option<String>,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (sender, mut receiver) = tauri::async_runtime::channel(1);
+    let mut dialog = app.dialog().file().add_filter("Workspace", &["json"]);
+    let name = suggested
+        .as_deref()
+        .and_then(|value| value.rsplit(['\\', '/']).next())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("workspace.json");
+    dialog = dialog.set_file_name(name);
+    dialog.save_file(move |path| {
+        let _ = sender.try_send(path);
+    });
+    let chosen = receiver
+        .recv()
+        .await
+        .ok_or_else(|| "File dialog closed unexpectedly".to_string())?;
+    Ok(chosen.and_then(dialog_path))
+}
+
+#[tauri::command]
 fn load_workspace() -> Result<sqlt_app::Workspace, String> {
     sqlt_app::workspace::load_default().map_err(|e| e.to_string())
 }
@@ -539,6 +568,8 @@ fn main() {
             pick_sql_file,
             pick_sql_save_path,
             save_workspace,
+            save_workspace_to,
+            pick_workspace_save_path,
             load_workspace,
             migrate_legacy_connections,
             export_csv,

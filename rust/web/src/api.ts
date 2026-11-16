@@ -88,6 +88,10 @@ export const api = {
     invoke<void>("write_sql_file", { path, text, eol }),
   saveWorkspace: (workspace: Workspace) =>
     invoke<void>("save_workspace", { workspace }),
+  saveWorkspaceTo: (path: string, workspace: Workspace) =>
+    invoke<void>("save_workspace_to", { path, workspace }),
+  pickWorkspaceSavePath: (suggested: string | null) =>
+    invoke<string | null>("pick_workspace_save_path", { suggested }),
   loadWorkspace: () => invoke<Workspace>("load_workspace"),
   migrateLegacy: (path: string) =>
     invoke<number>("migrate_legacy_connections", { path }),

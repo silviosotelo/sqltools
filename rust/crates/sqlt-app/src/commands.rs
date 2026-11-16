@@ -65,6 +65,7 @@ const IMPLEMENTED: &[&str] = &[
     "Edit.VisibleSpaces",
     "Edit.IndentGuide",
     "Workspace.SaveQuick",
+    "Workspace.SaveAs",
     "Workspace.OpenAutosaved",
     "Workspace.Copy",
     "Workspace.Paste",
@@ -124,6 +125,7 @@ const IMPLEMENTED: &[&str] = &[
     "Script.LoadDDLWithDbmsMetadata",
     "Script.FindObject",
     "View.StatusBar",
+    "Help.AboutOpenEditor",
     "View.History",
     "View.Properties",
     "Script.QuickCount",
@@ -133,6 +135,7 @@ const IMPLEMENTED: &[&str] = &[
     "File.SaveAs",
     "File.SaveAll",
     "File.Reload",
+    "File.CopyFileLocation",
     "File.Close",
     "File.CloseAll",
     "File.New",
@@ -229,7 +232,7 @@ mod tests {
                 .iter()
                 .filter(|command| command.implemented)
                 .count(),
-            134
+            137
         );
     }
 }

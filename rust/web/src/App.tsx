@@ -813,6 +813,34 @@ export default function App() {
     }
   };
 
+  const saveWorkspaceAs = async () => {
+    try {
+      const path = await api.pickWorkspaceSavePath("workspace.json");
+      if (!path) return;
+      await api.saveWorkspaceTo(path, {
+        version: 1,
+        files: [{ name: "query.sql", sql }],
+        active: 0,
+      });
+      setStatus(path);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const copyFileLocation = async () => {
+    if (!filePath) {
+      setStatus(t("noFile"));
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(filePath);
+      setStatus(filePath);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
   const loadWorkspace = async () => {
     if (!confirmDiscard()) return;
     try {
@@ -1177,6 +1205,15 @@ export default function App() {
         break;
       case "Workspace.SaveQuick":
         void saveWorkspace();
+        break;
+      case "Workspace.SaveAs":
+        void saveWorkspaceAs();
+        break;
+      case "File.CopyFileLocation":
+        void copyFileLocation();
+        break;
+      case "Help.AboutOpenEditor":
+        window.alert(`SQLTools 0.1.0\n${t("app.subtitle")}`);
         break;
       case "Workspace.OpenAutosaved":
         void loadWorkspace();
