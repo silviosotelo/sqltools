@@ -488,6 +488,20 @@ fn map_value(
             let interval: IntervalYM = value.get()?;
             Ok(Value::Text(interval.to_string()))
         }
+        OracleType::Object(object_type) => {
+            // Oracle objects and collections share `OracleType::Object`; both
+            // implement `Display` as `SCHEMA.TYPE(attr, ...)`.
+            if object_type.is_collection() {
+                let collection: oracle::sql_type::Collection = value.get()?;
+                Ok(Value::Text(collection.to_string()))
+            } else {
+                let object: oracle::sql_type::Object = value.get()?;
+                Ok(Value::Text(object.to_string()))
+            }
+        }
+        // A REF CURSOR is a child statement; the grid has no nested result
+        // sets, so it is shown as a placeholder instead of failing the query.
+        OracleType::RefCursor => Ok(Value::Text("(REF CURSOR)".to_string())),
         OracleType::Raw(_) | OracleType::LongRaw => Ok(Value::Binary(value.get::<Vec<u8>>()?)),
         OracleType::BLOB => {
             if lob_locator {

@@ -553,3 +553,50 @@ fn execution_lock_serializes_scripts() {
     assert!(receiver.recv_timeout(Duration::from_secs(5)).unwrap());
     handle.join().unwrap();
 }
+
+#[test]
+fn collections_and_objects_map_to_text() {
+    let Some(spec) = spec() else { return };
+    let session = open(&spec);
+
+    let mut collection = session
+        .query(
+            "select sys.odcivarchar2list('a','b') from dual",
+            QueryOptions::default(),
+        )
+        .expect("query collection");
+    let batch = collection.next_batch(10).expect("fetch collection");
+    match &batch.rows[0][0] {
+        Value::Text(text) => {
+            assert!(text.starts_with("SYS.ODCIVARCHAR2LIST"), "{text}");
+            assert!(text.contains("\"a\"") && text.contains("\"b\""), "{text}");
+        }
+        other => panic!("unexpected collection value: {other:?}"),
+    }
+
+    let mut object = session
+        .query(
+            "select sys.anydata.convertNumber(42) from dual",
+            QueryOptions::default(),
+        )
+        .expect("query object");
+    let batch = object.next_batch(10).expect("fetch object");
+    match &batch.rows[0][0] {
+        Value::Text(text) => assert!(text.starts_with("SYS.ANYDATA"), "{text}"),
+        other => panic!("unexpected object value: {other:?}"),
+    }
+}
+
+#[test]
+fn ref_cursor_maps_to_a_placeholder() {
+    let Some(spec) = spec() else { return };
+    let session = open(&spec);
+    let mut query = session
+        .query(
+            "select cursor(select 1 from dual) from dual",
+            QueryOptions::default(),
+        )
+        .expect("query ref cursor");
+    let batch = query.next_batch(10).expect("fetch ref cursor");
+    assert_eq!(batch.rows[0][0], Value::Text("(REF CURSOR)".to_string()));
+}
