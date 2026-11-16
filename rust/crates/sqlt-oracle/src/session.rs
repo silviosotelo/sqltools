@@ -453,6 +453,20 @@ fn is_lob_type(oratype: &OracleType) -> bool {
     )
 }
 
+/// Nested objects/collections are rendered by the crate's `Display` through a
+/// full `to_string()` of the inner value before the budget writer sees it, so
+/// they must be summarized up front instead.
+fn needs_summary_type(oratype: &OracleType) -> bool {
+    is_lob_type(oratype) || matches!(oratype, OracleType::Object(_))
+}
+
+fn collection_summary(object_type: &oracle::sql_type::ObjectType, size: i32) -> String {
+    match size {
+        1 => format!("{object_type}(1 element)"),
+        _ => format!("{object_type}({size} elements)"),
+    }
+}
+
 fn map_value(
     value: &oracle::SqlValue,
     info: &oracle::ColumnInfo,
@@ -543,13 +557,16 @@ fn map_value(
             if object_type.is_collection() {
                 let collection: oracle::sql_type::Collection = value.get()?;
                 let size = collection.size()?;
-                let lob_elements = object_type.element_oracle_type().is_some_and(is_lob_type);
-                if size > MAX_COLLECTION_ELEMENTS || lob_elements {
-                    Ok(Value::Text(format!("{object_type}({size} elements)")))
+                let heavy_elements = object_type
+                    .element_oracle_type()
+                    .is_some_and(needs_summary_type);
+                if size > MAX_COLLECTION_ELEMENTS || heavy_elements {
+                    Ok(Value::Text(collection_summary(object_type, size)))
                 } else {
-                    Ok(Value::Text(render_with_budget(&collection).unwrap_or_else(
-                        || format!("{object_type}({size} elements)"),
-                    )))
+                    Ok(Value::Text(
+                        render_with_budget(&collection)
+                            .unwrap_or_else(|| collection_summary(object_type, size)),
+                    ))
                 }
             } else {
                 let object: oracle::sql_type::Object = value.get()?;
@@ -557,7 +574,7 @@ fn map_value(
                     || object_type
                         .attributes()
                         .iter()
-                        .any(|attribute| is_lob_type(attribute.oracle_type()));
+                        .any(|attribute| needs_summary_type(attribute.oracle_type()));
                 if oversized {
                     Ok(Value::Text(format!("{object_type}(...)")))
                 } else {

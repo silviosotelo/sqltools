@@ -634,3 +634,22 @@ fn wide_collections_are_summarized_by_byte_budget() {
         Value::Text("SYS.ODCIVARCHAR2LIST(3 elements)".to_string())
     );
 }
+
+#[test]
+fn nested_objects_are_summarized() {
+    let Some(spec) = spec() else { return };
+    let session = open(&spec);
+    let mut query = session
+        .query(
+            "select sys.odciobjectlist(sys.odciobject('SYS','DUAL')) from dual",
+            QueryOptions::default(),
+        )
+        .expect("query nested object collection");
+    let batch = query
+        .next_batch(10)
+        .expect("fetch nested object collection");
+    assert_eq!(
+        batch.rows[0][0],
+        Value::Text("SYS.ODCIOBJECTLIST(1 element)".to_string())
+    );
+}
