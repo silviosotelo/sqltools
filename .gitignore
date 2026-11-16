@@ -42,3 +42,6 @@ build-arm64/
 
 # Scratch del método de trabajo (ledgers, briefs, reviews)
 /.superpowers/
+
+# Secretos locales de desarrollo (nunca se commitean)
+.env.local
