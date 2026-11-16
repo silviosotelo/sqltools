@@ -66,6 +66,31 @@ impl TabColumn {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PartitionKind {
+    Range,
+    Hash,
+    List,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Partition {
+    pub name: String,
+    /// `ALL_TAB_PARTITIONS.high_value` (LONG), printed verbatim.
+    pub high_value: Option<String>,
+    pub tablespace: Option<String>,
+    pub next_extent: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Partitioning {
+    pub kind: PartitionKind,
+    pub columns: Vec<String>,
+    pub interval: Option<String>,
+    pub partitions: Vec<Partition>,
+    pub row_movement: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TemporaryDuration {
     /// `ON COMMIT PRESERVE ROWS`
     Preserve,
@@ -112,6 +137,8 @@ pub struct Table {
     pub temporary: Option<TemporaryDuration>,
     /// `ALL_TABLES.cache = 'Y'` adds a `CACHE` line after the storage clause.
     pub cache: bool,
+    /// Range/list/hash partitioning (`Table::writePartitions`).
+    pub partitioning: Option<Partitioning>,
     pub comments: Option<String>,
     pub indexes: Vec<Index>,
     pub constraints: Vec<Constraint>,
@@ -129,6 +156,7 @@ impl Table {
             next_extent: None,
             temporary: None,
             cache: false,
+            partitioning: None,
             comments: None,
             indexes: Vec::new(),
             constraints: Vec::new(),
@@ -260,11 +288,114 @@ impl Table {
                 out.push_str("  )\n");
             }
         }
+        if let Some(partitioning) = &self.partitioning {
+            self.write_partitions(&mut out, partitioning, settings);
+        }
         if self.cache {
             out.push_str("  CACHE\n");
         }
         out.push_str("/\n\n");
         out
+    }
+
+    /// Port of `MetaObjects::Table::writePartitions` for range/list/hash.
+    /// `ponytail:` a partition tablespace is printed when it differs from the
+    /// table's tablespace; the original compares it with the owner's default
+    /// segment, which needs a dictionary lookup we do not have here.
+    fn write_partitions(
+        &self,
+        out: &mut String,
+        partitioning: &Partitioning,
+        settings: &WriteSettings,
+    ) {
+        let lower = settings.lower_db_name;
+        let keyword = match partitioning.kind {
+            PartitionKind::Range => "RANGE",
+            PartitionKind::Hash => "HASH",
+            PartitionKind::List => "LIST",
+        };
+        if partitioning.kind == PartitionKind::List {
+            let column = partitioning.columns.first().cloned().unwrap_or_default();
+            out.push_str(&format!(
+                "  PARTITION BY LIST ({})\n",
+                Table::display_name(&column, lower)
+            ));
+        } else {
+            out.push_str(&format!("  PARTITION BY {keyword} (\n"));
+            for (index, column) in partitioning.columns.iter().enumerate() {
+                let comma = if index + 1 < partitioning.columns.len() {
+                    ","
+                } else {
+                    ""
+                };
+                out.push_str(&format!(
+                    "    {}{comma}\n",
+                    Table::display_name(column, lower)
+                ));
+            }
+            out.push_str("  )\n");
+        }
+        if let Some(interval) = &partitioning.interval {
+            out.push_str(&format!("  INTERVAL ({interval})\n"));
+        }
+        out.push_str("  (\n");
+        let max_name = partitioning
+            .partitions
+            .iter()
+            .map(|partition| partition.name.len())
+            .max()
+            .unwrap_or(0);
+        let count = partitioning.partitions.len();
+        for (index, partition) in partitioning.partitions.iter().enumerate() {
+            let mut block = format!(
+                "    PARTITION {}",
+                Table::display_name(&partition.name, lower)
+            );
+            if partitioning.kind != PartitionKind::Hash {
+                let pad = max_name + 1 - partition.name.len();
+                let values = if partitioning.kind == PartitionKind::Range {
+                    "VALUES LESS THAN"
+                } else {
+                    "VALUES"
+                };
+                block.push_str(&" ".repeat(pad));
+                block.push_str(&format!(
+                    "{values} ({})",
+                    partition.high_value.clone().unwrap_or_default()
+                ));
+            }
+            if let Some(tablespace) = &partition.tablespace {
+                let same = self
+                    .tablespace
+                    .as_deref()
+                    .is_some_and(|table| table.eq_ignore_ascii_case(tablespace));
+                if !same {
+                    block.push_str(&format!(
+                        "\n      TABLESPACE {}",
+                        Table::display_name(tablespace, lower)
+                    ));
+                }
+            }
+            if let Some(next) = partition.next_extent {
+                let value = if next % 1024 == 0 {
+                    format!("{} K", next / 1024)
+                } else {
+                    format!("{next}")
+                };
+                block.push_str(&format!(
+                    "\n      STORAGE (\n        NEXT       {value}\n      )"
+                ));
+            }
+            if index + 1 < count {
+                block.push(',');
+            }
+            out.push_str(&block);
+            out.push('\n');
+        }
+        out.push_str("  )\n");
+        if partitioning.row_movement {
+            out.push_str("  ENABLE ROW MOVEMENT\n");
+        }
     }
 
     fn write_comments(&self, settings: &WriteSettings) -> String {

@@ -125,6 +125,101 @@ fn indexes_constraints_comments_grants() {
 }
 
 #[test]
+fn range_partitions_match_metobjects_layout() {
+    use sqlt_meta::{Partition, PartitionKind, Partitioning};
+
+    let mut table = Table::new("APP", "PEDIDOS");
+    table.columns = vec![
+        column("ID", "NUMBER", 22, 10, 0, false, ""),
+        column("FECHA", "DATE", 7, 0, 0, true, ""),
+    ];
+    table.partitioning = Some(Partitioning {
+        kind: PartitionKind::Range,
+        columns: vec!["FECHA".to_string()],
+        interval: None,
+        partitions: vec![
+            Partition {
+                name: "P_2018".to_string(),
+                high_value: Some("TO_DATE('2019-01-01', 'YYYY-MM-DD')".to_string()),
+                tablespace: None,
+                next_extent: None,
+            },
+            Partition {
+                name: "P_MAX".to_string(),
+                high_value: Some("MAXVALUE".to_string()),
+                tablespace: Some("DATA".to_string()),
+                next_extent: Some(1024 * 1024),
+            },
+        ],
+        row_movement: true,
+    });
+    let expected = "CREATE TABLE pedidos (\n  id    NUMBER(10,0) NOT NULL,\n  fecha DATE         NULL\n)\n  PARTITION BY RANGE (\n    fecha\n  )\n  (\n    PARTITION p_2018 VALUES LESS THAN (TO_DATE('2019-01-01', 'YYYY-MM-DD')),\n    PARTITION p_max  VALUES LESS THAN (MAXVALUE)\n      TABLESPACE data\n      STORAGE (\n        NEXT       1024 K\n      )\n  )\n  ENABLE ROW MOVEMENT\n/\n\n";
+    assert_eq!(table.write_definition(&settings(false)), expected);
+}
+
+#[test]
+fn hash_partitions_omit_values() {
+    use sqlt_meta::{Partition, PartitionKind, Partitioning};
+
+    let mut table = Table::new("APP", "HASHED");
+    table.columns = vec![column("ID", "NUMBER", 22, 10, 0, false, "")];
+    table.partitioning = Some(Partitioning {
+        kind: PartitionKind::Hash,
+        columns: vec!["ID".to_string()],
+        interval: None,
+        partitions: vec![
+            Partition {
+                name: "P1".to_string(),
+                high_value: None,
+                tablespace: None,
+                next_extent: None,
+            },
+            Partition {
+                name: "P2".to_string(),
+                high_value: None,
+                tablespace: None,
+                next_extent: None,
+            },
+        ],
+        row_movement: false,
+    });
+    let ddl = table.write_definition(&settings(false));
+    assert!(
+        ddl.contains("  PARTITION BY HASH (\n    id\n  )\n"),
+        "{ddl}"
+    );
+    assert!(ddl.contains("    PARTITION p1,\n"), "{ddl}");
+    assert!(!ddl.contains("VALUES"), "{ddl}");
+    assert!(ddl.ends_with("  )\n/\n\n"), "{ddl}");
+}
+
+#[test]
+fn list_partitions_use_single_key() {
+    use sqlt_meta::{Partition, PartitionKind, Partitioning};
+
+    let mut table = Table::new("APP", "REGIONES");
+    table.columns = vec![column("REGION", "CHAR", 1, 0, 0, false, "")];
+    table.partitioning = Some(Partitioning {
+        kind: PartitionKind::List,
+        columns: vec!["REGION".to_string(), "IGNORED".to_string()],
+        interval: None,
+        partitions: vec![Partition {
+            name: "P_NORTE".to_string(),
+            high_value: Some("'N'".to_string()),
+            tablespace: None,
+            next_extent: None,
+        }],
+        row_movement: false,
+    });
+    let ddl = table.write_definition(&settings(false));
+    assert!(ddl.contains("  PARTITION BY LIST (region)\n"), "{ddl}");
+    assert!(
+        ddl.contains("    PARTITION p_norte VALUES ('N')\n"),
+        "{ddl}"
+    );
+}
+
+#[test]
 fn temporary_table_clause() {
     let mut table = Table::new("APP", "TMP_ROWS");
     table.columns = vec![column("A", "NUMBER", 22, 10, 0, true, "")];

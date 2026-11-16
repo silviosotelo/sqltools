@@ -264,6 +264,89 @@ fn load_grants(
     Ok(())
 }
 
+/// Range/list/hash partitions. Subpartitioned tables and unsupported types
+/// return an error so the caller falls back to `DBMS_METADATA`.
+fn load_partitioning(
+    session: &Session,
+    schema: &str,
+    name: &str,
+    options: QueryOptions,
+    row_movement: bool,
+    table: &mut Table,
+) -> Result<(), String> {
+    use crate::{Partition, PartitionKind, Partitioning};
+
+    let rows = fetch_rows(
+        session,
+        "select partitioning_type, subpartitioning_type, interval \
+         from all_part_tables where owner = :1 and table_name = :2",
+        &[&schema, &name],
+        options,
+    )?;
+    let Some(row) = rows.first() else {
+        return Ok(());
+    };
+    let subpartitioning = cell(row, 1);
+    if !subpartitioning.is_empty() && subpartitioning != "NONE" {
+        return Err(format!(
+            "{schema}.{name} is subpartitioned; falling back to DBMS_METADATA"
+        ));
+    }
+    let kind = match cell(row, 0).as_str() {
+        "RANGE" => PartitionKind::Range,
+        "HASH" => PartitionKind::Hash,
+        "LIST" => PartitionKind::List,
+        other => {
+            return Err(format!(
+            "{schema}.{name} uses unsupported partitioning {other}; falling back to DBMS_METADATA"
+        ))
+        }
+    };
+    let interval = {
+        let value = cell(row, 2).trim().to_string();
+        if value.is_empty() || value == "NO" {
+            None
+        } else {
+            Some(value)
+        }
+    };
+    let columns = fetch_rows(
+        session,
+        "select column_name from all_part_key_columns \
+         where owner = :1 and name = :2 and object_type = 'TABLE' \
+         order by column_position",
+        &[&schema, &name],
+        options,
+    )?;
+    let partitions = fetch_rows(
+        session,
+        "select partition_name, high_value, tablespace_name, next_extent \
+         from all_tab_partitions where table_owner = :1 and table_name = :2 \
+         order by partition_position",
+        &[&schema, &name],
+        options,
+    )?;
+    table.partitioning = Some(Partitioning {
+        kind,
+        columns: columns.iter().map(|row| cell(row, 0)).collect(),
+        interval,
+        partitions: partitions
+            .iter()
+            .map(|row| Partition {
+                name: cell(row, 0),
+                high_value: option_cell(row, 1),
+                tablespace: option_cell(row, 2),
+                next_extent: match number(row, 3) {
+                    0 => None,
+                    value => Some(value),
+                },
+            })
+            .collect(),
+        row_movement,
+    });
+    Ok(())
+}
+
 pub fn load_table(
     session: &Session,
     schema: &str,
@@ -298,11 +381,13 @@ pub fn load_table(
     }
     let storage = fetch_rows(
         session,
-        "select tablespace_name, next_extent, temporary, duration, cache \
-         from all_tables where owner = :1 and table_name = :2",
+        "select tablespace_name, next_extent, temporary, duration, cache, \
+         iot_type, row_movement from all_tables \
+         where owner = :1 and table_name = :2",
         &[&schema, &name],
         options,
     )?;
+    let mut row_movement = false;
     if let Some(row) = storage.first() {
         let tablespace = cell(row, 0);
         if !tablespace.is_empty() {
@@ -319,7 +404,14 @@ pub fn load_table(
             });
         }
         table.cache = cell(row, 4) == "Y";
+        if !cell(row, 5).is_empty() {
+            return Err(format!(
+                "{schema}.{name} is index-organized; falling back to DBMS_METADATA"
+            ));
+        }
+        row_movement = cell(row, 6) == "ENABLED";
     }
+    load_partitioning(session, schema, name, options, row_movement, &mut table)?;
     load_comments(session, schema, name, options, &mut table)?;
     load_indexes(session, schema, name, options, &mut table)?;
     load_constraints(session, schema, name, options, &mut table)?;
