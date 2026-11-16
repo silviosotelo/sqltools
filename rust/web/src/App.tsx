@@ -130,6 +130,7 @@ export default function App() {
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [password, setPassword] = useState("");
   const [sql, setSql] = useState("select * from dual");
+  const [filePath, setFilePath] = useState("");
   const [columns, setColumns] = useState<ColumnMeta[]>([]);
   const [rows, setRows] = useState<Value[][]>([]);
   const [scrollTop, setScrollTop] = useState(0);
@@ -610,10 +611,53 @@ export default function App() {
   };
   const newFile = () => {
     setSql("");
+    setFilePath("");
     setColumns([]);
     setRows([]);
     setPanel("results");
     setStatus("");
+  };
+
+  const openFile = async () => {
+    try {
+      const path = await api.pickSqlFile();
+      if (!path) return;
+      const text = await api.readSqlFile(path);
+      setSql(text);
+      setFilePath(path);
+      setStatus(path);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const saveFile = async (saveAs = false) => {
+    try {
+      let path = filePath;
+      if (saveAs || !path) {
+        const picked = await api.pickSqlSavePath(filePath || "query.sql");
+        if (!picked) return;
+        path = picked;
+      }
+      await api.writeSqlFile(path, sql);
+      setFilePath(path);
+      setStatus(path);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const reloadFile = async () => {
+    if (!filePath) {
+      setStatus(t("noFile"));
+      return;
+    }
+    try {
+      setSql(await api.readSqlFile(filePath));
+      setStatus(filePath);
+    } catch (error) {
+      setStatus(String(error));
+    }
   };
 
   const reconnect = async () => {
@@ -773,6 +817,21 @@ export default function App() {
         break;
       case "View.Properties":
         setPanel("object");
+        break;
+      case "File.Open":
+        void openFile();
+        break;
+      case "File.Save":
+        void saveFile();
+        break;
+      case "File.SaveAs":
+        void saveFile(true);
+        break;
+      case "File.SaveAll":
+        void saveFile();
+        break;
+      case "File.Reload":
+        void reloadFile();
         break;
       case "File.Close":
       case "File.CloseAll":
@@ -1538,7 +1597,7 @@ export default function App() {
           <div className="editor-shell">
             <div className="editor-tabbar">
               <div className="editor-tab">
-                <span>SQL</span>
+                <span>{filePath ? filePath.split(/[\\/]/).pop() : "SQL"}</span>
                 <span className="tab-conn">
                   {isConnected
                     ? `${draft.user}${draft.alias ? `@${draft.alias}` : ""}`

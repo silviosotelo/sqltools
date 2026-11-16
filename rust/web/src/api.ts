@@ -79,6 +79,12 @@ export const api = {
   sessionStats: (connectionId: string) =>
     invoke<StatEntry[]>("session_stats", { connectionId }),
   listCommands: () => invoke<CommandSpec[]>("list_commands"),
+  pickSqlFile: () => invoke<string | null>("pick_sql_file"),
+  pickSqlSavePath: (suggested: string | null) =>
+    invoke<string | null>("pick_sql_save_path", { suggested }),
+  readSqlFile: (path: string) => invoke<string>("read_sql_file", { path }),
+  writeSqlFile: (path: string, text: string) =>
+    invoke<void>("write_sql_file", { path, text }),
   saveWorkspace: (workspace: Workspace) =>
     invoke<void>("save_workspace", { workspace }),
   loadWorkspace: () => invoke<Workspace>("load_workspace"),

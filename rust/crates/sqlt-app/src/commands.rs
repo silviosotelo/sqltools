@@ -114,6 +114,11 @@ const IMPLEMENTED: &[&str] = &[
     "View.Properties",
     "Script.QuickCount",
     "Session.ToggleReadOnly",
+    "File.Open",
+    "File.Save",
+    "File.SaveAs",
+    "File.SaveAll",
+    "File.Reload",
     "File.Close",
     "File.CloseAll",
     "File.New",
@@ -210,7 +215,7 @@ mod tests {
                 .iter()
                 .filter(|command| command.implemented)
                 .count(),
-            115
+            120
         );
     }
 }

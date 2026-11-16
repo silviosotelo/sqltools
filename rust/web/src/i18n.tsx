@@ -74,6 +74,7 @@ const translations = {
     typeType: "Tipos",
     typeSynonym: "Sinónimos",
     findObject: "Buscar objeto",
+    noFile: "No hay archivo abierto",
     noResults: "Ejecutá una consulta para ver resultados.",
     constraints: "Restricciones",
     indexes: "Índices",
@@ -169,6 +170,7 @@ const translations = {
     typeType: "Types",
     typeSynonym: "Synonyms",
     findObject: "Find object",
+    noFile: "No file is open",
 
     noResults: "Run a query to see results.",
     constraints: "Constraints",

@@ -15,3 +15,4 @@ sqlt-app = { path = "../crates/sqlt-app" }
 sqlt-core = { path = "../crates/sqlt-core" }
 sqlt-oracle = { path = "../crates/sqlt-oracle" }
 tauri-plugin-updater = "2"
+tauri-plugin-dialog = "2"
