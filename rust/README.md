@@ -11,11 +11,11 @@ Estado: **P1a (motor Oracle)**. El port C++/Qt sigue intacto en la raíz del rep
 
 ```
 rust/
-crates/sqlt-core/    # lógica pura (partidor de sentencias, formato, binds...)
+  crates/sqlt-core/    # lógica pura (partidor de sentencias, formato, binds...)
   crates/sqlt-oracle/  # driver Oracle (ODPI-C), sesiones, lotes, cancelación
   crates/sqlt-cli/     # harness headless: diag, query, bench
-  desktop/            # shell Tauri v2
-  web/                # frontend React + TypeScript + Vite
+  desktop/             # shell Tauri v2
+  web/                 # frontend React + TypeScript + Vite
 ```
 
 ## Requisitos
@@ -26,13 +26,23 @@ crates/sqlt-core/    # lógica pura (partidor de sentencias, formato, binds...)
 - Oracle Instant Client **solo para la capa de base de datos** (fase P1). No se
   incluye en el repo por su licencia OTN.
 
+## CI
+
+Windows x64, Linux x64 y macOS Intel (`macos-15-intel`). El runner arm64 de
+GitHub no está disponible para esta cuenta (los jobs quedan en cola y se
+cancelan a los 15 min), así que Apple Silicon se verifica con un runner propio o
+build local; el código Rust/Tauri es el mismo.
+
 ## Comandos
 
 ```bash
 # desde rust/
 cargo fmt --all --check
-cargo clippy -p sqlt-core --all-targets -- -D warnings
-cargo test -p sqlt-core
+cargo clippy --workspace --exclude sqlt-desktop --all-targets -- -D warnings
+cargo test --workspace --exclude sqlt-desktop
+
+# Oracle (ver crates/sqlt-oracle/README.md para las variables de entorno)
+cargo run -p sqlt-cli -- diag
 
 # frontend
 npm --prefix web install
