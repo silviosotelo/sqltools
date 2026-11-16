@@ -121,6 +121,7 @@ Expected: versiones estables impresas; sin error de linker (MSVC 14.29 y Windows
 - Produce:
 
 ```rust
+// SPDX-License-Identifier: GPL-3.0-only
 pub struct Statement {
     pub start: usize,      // unidad UTF-16, primer carácter útil
     pub end: usize,        // unidad UTF-16, justo después del último carácter (sin ';' ni '/')
@@ -140,6 +141,7 @@ pub fn statement_at(stmts: &[Statement], position_utf16: usize) -> Option<usize>
 [workspace]
 resolver = "2"
 members = ["crates/*"]
+# Task 4 agrega "desktop" a members.
 ```
 
 `rust/crates/sqlt-core/Cargo.toml`:
@@ -153,7 +155,7 @@ edition = "2021"
 
 - [ ] **Step 2: Escribir las pruebas que fallan**
 
-En `rust/crates/sqlt-core/tests/split_test.rs`, una prueba por cada caso de `tests/split_test.cpp` (dos selects, `;` en texto, comilla escapada, comentarios de línea/bloque, `q'[ ]'`, bloque anónimo, if/loop/case, declare+begin, bloques anidados, create procedure con `/`, package y body, create table, create trigger, sin `;` final, comentarios al inicio, barra sola, vacío) más:
+En `rust/crates/sqlt-core/tests/split_test.rs`, una prueba por cada caso de `tests/split_test.cpp` (dos selects, `;` en texto, comilla escapada, comentarios de línea/bloque, `q'[ ]'`, bloque anónimo, if/loop/case, declare+begin, bloques anidados, create procedure con `/`, package y body, create table, create trigger, sin `;` final, comentarios al inicio, barra sola, vacío) **más `statement_at` con las 4 aserciones de `split_test.cpp:46`** y los casos de UTF-16, solo comentarios, CRLF, identificador entrecomillado y `q'{ }'`:
 
 ```rust
 #[test]
@@ -185,7 +187,7 @@ Reglas a preservar: `;` fuera de textos/comentarios; `q'[...]'`; comillas `''`; 
 - [ ] **Step 5: Ejecutar y ver que pasan**
 
 Run: `cargo test -p sqlt-core`
-Expected: PASS (20 pruebas).
+Expected: PASS (todas las pruebas: 19 casos del original + `statement_at` + UTF-16 + solo comentarios + CRLF + identificador entrecomillado + `q'{ }'`).
 
 - [ ] **Step 6: fmt + clippy**
 
@@ -221,7 +223,7 @@ Expected: `rust/web/dist/index.html` existe, sin errores de TypeScript.
 
 - [ ] **Step 3: Crear el shell Tauri**
 
-`rust/desktop/Cargo.toml`: `tauri = { version = "2", features = [] }`, `serde`, `serde_json`; build-dep `tauri-build = "2"`. `build.rs`: `fn main() { tauri_build::build() }`. `main.rs`: builder mínimo con `tauri::generate_context!()`. `tauri.conf.json` con `frontendDist: "../web/dist"`, `devUrl: "http://localhost:1420"`, `beforeDevCommand: "npm --prefix ../web run dev"`, identifier `com.sqltools.rust`. `capabilities/default.json` con `"permissions": ["core:default"]`.
+`rust/desktop/Cargo.toml` (con `license = "GPL-3.0-only"`): `tauri = { version = "2", features = [] }`, `serde`, `serde_json`; build-dep `tauri-build = "2"`. Agregar `"desktop"` a `members` del workspace. `build.rs`: `fn main() { tauri_build::build() }`. `main.rs`: builder mínimo con `tauri::generate_context!()`. `tauri.conf.json` con `build.frontendDist: "../web/dist"`, `build.devUrl: "http://localhost:1420"`, `build.beforeDevCommand: "npm --prefix ../web run dev"`, `bundle.active: false` en P0 (el empaquetado es P5), identifier `com.sqltools.rust`. `capabilities/default.json` con `"permissions": ["core:default"]`.
 
 - [ ] **Step 4: Compilar el desktop**
 
@@ -249,7 +251,7 @@ git commit -m "feat(rust): esqueleto Tauri v2 + React sobre el workspace"
 
 - [ ] **Step 1: Escribir el workflow**
 
-Jobs: `test` (matriz `windows-latest`, `macos-14`, `macos-15-intel`, `ubuntu-22.04`; `cargo fmt --all --check`, `cargo clippy -p sqlt-core --all-targets -- -D warnings`, `cargo test -p sqlt-core` con `working-directory: rust`) y `tauri-check` (matriz `windows-latest`, `macos-14`, `ubuntu-22.04`; instala deps de WebKit en Linux, Node 22, `npm ci`, build de Vite y `cargo check -p sqlt-desktop`).
+Jobs: `test` (matriz `windows-latest`, `macos-15`, `macos-15-intel`, `ubuntu-22.04`; `cargo fmt --all --check`, `cargo clippy -p sqlt-core --all-targets -- -D warnings`, `cargo test -p sqlt-core` con `working-directory: rust`) y `tauri-check` (matriz `windows-latest`, `macos-15`, `ubuntu-22.04`; instala deps de WebKit en Linux, Node 22, `npm ci` usando el `package-lock.json` commiteado, build de Vite y `cargo check -p sqlt-desktop`).
 
 - [ ] **Step 2: Escribir atribución y README**
 
@@ -257,7 +259,7 @@ Jobs: `test` (matriz `windows-latest`, `macos-14`, `macos-15-intel`, `ubuntu-22.
 
 - [ ] **Step 3: Verificar localmente lo que el CI va a correr**
 
-Run: `cargo fmt --all --check; cargo clippy -p sqlt-core --all-targets -- -D warnings; cargo test -p sqlt-core`
+Run (desde `rust/`): `cargo fmt --all --check; cargo clippy -p sqlt-core --all-targets -- -D warnings; cargo test -p sqlt-core`
 Expected: todo verde.
 
 - [ ] **Step 4: Commit y push**
@@ -278,7 +280,7 @@ Expected: workflow en curso o completado; si falla una plataforma, corregir ante
 ## Cierre de P0 (definición de done)
 
 - [ ] `git log --oneline -4` muestra los commits de spec/plan, workspace/splitter, Tauri y CI.
-- [ ] `cargo test -p sqlt-core` PASA con 20 pruebas.
+- [ ] `cargo test -p sqlt-core` PASA (19 casos del original + `statement_at` + UTF-16 + solo comentarios + CRLF + identificador entrecomillado + `q'{ }'`).
 - [ ] `cargo build -p sqlt-desktop` PASA en Windows (y CI en macOS/Linux).
 - [ ] Workflow de GitHub Actions verde en las 4 plataformas.
 - [ ] `SCOPE`: `rust/**`, `.github/workflows/rust-ci.yml`, `.gitignore`, `docs/superpowers/**`. Nada de `src/`, `ui/` ni `CMakeLists.txt`.

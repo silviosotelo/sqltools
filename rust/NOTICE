@@ -1,0 +1,22 @@
+SQLTools Rust — aviso de atribución y licencia
+=================================================
+
+Este programa es software libre: se puede redistribuir y/o modificar bajo los
+términos de la GNU General Public License, versión 3 (ver `LICENSE` en la raíz
+del repositorio).
+
+Deriva de:
+- SQLTools (https://sqltools.net), cliente Oracle original para Windows.
+  Copyright de sus autores originales. Licencia GPLv3.
+- SQLTools Mac (https://github.com/JavierC78Py/sqltools), port nativo macOS en
+  C++/Qt del que se migran comportamiento, pruebas y decisiones de diseño.
+  Licencia GPLv3.
+
+El código fuente de este fork está disponible en
+https://github.com/silviosotelo/sqltools (rama `rust`).
+
+Oracle Instant Client
+---------------------
+Oracle Instant Client es un producto de Oracle Corporation sujeto a la licencia
+OTN. NO se incluye en este repositorio ni en los paquetes generados: cada
+usuario debe descargarlo e instalarlo por separado.
