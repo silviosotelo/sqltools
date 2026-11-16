@@ -75,6 +75,11 @@ export const api = {
   loadWorkspace: () => invoke<Workspace>("load_workspace"),
   migrateLegacy: (path: string) =>
     invoke<number>("migrate_legacy_connections", { path }),
+  exportCsvFile: (
+    connectionId: string,
+    sql: string,
+    maxRows: number,
+  ) => invoke<string>("export_csv", { connectionId, sql, maxRows }),
   checkUpdates: () => invoke<string>("check_updates"),
   formatSql: (sql: string, uppercase: boolean) =>
     invoke<string>("format_sql", { sql, uppercase }),

@@ -1,5 +1,5 @@
-import { useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { Editor } from "./Editor";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { Editor, type EditorHandle } from "./Editor";
 import { api } from "./api";
 import { useTranslation } from "./i18n";
 import type {
@@ -199,6 +199,21 @@ export default function App() {
     setStats([]);
   };
 
+  const columnCache = useRef(new Map<string, string[]>());
+  const editorRef = useRef<EditorHandle | null>(null);
+
+  const loadColumnsFor = async (table: string) => {
+    const parts = table.replace(/"/g, "").split(".");
+    const name = parts.pop() ?? table;
+    const owner = parts.pop() ?? (schema.trim() || null);
+    const key = `${owner ?? ""}|${name}`;
+    const cached = columnCache.current.get(key);
+    if (cached) return cached;
+    const columns = await api.listColumns(selected, owner, name);
+    const names = columns.map((column) => column.name);
+    columnCache.current.set(key, names);
+    return names;
+  };
   const update = <K extends keyof Draft>(key: K, value: Draft[K]) => {
     setDraft((current) => ({ ...current, [key]: value }));
   };
@@ -566,6 +581,39 @@ export default function App() {
       case "View.ObjectTree":
         void loadObjects();
         break;
+      case "View.History":
+        void showHistory();
+        break;
+      case "Edit.Undo":
+        editorRef.current?.undo();
+        break;
+      case "Edit.Redo":
+        editorRef.current?.redo();
+        break;
+      case "Edit.SelectAll":
+        editorRef.current?.selectAll();
+        break;
+      case "Edit.Copy":
+        void editorRef.current?.copy();
+        break;
+      case "Edit.Cut":
+        void editorRef.current?.cut();
+        break;
+      case "Edit.Paste":
+        void editorRef.current?.paste();
+        break;
+      case "Edit.Uppercase":
+        editorRef.current?.upper();
+        break;
+      case "Edit.Lowercase":
+        editorRef.current?.lower();
+        break;
+      case "Edit.CommentLine":
+        editorRef.current?.comment();
+        break;
+      case "Edit.UncommentLine":
+        editorRef.current?.uncomment();
+        break;
       case "Workspace.Save":
         void saveWorkspace();
         break;
@@ -607,7 +655,16 @@ export default function App() {
       if (command) executeCommand(command.name);
     }
   };
-  const exportCsv = () => {
+  const exportCsv = async () => {
+    if (isConnected) {
+      try {
+        const path = await api.exportCsvFile(selected, sql, 0);
+        setStatus(path);
+        return;
+      } catch (error) {
+        setStatus(String(error));
+      }
+    }
     if (!columns.length) return;
     const header = columns.map((column) => column.name).join(",");
     const lines = rows.map((row) => row.map(csvCell).join(","));
@@ -856,7 +913,7 @@ export default function App() {
           <button onClick={() => setPaletteOpen(true)}>{t("commandPalette")}</button>
           <button onClick={() => void saveWorkspace()}>{t("workspaceSave")}</button>
           <button onClick={() => void loadWorkspace()}>{t("workspaceLoad")}</button>
-          <button onClick={exportCsv} disabled={!columns.length}>
+          <button onClick={() => void exportCsv()} disabled={!columns.length && !isConnected}>
             {t("exportCsv")}
           </button>
           <span className="connection-state">
@@ -865,8 +922,10 @@ export default function App() {
         </header>
 
         <Editor
+          ref={editorRef}
           initialValue={sql}
           tables={tables}
+          loadColumns={loadColumnsFor}
           onChange={setSql}
           onExecute={(text) => void run(text)}
         />

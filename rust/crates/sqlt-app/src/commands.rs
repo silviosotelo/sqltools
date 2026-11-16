@@ -18,6 +18,17 @@ pub struct CommandSpec {
 /// Names handled by the Rust frontend. Keeping this explicit avoids claiming
 /// parity for commands that only exist in the Windows original.
 const IMPLEMENTED: &[&str] = &[
+    "Edit.Undo",
+    "Edit.Redo",
+    "Edit.SelectAll",
+    "Edit.Cut",
+    "Edit.Copy",
+    "Edit.Paste",
+    "Edit.Uppercase",
+    "Edit.Lowercase",
+    "Edit.CommentLine",
+    "Edit.UncommentLine",
+    "View.History",
     "Session.Connect",
     "Session.Disconnect",
     "Session.Commit",

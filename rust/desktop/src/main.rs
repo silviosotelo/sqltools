@@ -367,6 +367,35 @@ fn migrate_legacy_connections(
 }
 
 #[tauri::command]
+fn export_csv(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    sql: String,
+    max_rows: usize,
+    path: Option<String>,
+) -> Result<String, String> {
+    let session = state.session(&connection_id)?;
+    let target = match path.map(|value| value.trim().to_string()) {
+        Some(value) if !value.is_empty() => std::path::PathBuf::from(value),
+        _ => std::env::temp_dir().join(format!(
+            "sqltools-export-{}.csv",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_secs())
+                .unwrap_or_default()
+        )),
+    };
+    sqlt_app::export::export_csv(
+        &session,
+        &sql,
+        state.query_options(&connection_id),
+        &target,
+        max_rows,
+    )?;
+    Ok(target.display().to_string())
+}
+
+#[tauri::command]
 fn format_sql(sql: String, uppercase: bool) -> String {
     sqlt_core::format::format_sql(
         &sql,
@@ -421,6 +450,7 @@ fn main() {
             save_workspace,
             load_workspace,
             migrate_legacy_connections,
+            export_csv,
             format_sql,
             check_updates,
             explain_plan

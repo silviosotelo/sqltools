@@ -114,6 +114,21 @@ fn catalog_and_ddl() {
         assert!(full.contains("CREATE OR REPLACE TRIGGER "), "{full}");
         eprintln!("meta full {target}: {} bytes", full.len());
     }
+    let export_path = std::env::temp_dir().join(format!("sqlt-export-{}.csv", std::process::id()));
+    let exported = sqlt_app::export::export_csv(
+        &session,
+        "select 1 n, 'a,b' t, cast(null as varchar2(1)) z from dual",
+        options,
+        &export_path,
+        0,
+    )
+    .expect("export csv");
+    assert_eq!(exported, 1);
+    let csv = fs::read_to_string(&export_path).expect("read csv");
+    assert!(csv.starts_with("N,T,Z\n"), "{csv}");
+    assert!(csv.contains("1,\"a,b\","), "{csv}");
+    let _ = fs::remove_file(&export_path);
+    eprintln!("export csv: {exported} row");
     match catalog::session_stats(&session, options) {
         Ok(stats) => {
             assert!(!stats.is_empty());

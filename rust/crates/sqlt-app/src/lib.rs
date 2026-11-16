@@ -3,6 +3,7 @@
 
 pub mod catalog;
 pub mod commands;
+pub mod export;
 pub mod migrate;
 pub mod state;
 pub mod store;
