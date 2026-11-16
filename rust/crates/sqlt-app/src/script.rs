@@ -48,6 +48,9 @@ where
     // One execution per session: two scripts sharing the OCI session would
     // interleave result sets and DBMS_OUTPUT lines.
     let _execution = session.lock_execution();
+    if session.is_closed() {
+        return Err("The connection was closed".to_string());
+    }
     let mut statements = split(sql);
     if let Some(position) = offset {
         let index = statement_at(&statements, position)

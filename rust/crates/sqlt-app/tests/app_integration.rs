@@ -336,3 +336,82 @@ fn failed_statement_output_does_not_leak() {
     assert!(next_output.is_empty(), "{next_output:?}");
     let _ = fs::remove_file(path);
 }
+
+#[test]
+#[ignore = "requires a real Oracle connection"]
+fn disconnect_waits_for_a_running_script() {
+    use std::sync::mpsc;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    let user = std::env::var("SQLT_USER").expect("SQLT_USER");
+    let password = std::env::var("SQLT_PASS").expect("SQLT_PASS");
+    let alias = std::env::var("SQLT_ALIAS").expect("SQLT_ALIAS");
+    let path = std::env::temp_dir().join(format!("sqlt-app-close-{}.json", std::process::id()));
+    let _ = fs::remove_file(&path);
+    let mut store = ConnectionStore::new(path.clone());
+    let mut config = ConnectionConfig::new("Close", &user);
+    config.alias = Some(alias);
+    config.tns_admin = std::env::var("SQLT_TNS_ADMIN").ok();
+    config.oci_dir = std::env::var("SQLT_OCI_DIR").ok();
+    store.upsert(config.clone()).unwrap();
+    store.set_password(&config.id, &password).unwrap();
+    let state = Arc::new(AppState::with_store(store));
+    state.connect(&config.id).expect("connect");
+    let session = state.session(&config.id).expect("session");
+
+    // Simulate a running script by holding the execution guard.
+    let guard = session.lock_execution();
+    let worker_state = Arc::clone(&state);
+    let worker_id = config.id.clone();
+    let (sender, receiver) = mpsc::channel();
+    let handle = std::thread::spawn(move || {
+        sender.send(worker_state.disconnect(&worker_id)).unwrap();
+    });
+    assert!(
+        receiver.recv_timeout(Duration::from_millis(300)).is_err(),
+        "disconnect returned while a script held the session"
+    );
+    drop(guard);
+    receiver
+        .recv_timeout(Duration::from_secs(5))
+        .expect("disconnect did not finish")
+        .expect("disconnect");
+    handle.join().unwrap();
+    assert!(state.session(&config.id).is_err());
+    let _ = fs::remove_file(path);
+}
+
+#[test]
+#[ignore = "requires a real Oracle connection"]
+fn closed_session_rejects_scripts() {
+    use sqlt_app::script::run_script;
+
+    let user = std::env::var("SQLT_USER").expect("SQLT_USER");
+    let password = std::env::var("SQLT_PASS").expect("SQLT_PASS");
+    let alias = std::env::var("SQLT_ALIAS").expect("SQLT_ALIAS");
+    let path = std::env::temp_dir().join(format!("sqlt-app-stale-{}.json", std::process::id()));
+    let _ = fs::remove_file(&path);
+    let mut store = ConnectionStore::new(path.clone());
+    let mut config = ConnectionConfig::new("Stale", &user);
+    config.alias = Some(alias);
+    config.tns_admin = std::env::var("SQLT_TNS_ADMIN").ok();
+    config.oci_dir = std::env::var("SQLT_OCI_DIR").ok();
+    store.upsert(config.clone()).unwrap();
+    store.set_password(&config.id, &password).unwrap();
+    let state = AppState::with_store(store);
+    state.connect(&config.id).expect("connect");
+    let session = state.session(&config.id).expect("session");
+    state.disconnect(&config.id).expect("disconnect");
+    let error = run_script(
+        &session,
+        "select 1 from dual",
+        state.query_options(&config.id),
+        0,
+        None,
+        |_| {},
+    )
+    .expect_err("a closed session must not run scripts");
+    assert!(error.contains("closed"), "{error}");
+    let _ = fs::remove_file(path);
+}

@@ -67,13 +67,19 @@ fn delete_connection(state: State<'_, Arc<AppState>>, id: String) -> Result<(), 
 }
 
 #[tauri::command]
-fn connect(state: State<'_, Arc<AppState>>, id: String) -> Result<String, String> {
-    state.connect(&id)
+async fn connect(state: State<'_, Arc<AppState>>, id: String) -> Result<String, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.connect(&id))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn disconnect(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
-    state.disconnect(&id)
+async fn disconnect(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.disconnect(&id))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

@@ -47,8 +47,10 @@ impl AppState {
                 .map_err(|_| "Connection store lock poisoned".to_string())?;
             store.to_spec(connection_id).map_err(|e| e.to_string())?
         };
+        // Open first so a failed reconnect keeps the existing session usable.
         let session = Session::open(&spec).map_err(|e| e.to_string())?;
         let version = session.server_version().map_err(|e| e.to_string())?;
+        self.close_existing(connection_id)?;
         self.sessions
             .lock()
             .map_err(|_| "Session map lock poisoned".to_string())?
@@ -57,10 +59,29 @@ impl AppState {
     }
 
     pub fn disconnect(&self, connection_id: &str) -> Result<(), String> {
-        self.sessions
+        self.close_existing(connection_id)
+    }
+
+    /// Cancels a running script, waits for its cycle to finish and only then
+    /// drops the session, so no statement keeps running on an orphaned
+    /// connection.
+    fn close_existing(&self, connection_id: &str) -> Result<(), String> {
+        let existing = self
+            .sessions
             .lock()
             .map_err(|_| "Session map lock poisoned".to_string())?
-            .remove(connection_id);
+            .get(connection_id)
+            .cloned();
+        if let Some(session) = existing {
+            session.close();
+            // `close` interrupts the statement; the guard waits for the script
+            // to unwind so nothing writes to the old session afterwards.
+            let _guard = session.lock_execution();
+            self.sessions
+                .lock()
+                .map_err(|_| "Session map lock poisoned".to_string())?
+                .remove(connection_id);
+        }
         Ok(())
     }
 

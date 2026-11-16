@@ -42,6 +42,9 @@ pub struct Session {
     /// `DBMS_OUTPUT` belong to the session, so two concurrent scripts would
     /// otherwise drain each other's lines.
     execution: std::sync::Mutex<()>,
+    /// Set when the connection is being closed or replaced. A script that
+    /// starts after that must not run on the orphaned session.
+    closed: std::sync::atomic::AtomicBool,
 }
 
 pub struct QueryHandle {
@@ -84,7 +87,21 @@ impl Session {
             fast_dates,
             dbms_output_enabled: std::sync::atomic::AtomicBool::new(false),
             execution: std::sync::Mutex::new(()),
+            closed: std::sync::atomic::AtomicBool::new(false),
         })
+    }
+
+    /// Marks the session as closed and interrupts a running statement. Callers
+    /// that hold the execution guard should wait for it before dropping the
+    /// connection (see `AppState::disconnect`).
+    pub fn close(&self) {
+        self.closed
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        let _ = self.cancel();
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.closed.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Blocks until this session is free. Callers hold the guard for the whole
