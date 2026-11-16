@@ -6,12 +6,18 @@ import type {
   ColumnInfo,
   ColumnMeta,
   ConnectionConfig,
+  ConstraintInfo,
+  GrantInfo,
   HistoryEntry,
+  IndexInfo,
   ObjectInfo,
   QueryEvent,
   StatEntry,
+  TriggerInfo,
   Value,
 } from "./types";
+
+type ObjectTab = "columns" | "constraints" | "indexes" | "triggers" | "grants";
 
 type Draft = {
   id: string;
@@ -120,6 +126,16 @@ export default function App() {
   const [objects, setObjects] = useState<ObjectInfo[]>([]);
   const [selectedObject, setSelectedObject] = useState<ObjectInfo | null>(null);
   const [objectColumns, setObjectColumns] = useState<ColumnInfo[]>([]);
+  const [objectTab, setObjectTab] = useState<ObjectTab>("columns");
+  const [constraints, setConstraints] = useState<ConstraintInfo[]>([]);
+  const [indexes, setIndexes] = useState<IndexInfo[]>([]);
+  const [triggers, setTriggers] = useState<TriggerInfo[]>([]);
+  const [grants, setGrants] = useState<GrantInfo[]>([]);
+  const [menu, setMenu] = useState<{
+    object: ObjectInfo;
+    x: number;
+    y: number;
+  } | null>(null);
   const [stats, setStats] = useState<StatEntry[]>([]);
 
   const isConnected = Boolean(selected && connected[selected]);
@@ -148,6 +164,12 @@ export default function App() {
     setObjects([]);
     setSelectedObject(null);
     setObjectColumns([]);
+    setConstraints([]);
+    setIndexes([]);
+    setTriggers([]);
+    setGrants([]);
+    setObjectTab("columns");
+    setMenu(null);
     setStats([]);
   };
 
@@ -334,9 +356,17 @@ export default function App() {
     }
   };
 
+  const qualified = (object: ObjectInfo) =>
+    schema.trim() ? `${schema.trim()}.${object.name}` : object.name;
+
   const openObject = async (object: ObjectInfo) => {
     setSelectedObject(object);
     setObjectColumns([]);
+    setConstraints([]);
+    setIndexes([]);
+    setTriggers([]);
+    setGrants([]);
+    setObjectTab("columns");
     setPanel("object");
     if (!["TABLE", "VIEW"].includes(object.objectType)) return;
     try {
@@ -348,15 +378,38 @@ export default function App() {
     }
   };
 
-  const loadDdl = async () => {
+  const loadDetail = async (tab: ObjectTab) => {
     if (!selectedObject) return;
+    setObjectTab(tab);
+    const owner = schema.trim() || null;
     try {
+      if (tab === "constraints") {
+        setConstraints(
+          await api.listConstraints(selected, owner, selectedObject.name),
+        );
+      } else if (tab === "indexes") {
+        setIndexes(await api.listIndexes(selected, owner, selectedObject.name));
+      } else if (tab === "triggers") {
+        setTriggers(
+          await api.listTriggers(selected, owner, selectedObject.name),
+        );
+      } else if (tab === "grants") {
+        setGrants(await api.listGrants(selected, owner, selectedObject.name));
+      }
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const loadDdlFor = async (object: ObjectInfo) => {
+    try {
+      setSelectedObject(object);
       setSql(
         await api.loadDdl(
           selected,
           schema.trim() || null,
-          selectedObject.name,
-          selectedObject.objectType,
+          object.name,
+          object.objectType,
         ),
       );
       setPanel("results");
@@ -366,6 +419,34 @@ export default function App() {
     }
   };
 
+  const queryObject = (object: ObjectInfo) => {
+    const text = `select * from ${qualified(object)}`;
+    setSql(text);
+    void run(text);
+  };
+
+  const countObject = (object: ObjectInfo) => {
+    const text = `select count(*) from ${qualified(object)}`;
+    setSql(text);
+    void run(text);
+  };
+
+  const copyName = async (object: ObjectInfo) => {
+    try {
+      await navigator.clipboard.writeText(object.name);
+      setStatus(object.name);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const formatSql = async () => {
+    try {
+      setSql(await api.formatSql(sql, true));
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
   const exportCsv = () => {
     if (!columns.length) return;
     const header = columns.map((column) => column.name).join(",");
@@ -570,6 +651,10 @@ export default function App() {
                   selectedObject?.name === object.name ? "object active" : "object"
                 }
                 title={object.status}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  setMenu({ object, x: event.clientX, y: event.clientY });
+                }}
                 onClick={() => void openObject(object)}
               >
                 {object.name}
@@ -601,7 +686,7 @@ export default function App() {
           <button onClick={() => void showStats()} disabled={!isConnected}>
             {t("stats")}
           </button>
-          <button onClick={exportCsv} disabled={!columns.length}>
+          <button onClick={() => void formatSql()} disabled={!sql.trim()}>\n            {t("format")}\n          </button>\n          <button onClick={exportCsv} disabled={!columns.length}>
             {t("exportCsv")}
           </button>
           <span className="connection-state">
@@ -728,31 +813,139 @@ export default function App() {
                   <header className="object-header">
                     <strong>{selectedObject.name}</strong>
                     <span>{selectedObject.objectType}</span>
-                    <button onClick={() => void loadDdl()}>{t("loadDdl")}</button>
+                    <button onClick={() => void loadDdlFor(selectedObject)}>
+                      {t("loadDdl")}
+                    </button>
                   </header>
-                  {objectColumns.length > 0 ? (
+                  <nav className="object-tabs">
+                    {(
+                      [
+                        "columns",
+                        "constraints",
+                        "indexes",
+                        "triggers",
+                        "grants",
+                      ] as ObjectTab[]
+                    ).map((tab) => (
+                      <button
+                        key={tab}
+                        className={objectTab === tab ? "active" : ""}
+                        onClick={() => void loadDetail(tab)}
+                      >
+                        {t(tab)}
+                      </button>
+                    ))}
+                  </nav>
+                  {objectTab === "columns" &&
+                    (objectColumns.length > 0 ? (
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>{t("columns")}</th>
+                            <th>{t("dataType")}</th>
+                            <th>{t("nullable")}</th>
+                            <th>{t("defaultValue")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {objectColumns.map((column) => (
+                            <tr key={column.name}>
+                              <td>{column.name}</td>
+                              <td>{column.dataType}</td>
+                              <td>{column.nullable ? "Y" : "N"}</td>
+                              <td>{column.dataDefault ?? ""}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <p className="hint">{selectedObject.status}</p>
+                    ))}
+                  {objectTab === "constraints" && (
                     <table>
                       <thead>
                         <tr>
+                          <th>{t("constraints")}</th>
+                          <th>{t("objectType")}</th>
+                          <th>Status</th>
                           <th>{t("columns")}</th>
-                          <th>{t("dataType")}</th>
-                          <th>{t("nullable")}</th>
-                          <th>{t("defaultValue")}</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {objectColumns.map((column) => (
-                          <tr key={column.name}>
-                            <td>{column.name}</td>
-                            <td>{column.dataType}</td>
-                            <td>{column.nullable ? "Y" : "N"}</td>
-                            <td>{column.dataDefault ?? ""}</td>
+                        {constraints.map((constraint) => (
+                          <tr key={constraint.name}>
+                            <td>{constraint.name}</td>
+                            <td>{constraint.kind}</td>
+                            <td>{constraint.status}</td>
+                            <td>{constraint.columns.join(", ")}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
-                  ) : (
-                    <p className="hint">{selectedObject.status}</p>
+                  )}
+                  {objectTab === "indexes" && (
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>{t("indexes")}</th>
+                          <th>{t("uniqueness")}</th>
+                          <th>Status</th>
+                          <th>{t("columns")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {indexes.map((index) => (
+                          <tr key={index.name}>
+                            <td>{index.name}</td>
+                            <td>{index.uniqueness}</td>
+                            <td>{index.status}</td>
+                            <td>{index.columns.join(", ")}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                  {objectTab === "triggers" && (
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>{t("triggers")}</th>
+                          <th>{t("objectType")}</th>
+                          <th>{t("event")}</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {triggers.map((trigger) => (
+                          <tr key={trigger.name}>
+                            <td>{trigger.name}</td>
+                            <td>{trigger.triggerType}</td>
+                            <td>{trigger.event}</td>
+                            <td>{trigger.status}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                  {objectTab === "grants" && (
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>{t("grantee")}</th>
+                          <th>{t("privilege")}</th>
+                          <th>{t("grantable")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {grants.map((grant, index) => (
+                          <tr key={`${grant.grantee}-${index}`}>
+                            <td>{grant.grantee}</td>
+                            <td>{grant.privilege}</td>
+                            <td>{grant.grantable ? "Y" : "N"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   )}
                 </>
               ) : (
@@ -783,6 +976,64 @@ export default function App() {
 
         <footer className="status">{status}</footer>
       </main>
+
+      {menu && (
+        <>
+          <div
+            className="menu-backdrop"
+            onClick={() => setMenu(null)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setMenu(null);
+            }}
+          />
+          <div
+            className="context-menu"
+            style={{ left: menu.x, top: menu.y }}
+          >
+            <button
+              onClick={() => {
+                setMenu(null);
+                void openObject(menu.object);
+              }}
+            >
+              {t("object")}
+            </button>
+            <button
+              onClick={() => {
+                setMenu(null);
+                queryObject(menu.object);
+              }}
+            >
+              {t("query")}
+            </button>
+            <button
+              onClick={() => {
+                setMenu(null);
+                countObject(menu.object);
+              }}
+            >
+              {t("count")}
+            </button>
+            <button
+              onClick={() => {
+                setMenu(null);
+                void loadDdlFor(menu.object);
+              }}
+            >
+              {t("loadDdl")}
+            </button>
+            <button
+              onClick={() => {
+                setMenu(null);
+                void copyName(menu.object);
+              }}
+            >
+              {t("copy")}
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

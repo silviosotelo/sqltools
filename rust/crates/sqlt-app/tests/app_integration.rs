@@ -88,6 +88,18 @@ fn catalog_and_ddl() {
     let objects = catalog::list_objects(&session, None, Some("TABLE"), options).expect("objects");
     assert!(objects.iter().any(|object| object.name == first));
 
+    let constraints =
+        catalog::list_constraints(&session, None, &first, options).expect("constraints");
+    let indexes = catalog::list_indexes(&session, None, &first, options).expect("indexes");
+    let triggers = catalog::list_triggers(&session, None, &first, options).expect("triggers");
+    let grants = catalog::list_grants(&session, None, &first, options).expect("grants");
+    eprintln!(
+        "details {first}: {} constraints, {} indexes, {} triggers, {} grants",
+        constraints.len(),
+        indexes.len(),
+        triggers.len(),
+        grants.len()
+    );
     match catalog::session_stats(&session, options) {
         Ok(stats) => {
             assert!(!stats.is_empty());

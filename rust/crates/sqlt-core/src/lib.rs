@@ -3,6 +3,7 @@
 
 pub mod binds;
 pub mod datefmt;
+pub mod format;
 pub mod readonly;
 mod split;
 pub mod value;

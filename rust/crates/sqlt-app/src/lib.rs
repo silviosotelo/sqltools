@@ -5,6 +5,9 @@ pub mod catalog;
 pub mod state;
 pub mod store;
 
-pub use catalog::{list_columns, list_objects, list_table_names, load_ddl, session_stats};
+pub use catalog::{
+    list_columns, list_constraints, list_grants, list_indexes, list_objects, list_table_names,
+    list_triggers, load_ddl, session_stats,
+};
 pub use state::{AppState, HistoryEntry};
 pub use store::{ConnectionConfig, ConnectionStore, StoreError};

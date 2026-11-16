@@ -2,10 +2,14 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
   ColumnInfo,
   ConnectionConfig,
+  ConstraintInfo,
+  GrantInfo,
   HistoryEntry,
+  IndexInfo,
   ObjectInfo,
   QueryEvent,
   StatEntry,
+  TriggerInfo,
 } from "./types";
 
 export const api = {
@@ -61,6 +65,36 @@ export const api = {
     invoke<string>("load_ddl", { connectionId, schema, name, objectType }),
   sessionStats: (connectionId: string) =>
     invoke<StatEntry[]>("session_stats", { connectionId }),
+  formatSql: (sql: string, uppercase: boolean) =>
+    invoke<string>("format_sql", { sql, uppercase }),
+  listConstraints: (
+    connectionId: string,
+    schema: string | null,
+    table: string,
+  ) =>
+    invoke<ConstraintInfo[]>("list_constraints", {
+      connectionId,
+      schema,
+      table,
+    }),
+  listIndexes: (connectionId: string, schema: string | null, table: string) =>
+    invoke<IndexInfo[]>("list_indexes", {
+      connectionId,
+      schema,
+      table,
+    }),
+  listTriggers: (connectionId: string, schema: string | null, table: string) =>
+    invoke<TriggerInfo[]>("list_triggers", {
+      connectionId,
+      schema,
+      table,
+    }),
+  listGrants: (connectionId: string, schema: string | null, table: string) =>
+    invoke<GrantInfo[]>("list_grants", {
+      connectionId,
+      schema,
+      table,
+    }),
   explainPlan: (connectionId: string, sql: string) =>
     invoke<string>("explain_plan", { connectionId, sql }),
 };

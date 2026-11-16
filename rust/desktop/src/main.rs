@@ -228,6 +228,70 @@ fn session_stats(
 }
 
 #[tauri::command]
+fn list_constraints(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    schema: Option<String>,
+    table: String,
+) -> Result<Vec<catalog::ConstraintInfo>, String> {
+    let session = state.session(&connection_id)?;
+    catalog::list_constraints(
+        &session,
+        schema.as_deref(),
+        &table,
+        state.query_options(&connection_id),
+    )
+}
+
+#[tauri::command]
+fn list_indexes(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    schema: Option<String>,
+    table: String,
+) -> Result<Vec<catalog::IndexInfo>, String> {
+    let session = state.session(&connection_id)?;
+    catalog::list_indexes(
+        &session,
+        schema.as_deref(),
+        &table,
+        state.query_options(&connection_id),
+    )
+}
+
+#[tauri::command]
+fn list_triggers(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    schema: Option<String>,
+    table: String,
+) -> Result<Vec<catalog::TriggerInfo>, String> {
+    let session = state.session(&connection_id)?;
+    catalog::list_triggers(
+        &session,
+        schema.as_deref(),
+        &table,
+        state.query_options(&connection_id),
+    )
+}
+
+#[tauri::command]
+fn list_grants(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    schema: Option<String>,
+    table: String,
+) -> Result<Vec<catalog::GrantInfo>, String> {
+    let session = state.session(&connection_id)?;
+    catalog::list_grants(
+        &session,
+        schema.as_deref(),
+        &table,
+        state.query_options(&connection_id),
+    )
+}
+
+#[tauri::command]
 fn explain_plan(
     state: State<'_, Arc<AppState>>,
     connection_id: String,
@@ -258,6 +322,17 @@ fn explain_plan(
     Ok(lines.join("\n"))
 }
 
+#[tauri::command]
+fn format_sql(sql: String, uppercase: bool) -> String {
+    sqlt_core::format::format_sql(
+        &sql,
+        &sqlt_core::format::FormatOptions {
+            uppercase_keywords: uppercase,
+            indent: 2,
+        },
+    )
+}
+
 fn main() {
     let state = AppState::new().unwrap_or_else(|error| {
         eprintln!("Could not load the connection store: {error}");
@@ -281,6 +356,11 @@ fn main() {
             list_columns,
             load_ddl,
             session_stats,
+            list_constraints,
+            list_indexes,
+            list_triggers,
+            list_grants,
+            format_sql,
             explain_plan
         ])
         .run(tauri::generate_context!())

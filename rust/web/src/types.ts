@@ -61,3 +61,30 @@ export type ColumnInfo = {
 };
 
 export type StatEntry = [string, string];
+
+export type ConstraintInfo = {
+  name: string;
+  kind: string;
+  status: string;
+  columns: string[];
+};
+
+export type IndexInfo = {
+  name: string;
+  uniqueness: string;
+  status: string;
+  columns: string[];
+};
+
+export type TriggerInfo = {
+  name: string;
+  triggerType: string;
+  event: string;
+  status: string;
+};
+
+export type GrantInfo = {
+  grantee: string;
+  privilege: string;
+  grantable: boolean;
+};

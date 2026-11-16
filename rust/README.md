@@ -4,7 +4,7 @@ Rust rewrite of SQLTools (Oracle client for PL/SQL/APEX developers), with a web 
 (Tauri v2 + React). Target platforms: Windows x64, macOS Intel/Apple Silicon and
 Linux x64.
 
-Status: **P3 (object explorer / DDL)**. The C++/Qt port remains untouched at the
+Status: **P4 (Format SQL started)**. The C++/Qt port remains untouched at the
 repository root (branch `main`); this branch (`rust`) contains the new
 implementation.
 

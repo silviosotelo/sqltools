@@ -276,3 +276,40 @@ tr.spacer td {
   border: none;
   padding: 0;
 }
+
+.object-tabs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.object-tabs button.active {
+  background: #4a90d933;
+  border-color: #4a90d9;
+}
+
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+}
+
+.context-menu {
+  position: fixed;
+  z-index: 11;
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+  padding: 4px;
+  border: 1px solid #8886;
+  border-radius: 4px;
+  background: Canvas;
+  box-shadow: 0 4px 12px #0003;
+}
+
+.context-menu button {
+  border: none;
+  text-align: left;
+  background: transparent;
+}
