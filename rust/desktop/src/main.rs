@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use sqlt_app::{AppState, ConnectionConfig, HistoryEntry};
+use sqlt_app::{catalog, AppState, ConnectionConfig, HistoryEntry};
 use sqlt_core::{Batch, ColumnMeta};
 use tauri::ipc::Channel;
 use tauri::State;
@@ -160,32 +160,71 @@ fn history(state: State<'_, Arc<AppState>>) -> Vec<HistoryEntry> {
 }
 
 #[tauri::command]
-fn list_objects(
+fn list_table_names(
     state: State<'_, Arc<AppState>>,
     connection_id: String,
 ) -> Result<Vec<String>, String> {
     let session = state.session(&connection_id)?;
-    let mut query = session
-        .query(
-            "select object_name from user_objects \
-             where object_type in ('TABLE', 'VIEW') and rownum <= 1000 \
-             order by object_name",
-            state.query_options(&connection_id),
-        )
-        .map_err(|e| e.to_string())?;
-    let mut names = Vec::new();
-    loop {
-        let batch = query.next_batch(500).map_err(|e| e.to_string())?;
-        if batch.rows.is_empty() {
-            break;
-        }
-        for row in batch.rows {
-            if let Some(name) = row.first().and_then(|value| value.display()) {
-                names.push(name.to_string());
-            }
-        }
-    }
-    Ok(names)
+    catalog::list_table_names(&session, state.query_options(&connection_id))
+}
+
+#[tauri::command]
+fn list_objects(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    schema: Option<String>,
+    object_type: Option<String>,
+) -> Result<Vec<catalog::ObjectInfo>, String> {
+    let session = state.session(&connection_id)?;
+    catalog::list_objects(
+        &session,
+        schema.as_deref(),
+        object_type.as_deref(),
+        state.query_options(&connection_id),
+    )
+}
+
+#[tauri::command]
+fn list_columns(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    schema: Option<String>,
+    table: String,
+) -> Result<Vec<catalog::ColumnInfo>, String> {
+    let session = state.session(&connection_id)?;
+    catalog::list_columns(
+        &session,
+        schema.as_deref(),
+        &table,
+        state.query_options(&connection_id),
+    )
+}
+
+#[tauri::command]
+fn load_ddl(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    schema: Option<String>,
+    name: String,
+    object_type: String,
+) -> Result<String, String> {
+    let session = state.session(&connection_id)?;
+    catalog::load_ddl(
+        &session,
+        schema.as_deref(),
+        &name,
+        &object_type,
+        state.query_options(&connection_id),
+    )
+}
+
+#[tauri::command]
+fn session_stats(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+) -> Result<Vec<(String, String)>, String> {
+    let session = state.session(&connection_id)?;
+    catalog::session_stats(&session, state.query_options(&connection_id))
 }
 
 #[tauri::command]
@@ -237,7 +276,11 @@ fn main() {
             commit,
             rollback,
             history,
+            list_table_names,
             list_objects,
+            list_columns,
+            load_ddl,
+            session_stats,
             explain_plan
         ])
         .run(tauri::generate_context!())

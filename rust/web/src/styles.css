@@ -233,3 +233,46 @@ td.null {
 .cm-bookmark-gutter {
   width: 14px;
 }
+
+.object-list {
+  max-height: 260px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.object {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: left;
+}
+
+.object span {
+  opacity: 0.6;
+  font-size: 11px;
+}
+
+.object.active {
+  background: #4a90d933;
+  border-color: #4a90d9;
+}
+
+.object-panel {
+  padding: 8px;
+  overflow: auto;
+  height: 100%;
+}
+
+.object-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+tr.spacer td {
+  border: none;
+  padding: 0;
+}

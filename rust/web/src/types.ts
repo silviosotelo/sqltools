@@ -46,3 +46,18 @@ export type HistoryEntry = {
   error: string | null;
   startedAt: number;
 };
+
+export type ObjectInfo = {
+  name: string;
+  objectType: string;
+  status: string;
+};
+
+export type ColumnInfo = {
+  name: string;
+  dataType: string;
+  nullable: boolean;
+  dataDefault: string | null;
+};
+
+export type StatEntry = [string, string];

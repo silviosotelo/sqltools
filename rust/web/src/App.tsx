@@ -3,10 +3,13 @@ import { Editor } from "./Editor";
 import { api } from "./api";
 import { useTranslation } from "./i18n";
 import type {
+  ColumnInfo,
   ColumnMeta,
   ConnectionConfig,
   HistoryEntry,
+  ObjectInfo,
   QueryEvent,
+  StatEntry,
   Value,
 } from "./types";
 
@@ -23,6 +26,12 @@ type Draft = {
   prefetch: number;
   savePassword: boolean;
 };
+
+type Panel = "results" | "history" | "plan" | "object" | "stats";
+
+const ROW_HEIGHT = 24;
+const OVERSCAN = 8;
+const VISIBLE_ROWS = 60;
 
 function emptyDraft(): Draft {
   return {
@@ -99,18 +108,24 @@ export default function App() {
   const [sql, setSql] = useState("select * from dual");
   const [columns, setColumns] = useState<ColumnMeta[]>([]);
   const [rows, setRows] = useState<Value[][]>([]);
+  const [scrollTop, setScrollTop] = useState(0);
   const [running, setRunning] = useState(false);
   const [status, setStatus] = useState("");
   const [tables, setTables] = useState<string[]>([]);
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
   const [plan, setPlan] = useState("");
-  const [panel, setPanel] = useState<"results" | "history" | "plan">("results");
+  const [panel, setPanel] = useState<Panel>("results");
+  const [schema, setSchema] = useState("");
+  const [objectType, setObjectType] = useState("");
+  const [objects, setObjects] = useState<ObjectInfo[]>([]);
+  const [selectedObject, setSelectedObject] = useState<ObjectInfo | null>(null);
+  const [objectColumns, setObjectColumns] = useState<ColumnInfo[]>([]);
+  const [stats, setStats] = useState<StatEntry[]>([]);
 
   const isConnected = Boolean(selected && connected[selected]);
 
   const refresh = async () => {
-    const list = await api.listConnections();
-    setConnections(list);
+    setConnections(await api.listConnections());
   };
 
   useEffect(() => {
@@ -130,6 +145,10 @@ export default function App() {
       setDraft(fromConfig(config));
       setPassword("");
     }
+    setObjects([]);
+    setSelectedObject(null);
+    setObjectColumns([]);
+    setStats([]);
   };
 
   const update = <K extends keyof Draft>(key: K, value: Draft[K]) => {
@@ -175,7 +194,7 @@ export default function App() {
       const version = await api.connect(selected);
       setConnected((current) => ({ ...current, [selected]: version }));
       setStatus(`${t("connected")}: ${version}`);
-      setTables(await api.listObjects(selected));
+      setTables(await api.listTableNames(selected));
     } catch (error) {
       setStatus(String(error));
     }
@@ -191,6 +210,10 @@ export default function App() {
         return next;
       });
       setTables([]);
+      setObjects([]);
+      setSelectedObject(null);
+      setObjectColumns([]);
+      setStats([]);
       setStatus(t("disconnect"));
     } catch (error) {
       setStatus(String(error));
@@ -204,6 +227,7 @@ export default function App() {
     }
     setRows([]);
     setColumns([]);
+    setScrollTop(0);
     setRunning(true);
     setStatus("");
     setPanel("results");
@@ -278,6 +302,70 @@ export default function App() {
     }
   };
 
+  const showStats = async () => {
+    if (!isConnected) {
+      setStatus(t("noConnection"));
+      return;
+    }
+    try {
+      setStats(await api.sessionStats(selected));
+      setPanel("stats");
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const loadObjects = async () => {
+    if (!isConnected) {
+      setStatus(t("noConnection"));
+      return;
+    }
+    try {
+      setObjects(
+        await api.listObjects(
+          selected,
+          schema.trim() || null,
+          objectType.trim() || null,
+        ),
+      );
+      setPanel("object");
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const openObject = async (object: ObjectInfo) => {
+    setSelectedObject(object);
+    setObjectColumns([]);
+    setPanel("object");
+    if (!["TABLE", "VIEW"].includes(object.objectType)) return;
+    try {
+      setObjectColumns(
+        await api.listColumns(selected, schema.trim() || null, object.name),
+      );
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const loadDdl = async () => {
+    if (!selectedObject) return;
+    try {
+      setSql(
+        await api.loadDdl(
+          selected,
+          schema.trim() || null,
+          selectedObject.name,
+          selectedObject.objectType,
+        ),
+      );
+      setPanel("results");
+      setStatus(t("loadDdl"));
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
   const exportCsv = () => {
     if (!columns.length) return;
     const header = columns.map((column) => column.name).join(",");
@@ -292,6 +380,9 @@ export default function App() {
     link.click();
     URL.revokeObjectURL(url);
   };
+
+  const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
+  const end = Math.min(rows.length, start + VISIBLE_ROWS + OVERSCAN * 2);
 
   return (
     <div className="app">
@@ -441,6 +532,52 @@ export default function App() {
             </button>
           </div>
         </details>
+
+        <details open>
+          <summary>{t("objects")}</summary>
+          <label>
+            {t("schema")}
+            <input
+              value={schema}
+              placeholder="(current)"
+              onChange={(event) => setSchema(event.target.value)}
+            />
+          </label>
+          <label>
+            {t("objectType")}
+            <select
+              value={objectType}
+              onChange={(event) => setObjectType(event.target.value)}
+            >
+              <option value="">{t("allTypes")}</option>
+              <option value="TABLE">TABLE</option>
+              <option value="VIEW">VIEW</option>
+              <option value="PACKAGE">PACKAGE</option>
+              <option value="PROCEDURE">PROCEDURE</option>
+              <option value="FUNCTION">FUNCTION</option>
+              <option value="TRIGGER">TRIGGER</option>
+              <option value="SEQUENCE">SEQUENCE</option>
+            </select>
+          </label>
+          <button onClick={() => void loadObjects()} disabled={!isConnected}>
+            {t("loadObjects")}
+          </button>
+          <div className="object-list">
+            {objects.map((object) => (
+              <button
+                key={`${object.objectType}-${object.name}`}
+                className={
+                  selectedObject?.name === object.name ? "object active" : "object"
+                }
+                title={object.status}
+                onClick={() => void openObject(object)}
+              >
+                {object.name}
+                <span>{object.objectType}</span>
+              </button>
+            ))}
+          </div>
+        </details>
       </aside>
 
       <main className="main">
@@ -460,6 +597,9 @@ export default function App() {
           <button onClick={() => void showHistory()}>{t("history")}</button>
           <button onClick={() => void explain()} disabled={!isConnected}>
             {t("explain")}
+          </button>
+          <button onClick={() => void showStats()} disabled={!isConnected}>
+            {t("stats")}
           </button>
           <button onClick={exportCsv} disabled={!columns.length}>
             {t("exportCsv")}
@@ -495,12 +635,27 @@ export default function App() {
           >
             {t("plan")}
           </button>
+          <button
+            className={panel === "object" ? "active" : ""}
+            onClick={() => setPanel("object")}
+          >
+            {t("object")}
+          </button>
+          <button
+            className={panel === "stats" ? "active" : ""}
+            onClick={() => void showStats()}
+          >
+            {t("stats")}
+          </button>
           <span className="hint">{t("bookmarkHint")}</span>
         </nav>
 
         <section className="content">
           {panel === "results" && (
-            <div className="results">
+            <div
+              className="results"
+              onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+            >
               <table>
                 <thead>
                   <tr>
@@ -512,8 +667,13 @@ export default function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.slice(0, 500).map((row, rowIndex) => (
-                    <tr key={rowIndex}>
+                  {start > 0 && (
+                    <tr className="spacer" style={{ height: start * ROW_HEIGHT }}>
+                      <td colSpan={Math.max(columns.length, 1)} />
+                    </tr>
+                  )}
+                  {rows.slice(start, end).map((row, index) => (
+                    <tr key={start + index} style={{ height: ROW_HEIGHT }}>
                       {row.map((value, columnIndex) => (
                         <td
                           key={columnIndex}
@@ -524,15 +684,22 @@ export default function App() {
                       ))}
                     </tr>
                   ))}
+                  {end < rows.length && (
+                    <tr
+                      className="spacer"
+                      style={{ height: (rows.length - end) * ROW_HEIGHT }}
+                    >
+                      <td colSpan={Math.max(columns.length, 1)} />
+                    </tr>
+                  )}
                 </tbody>
               </table>
-              {rows.length > 500 && (
-                <p className="hint">
-                  {rows.length} {t("rows")} (mostrando 500)
-                </p>
-              )}
+              <p className="hint">
+                {rows.length} {t("rows")}
+              </p>
             </div>
           )}
+
           {panel === "history" && (
             <div className="history">
               {historyEntries.map((entry, index) => (
@@ -551,7 +718,67 @@ export default function App() {
               ))}
             </div>
           )}
+
           {panel === "plan" && <pre className="plan">{plan}</pre>}
+
+          {panel === "object" && (
+            <div className="object-panel">
+              {selectedObject ? (
+                <>
+                  <header className="object-header">
+                    <strong>{selectedObject.name}</strong>
+                    <span>{selectedObject.objectType}</span>
+                    <button onClick={() => void loadDdl()}>{t("loadDdl")}</button>
+                  </header>
+                  {objectColumns.length > 0 ? (
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>{t("columns")}</th>
+                          <th>{t("dataType")}</th>
+                          <th>{t("nullable")}</th>
+                          <th>{t("defaultValue")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {objectColumns.map((column) => (
+                          <tr key={column.name}>
+                            <td>{column.name}</td>
+                            <td>{column.dataType}</td>
+                            <td>{column.nullable ? "Y" : "N"}</td>
+                            <td>{column.dataDefault ?? ""}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <p className="hint">{selectedObject.status}</p>
+                  )}
+                </>
+              ) : (
+                <p className="hint">{t("selectObject")}</p>
+              )}
+            </div>
+          )}
+
+          {panel === "stats" && (
+            <table>
+              <thead>
+                <tr>
+                  <th>{t("stats")}</th>
+                  <th>Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats.map(([name, value]) => (
+                  <tr key={name}>
+                    <td>{name}</td>
+                    <td>{value}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </section>
 
         <footer className="status">{status}</footer>

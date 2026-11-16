@@ -4,13 +4,15 @@ Rust rewrite of SQLTools (Oracle client for PL/SQL/APEX developers), with a web 
 (Tauri v2 + React). Target platforms: Windows x64, macOS Intel/Apple Silicon and
 Linux x64.
 
-Status: **P2 (Tauri app)**. The C++/Qt port remains untouched at the repository
-root (branch `main`); this branch (`rust`) contains the new implementation.
+Status: **P3 (object explorer / DDL)**. The C++/Qt port remains untouched at the
+repository root (branch `main`); this branch (`rust`) contains the new
+implementation.
 
 The app can store connections (metadata in JSON, passwords only in the OS
 keyring), connect, edit SQL with CodeMirror (folding, bookmarks, autocomplete),
-execute with streaming results, cancel, commit/rollback, browse history and the
-execution plan, and export CSV. UI strings go through i18n (es/en).
+execute with streaming results and a virtualized grid, cancel, commit/rollback,
+browse history, plan and session statistics, export CSV, explore objects, inspect
+columns and load DDL through `DBMS_METADATA`. UI strings go through i18n (es/en).
 
 ## Structure
 

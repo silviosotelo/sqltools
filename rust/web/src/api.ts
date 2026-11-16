@@ -1,8 +1,11 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
+  ColumnInfo,
   ConnectionConfig,
   HistoryEntry,
+  ObjectInfo,
   QueryEvent,
+  StatEntry,
 } from "./types";
 
 export const api = {
@@ -27,8 +30,37 @@ export const api = {
   commit: (id: string) => invoke<void>("commit", { id }),
   rollback: (id: string) => invoke<void>("rollback", { id }),
   history: () => invoke<HistoryEntry[]>("history"),
-  listObjects: (connectionId: string) =>
-    invoke<string[]>("list_objects", { connectionId }),
+  listTableNames: (connectionId: string) =>
+    invoke<string[]>("list_table_names", { connectionId }),
+  listObjects: (
+    connectionId: string,
+    schema: string | null,
+    objectType: string | null,
+  ) =>
+    invoke<ObjectInfo[]>("list_objects", {
+      connectionId,
+      schema,
+      objectType,
+    }),
+  listColumns: (
+    connectionId: string,
+    schema: string | null,
+    table: string,
+  ) =>
+    invoke<ColumnInfo[]>("list_columns", {
+      connectionId,
+      schema,
+      table,
+    }),
+  loadDdl: (
+    connectionId: string,
+    schema: string | null,
+    name: string,
+    objectType: string,
+  ) =>
+    invoke<string>("load_ddl", { connectionId, schema, name, objectType }),
+  sessionStats: (connectionId: string) =>
+    invoke<StatEntry[]>("session_stats", { connectionId }),
   explainPlan: (connectionId: string, sql: string) =>
     invoke<string>("explain_plan", { connectionId, sql }),
 };
