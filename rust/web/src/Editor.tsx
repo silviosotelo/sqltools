@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { autocompletion, type CompletionContext } from "@codemirror/autocomplete";
 import { sql, StandardSQL } from "@codemirror/lang-sql";
-import { EditorState, StateEffect, StateField } from "@codemirror/state";
+import { EditorState, RangeSet, StateEffect, StateField } from "@codemirror/state";
 import {
   EditorView,
   GutterMarker,
@@ -31,30 +31,39 @@ class BookmarkMarker extends GutterMarker {
 const bookmarkMarker = new BookmarkMarker();
 const toggleBookmark = StateEffect.define<number>();
 
-const bookmarkField = StateField.define<Set<number>>({
-  create: () => new Set(),
+const bookmarkField = StateField.define<RangeSet<GutterMarker>>({
+  create: () => RangeSet.empty,
   update(value, transaction) {
-    let next = new Set(value);
+    let next = value.map(transaction.changes);
     for (const effect of transaction.effects) {
       if (effect.is(toggleBookmark)) {
-        if (next.has(effect.value)) next.delete(effect.value);
-        else next.add(effect.value);
+        const line = transaction.state.doc.lineAt(effect.value);
+        let exists = false;
+        next.between(line.from, line.from, () => {
+          exists = true;
+          return false;
+        });
+        if (exists) {
+          next = next.update({ filter: (from) => from !== line.from });
+        } else {
+          next = next.update({ add: [bookmarkMarker.range(line.from)] });
+        }
       }
     }
-    // Line numbers shift on edits; clear rather than point at the wrong line.
-    if (transaction.docChanged) next = new Set();
     return next;
   },
 });
 
 const bookmarkGutter = gutter({
   class: "cm-bookmark-gutter",
-  lineMarker: (view, line) =>
-    view.state
-      .field(bookmarkField)
-      .has(view.state.doc.lineAt(line.from).number)
-      ? bookmarkMarker
-      : null,
+  lineMarker: (view, line) => {
+    let exists = false;
+    view.state.field(bookmarkField).between(line.from, line.from, () => {
+      exists = true;
+      return false;
+    });
+    return exists ? bookmarkMarker : null;
+  },
   initialSpacer: () => bookmarkMarker,
   domEventHandlers: {
     mousedown(view, line) {
