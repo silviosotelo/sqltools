@@ -124,7 +124,7 @@ Expected: versiones estables impresas; sin error de linker (MSVC 14.29 y Windows
 // SPDX-License-Identifier: GPL-3.0-only
 pub struct Statement {
     pub start: usize,      // unidad UTF-16, primer carácter útil
-    pub end: usize,        // unidad UTF-16, justo después del último carácter (sin ';' ni '/')
+    pub end: usize,        // unidad UTF-16, fin de `text` (SQL sin ';'; PL/SQL con ';')
     pub plsql: bool,
     pub start_line: usize, // 1-based
     pub text: String,
@@ -223,12 +223,17 @@ Expected: `rust/web/dist/index.html` existe, sin errores de TypeScript.
 
 - [ ] **Step 3: Crear el shell Tauri**
 
-`rust/desktop/Cargo.toml` (con `license = "GPL-3.0-only"`): `tauri = { version = "2", features = [] }`, `serde`, `serde_json`; build-dep `tauri-build = "2"`. Agregar `"desktop"` a `members` del workspace. `build.rs`: `fn main() { tauri_build::build() }`. `main.rs`: builder mínimo con `tauri::generate_context!()`. `tauri.conf.json` con `build.frontendDist: "../web/dist"`, `build.devUrl: "http://localhost:1420"`, `build.beforeDevCommand: "npm --prefix ../web run dev"`, `bundle.active: false` en P0 (el empaquetado es P5), identifier `com.sqltools.rust`. `capabilities/default.json` con `"permissions": ["core:default"]`.
+`rust/desktop/Cargo.toml` (con `license = "GPL-3.0-only"`): `tauri = { version = "2", features = [] }`, `serde`, `serde_json`; build-dep `tauri-build = "2"`. Agregar `"desktop"` a `members` del workspace. `build.rs`: `fn main() { tauri_build::build() }`. `main.rs`: builder mínimo con `tauri::generate_context!()`. `tauri.conf.json` con `build.frontendDist: "../web/dist"`, `build.devUrl: "http://localhost:1420"`, `app.security.csp`, `bundle.active: true` e `icon` explícito. Sin `beforeBuildCommand`: el frontend se construye antes con `npm --prefix web run build` (Tauri ejecuta esos comandos desde la raíz del workspace). identifier `com.sqltools.rust`. `capabilities/default.json` con `"permissions": ["core:default"]`.
 
 - [ ] **Step 4: Compilar el desktop**
 
 Run: `cargo build -p sqlt-desktop` (desde `rust/`)
 Expected: binario en `rust/target/debug/`; sin errores de WebView2 ni de linking.
+
+- [ ] **Step 4b: Verificar el empaquetado real**
+
+Run (desde `rust/desktop`, con `rust/web/dist` construido): `npx @tauri-apps/cli@^2 build`
+Expected: `rust/target/release/bundle/msi/*.msi` y `.../nsis/*-setup.exe` generados.
 
 - [ ] **Step 5: Commit**
 
@@ -282,5 +287,6 @@ Expected: workflow en curso o completado; si falla una plataforma, corregir ante
 - [ ] `git log --oneline -4` muestra los commits de spec/plan, workspace/splitter, Tauri y CI.
 - [ ] `cargo test -p sqlt-core` PASA (19 casos del original + `statement_at` + UTF-16 + solo comentarios + CRLF + identificador entrecomillado + `q'{ }'`).
 - [ ] `cargo build -p sqlt-desktop` PASA en Windows (y CI en macOS/Linux).
+- [ ] `npx @tauri-apps/cli@^2 build` genera MSI y NSIS en Windows.
 - [ ] Workflow de GitHub Actions verde en las 4 plataformas.
 - [ ] `SCOPE`: `rust/**`, `.github/workflows/rust-ci.yml`, `.gitignore`, `docs/superpowers/**`. Nada de `src/`, `ui/` ni `CMakeLists.txt`.

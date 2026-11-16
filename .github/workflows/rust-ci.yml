@@ -15,6 +15,9 @@ concurrency:
   group: rust-ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: fmt + clippy + test (${{ matrix.os }})
@@ -65,3 +68,29 @@ jobs:
       - run: npm --prefix rust/web run build
       - run: cargo check -p sqlt-desktop
         working-directory: rust
+
+  bundle-windows:
+    name: bundle (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: rust/web/package-lock.json
+      - run: npm ci --prefix rust/web
+      - run: npm --prefix rust/web run build
+      - run: npx --yes @tauri-apps/cli@^2 build
+        working-directory: rust/desktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sqltools-windows
+          path: |
+            rust/target/release/bundle/msi/*.msi
+            rust/target/release/bundle/nsis/*.exe
+          if-no-files-found: error

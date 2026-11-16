@@ -36,9 +36,16 @@ cargo test -p sqlt-core
 npm --prefix web install
 npm --prefix web run build
 
-# app de escritorio (compila el shell; el empaquetado llega en P5)
+# app de escritorio
 cargo build -p sqlt-desktop
+
+# empaquetado (desde rust/desktop; requiere el frontend ya construido)
+npx @tauri-apps/cli@^2 build
+# artefactos: target/release/bundle/{msi,nsis} (Windows), dmg/app (macOS), deb/appimage (Linux)
 ```
+
+La firma/notarización y los instaladores por SO se completan en P5; el empaquetado
+sin firma ya se verifica en P0 en Windows.
 
 ## Licencia
 

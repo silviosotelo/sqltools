@@ -17,7 +17,8 @@
 pub struct Statement {
     /// Offset UTF-16 del primer carácter útil.
     pub start: usize,
-    /// Offset UTF-16 justo después del último carácter (sin `;` ni `/`).
+    /// Offset UTF-16 del final de `text` (para SQL excluye el `;`; para PL/SQL
+    /// conserva el `;` final del `END`, igual que el port C++).
     pub end: usize,
     /// Bloque PL/SQL (conserva el `;` final del `END` al ejecutar).
     pub plsql: bool,

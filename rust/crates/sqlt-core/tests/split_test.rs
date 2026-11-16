@@ -296,6 +296,22 @@ fn offsets_son_utf16_con_acentos_y_emoji() {
 }
 
 #[test]
+fn end_coincide_con_el_texto_en_sql_y_plsql() {
+    for script in [
+        "select 1 from dual;",
+        "select 1 from dual",
+        "begin null; end;",
+        "declare v number; begin v := 1; end;",
+        "begin\n  null;\nend;",
+    ] {
+        for st in split(script) {
+            let units = st.text.encode_utf16().count();
+            assert_eq!(st.end - st.start, units, "script {script:?}");
+        }
+    }
+}
+
+#[test]
 fn crlf_conserva_texto_y_lineas() {
     let got = split("select 1 from dual;\r\nselect 2 from dual;\r\n");
     assert_eq!(got.len(), 2);
