@@ -459,10 +459,12 @@ fn is_lob_type(oratype: &OracleType) -> bool {
 fn needs_summary_type(oratype: &OracleType) -> bool {
     // `XMLTYPE` attributes/elements are converted through a full `Char` value,
     // so they must be summarized before the crate's `Display` reads them.
+    // `JSON` can reach 32 MB in 21c and the crate cannot bind it as an
+    // attribute, so summarize instead of rendering `ERR(...)`/megabytes.
     is_lob_type(oratype)
         || matches!(
             oratype,
-            OracleType::Object(_) | OracleType::Xml | OracleType::RefCursor
+            OracleType::Object(_) | OracleType::Xml | OracleType::Json | OracleType::RefCursor
         )
 }
 
@@ -656,6 +658,7 @@ mod tests {
 #[test]
 fn xmltype_and_lobs_are_summarized_not_rendered() {
     assert!(needs_summary_type(&OracleType::Xml));
+    assert!(needs_summary_type(&OracleType::Json));
     assert!(needs_summary_type(&OracleType::CLOB));
     assert!(needs_summary_type(&OracleType::LongRaw));
     assert!(needs_summary_type(&OracleType::RefCursor));
