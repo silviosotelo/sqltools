@@ -415,3 +415,47 @@ fn closed_session_rejects_scripts() {
     assert!(error.contains("closed"), "{error}");
     let _ = fs::remove_file(path);
 }
+
+#[test]
+#[ignore = "requires a real Oracle connection"]
+fn closing_between_statements_stops_the_script() {
+    use sqlt_app::script::{run_script, ScriptEvent};
+    use std::sync::Arc;
+
+    let user = std::env::var("SQLT_USER").expect("SQLT_USER");
+    let password = std::env::var("SQLT_PASS").expect("SQLT_PASS");
+    let alias = std::env::var("SQLT_ALIAS").expect("SQLT_ALIAS");
+    let path = std::env::temp_dir().join(format!("sqlt-app-mid-{}.json", std::process::id()));
+    let _ = fs::remove_file(&path);
+    let mut store = ConnectionStore::new(path.clone());
+    let mut config = ConnectionConfig::new("Mid", &user);
+    config.alias = Some(alias);
+    config.tns_admin = std::env::var("SQLT_TNS_ADMIN").ok();
+    config.oci_dir = std::env::var("SQLT_OCI_DIR").ok();
+    store.upsert(config.clone()).unwrap();
+    store.set_password(&config.id, &password).unwrap();
+    let state = AppState::with_store(store);
+    state.connect(&config.id).expect("connect");
+    let session = state.session(&config.id).expect("session");
+    session.enable_dbms_output().expect("enable dbms_output");
+
+    // Close the session from the Output callback, i.e. between two statements.
+    let closing = Arc::clone(&session);
+    let mut outputs: Vec<String> = Vec::new();
+    let result = run_script(
+        &session,
+        "begin dbms_output.put_line('first'); end;\nbegin dbms_output.put_line('second'); end;",
+        state.query_options(&config.id),
+        0,
+        None,
+        |event| {
+            if let ScriptEvent::Output(lines) = event {
+                outputs.extend(lines);
+                closing.close();
+            }
+        },
+    );
+    assert!(result.is_err(), "a closed session must stop the script");
+    assert_eq!(outputs, vec!["first".to_string()], "{outputs:?}");
+    let _ = fs::remove_file(path);
+}

@@ -64,6 +64,11 @@ where
     let mut total = 0usize;
     let mut last_rows = 0usize;
     for statement in statements {
+        // `close()` interrupts an active OCI call, but between statements there
+        // is nothing to break: re-check so a closed session runs no more work.
+        if session.is_closed() {
+            return Err("The connection was closed".to_string());
+        }
         let text = statement.text.trim();
         if text.is_empty() {
             continue;
@@ -98,6 +103,9 @@ fn run_statement<F>(
 where
     F: FnMut(ScriptEvent),
 {
+    if session.is_closed() {
+        return Err("The connection was closed".to_string());
+    }
     let mut statement_rows = 0usize;
     if returns_rows(text) {
         let mut handle = session.query(text, options).map_err(|e| e.to_string())?;
@@ -119,6 +127,9 @@ where
             emit(ScriptEvent::Batch(batch));
         }
     } else {
+        if session.is_closed() {
+            return Err("The connection was closed".to_string());
+        }
         let affected = session.execute(text).map_err(|e| e.to_string())?;
         statement_rows = affected as usize;
     }
