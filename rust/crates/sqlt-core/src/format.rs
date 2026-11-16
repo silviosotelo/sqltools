@@ -501,6 +501,18 @@ fn format_statement(tokens: &[Token], options: &FormatOptions) -> String {
             "WHERE" => format_where(&body, options),
             "SET" => format_list("SET", &body, options),
             "VALUES" => format!("VALUES {}", render(&body, options)),
+            "INSERT INTO" => {
+                let mut body_options = *options;
+                body_options.uppercase_keywords = false;
+                let rendered = render(&body, &body_options);
+                let with_space = match rendered.find('(') {
+                    Some(position) => {
+                        format!("{} {}", &rendered[..position], &rendered[position..])
+                    }
+                    None => rendered,
+                };
+                format!("INSERT INTO {with_space}")
+            }
             _ => format!("{clause} {}", render(&body, options)),
         };
         out.push(text);
@@ -615,6 +627,15 @@ mod tests {
         let sql = "select a.id,b.nombre,sum(c.total) from cab_pedido a join cliente b on a.id_cliente=b.id left join det_pedido c on c.id_pedido=a.id where a.estado='A' and b.activo=1 group by a.id,b.nombre order by 3 desc;";
         let expected = "SELECT\n  a.id,\n  b.nombre,\n  SUM(c.total)\nFROM cab_pedido a\n  JOIN cliente b ON a.id_cliente = b.id\n  LEFT JOIN det_pedido c ON c.id_pedido = a.id\nWHERE a.estado = 'A'\n  AND b.activo = 1\nGROUP BY\n  a.id,\n  b.nombre\nORDER BY 3 DESC;";
         assert_eq!(format_sql(sql, &standard()), expected);
+    }
+
+    #[test]
+    fn insert_update_delete() {
+        let sql = "insert into t(a,b) values(1,'x');update t set a=1,b=2 where id=3;delete from t where id=3";
+        assert_eq!(
+            format_sql(sql, &standard()),
+            "INSERT INTO t (a, b)\nVALUES (1, 'x');\nUPDATE t\nSET\n  a = 1,\n  b = 2\nWHERE id = 3;\nDELETE FROM t\nWHERE id = 3"
+        );
     }
 
     #[test]
