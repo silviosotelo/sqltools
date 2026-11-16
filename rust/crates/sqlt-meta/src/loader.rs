@@ -163,7 +163,7 @@ fn load_constraints(
     let rows = fetch_rows(
         session,
         "select c.constraint_name, c.constraint_type, c.search_condition, \
-         c.r_constraint_name, c.delete_rule, cc.column_name \
+         c.r_constraint_name, c.delete_rule, cc.column_name, c.generated \
          from all_constraints c \
          left join all_cons_columns cc on cc.owner = c.owner and cc.constraint_name = c.constraint_name \
          where c.owner = :1 and c.table_name = :2 \
@@ -177,7 +177,8 @@ fn load_constraints(
         let constraint_name = cell(&row, 0);
         let kind = cell(&row, 1).chars().next().unwrap_or('C');
         let entry = by_name.entry(constraint_name.clone()).or_insert_with(|| {
-            let generated = constraint_name.to_ascii_uppercase().starts_with("SYS_C");
+            // ALL_CONSTRAINTS.GENERATED: 'GENERATED NAME' or 'USER NAME'.
+            let generated = cell(&row, 6) == "GENERATED NAME";
             let mut constraint = Constraint {
                 name: constraint_name,
                 kind,
