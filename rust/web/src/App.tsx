@@ -575,6 +575,18 @@ export default function App() {
     }
   };
 
+  const toggleReadOnly = async () => {
+    if (!selected) return;
+    try {
+      const value = await api.toggleReadOnly(selected);
+      await refresh();
+      setStatus(`${t("readOnly")}: ${value ? "ON" : "OFF"}`);
+      if (isConnected) await reconnect();
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
   const refreshObjectCache = async () => {
     columnCache.current.clear();
     if (!isConnected) return;
@@ -636,6 +648,20 @@ export default function App() {
         break;
       case "Session.Reconnect":
         void reconnect();
+        break;
+      case "Session.ToggleReadOnly":
+        void toggleReadOnly();
+        break;
+      case "Script.QuickCount":
+        if (selectedObject) countObject(selectedObject);
+        else setStatus(t("selectObject"));
+        break;
+      case "View.Properties":
+        setPanel("object");
+        break;
+      case "File.Close":
+      case "File.CloseAll":
+        newFile();
         break;
       case "Session.RefreshObjectCache":
         void refreshObjectCache();

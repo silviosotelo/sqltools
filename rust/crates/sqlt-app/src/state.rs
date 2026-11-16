@@ -102,4 +102,52 @@ impl AppState {
             .map(|entries| entries.clone())
             .unwrap_or_default()
     }
+
+    /// Flips the stored read-only flag. The caller reconnects for it to take
+    /// effect, because the driver enforces it when the session opens.
+    pub fn toggle_read_only(&self, connection_id: &str) -> Result<bool, String> {
+        let mut store = self
+            .store
+            .lock()
+            .map_err(|_| "Connection store lock poisoned".to_string())?;
+        let mut config = store
+            .get(connection_id)
+            .cloned()
+            .ok_or_else(|| format!("Connection {connection_id} not found"))?;
+        config.read_only = !config.read_only;
+        let value = config.read_only;
+        store.upsert(config).map_err(|e| e.to_string())?;
+        Ok(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::ConnectionConfig;
+
+    #[test]
+    fn toggles_read_only_and_persists_it() {
+        let path = std::env::temp_dir().join(format!("sqlt-state-{}.json", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let mut store = ConnectionStore::new(path.clone());
+        let mut config = ConnectionConfig::new("Local", "scott");
+        config.alias = Some("x".to_string());
+        config.save_password = false;
+        store.upsert(config.clone()).unwrap();
+        let state = AppState::with_store(store);
+        assert!(state.toggle_read_only(&config.id).unwrap());
+        assert!(
+            state
+                .store
+                .lock()
+                .unwrap()
+                .get(&config.id)
+                .unwrap()
+                .read_only
+        );
+        assert!(!state.toggle_read_only(&config.id).unwrap());
+        assert!(state.toggle_read_only("missing").is_err());
+        let _ = std::fs::remove_file(path);
+    }
 }

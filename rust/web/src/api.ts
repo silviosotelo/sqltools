@@ -33,6 +33,7 @@ export const api = {
     channel.onmessage = onEvent;
     return invoke<void>("execute", { connectionId, sql, maxRows, channel });
   },
+  toggleReadOnly: (id: string) => invoke<boolean>("toggle_read_only", { id }),
   cancel: (id: string) => invoke<void>("cancel", { id }),
   commit: (id: string) => invoke<void>("commit", { id }),
   rollback: (id: string) => invoke<void>("rollback", { id }),

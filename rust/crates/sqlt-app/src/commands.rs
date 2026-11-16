@@ -49,6 +49,11 @@ const IMPLEMENTED: &[&str] = &[
     "Edit.NextBookmark",
     "Edit.PreviousBookmark",
     "View.History",
+    "View.Properties",
+    "Script.QuickCount",
+    "Session.ToggleReadOnly",
+    "File.Close",
+    "File.CloseAll",
     "File.New",
     "Session.Reconnect",
     "Session.RefreshObjectCache",
@@ -143,7 +148,7 @@ mod tests {
                 .iter()
                 .filter(|command| command.implemented)
                 .count(),
-            48
+            53
         );
     }
 }

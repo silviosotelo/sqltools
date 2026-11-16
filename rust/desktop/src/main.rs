@@ -145,6 +145,11 @@ fn cancel(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn toggle_read_only(state: State<'_, Arc<AppState>>, id: String) -> Result<bool, String> {
+    state.toggle_read_only(&id)
+}
+
+#[tauri::command]
 fn commit(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
     state.session(&id)?.commit().map_err(|e| e.to_string())
 }
@@ -467,6 +472,7 @@ fn main() {
             delete_connection,
             connect,
             disconnect,
+            toggle_read_only,
             execute,
             cancel,
             commit,
