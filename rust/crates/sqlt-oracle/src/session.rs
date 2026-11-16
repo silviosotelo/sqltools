@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Sesión Oracle: conexión, consultas por lotes, cancelación y modo de solo lectura.
+//! Oracle session: connection, batched queries, binds, LOBs, cancellation and
+//! read-only mode.
 
+use std::io::Read;
 use std::sync::{Arc, OnceLock};
 
-use oracle::sql_type::{OracleType, Timestamp};
+use oracle::sql_type::{Clob, IntervalDS, IntervalYM, Nclob, OracleType, Timestamp};
 use oracle::{Connection, Connector, Privilege};
 use sqlt_core::datefmt::{compile_date_format, DateFormat};
 use sqlt_core::{Batch, ColumnMeta, Value};
@@ -14,23 +16,36 @@ use crate::spec::{ConnectMode, ConnectSpec};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct QueryOptions {
     pub prefetch: u32,
+    /// Returns LOB handles and reads them on the client (required for large CLOB/BLOB).
+    pub lob_locator: bool,
+    /// Maximum bytes read per LOB.
+    pub lob_limit: usize,
 }
 
 impl Default for QueryOptions {
     fn default() -> Self {
-        QueryOptions { prefetch: 1000 }
+        QueryOptions {
+            prefetch: 1000,
+            lob_locator: true,
+            lob_limit: 4 * 1024 * 1024,
+        }
     }
 }
 
 pub struct Session {
     conn: Arc<Connection>,
     read_only: bool,
+    /// Use the local fast formatter only when the session language is English.
+    fast_dates: bool,
 }
 
 pub struct QueryHandle {
     rs: oracle::ResultSet<'static, oracle::Row>,
     conn: Arc<Connection>,
     columns: Vec<ColumnMeta>,
+    fast_dates: bool,
+    lob_locator: bool,
+    lob_limit: usize,
 }
 
 impl Session {
@@ -56,10 +71,21 @@ impl Session {
             }
         }
         let conn = connector.connect()?;
+        let fast_dates = session_uses_english_dates(&conn);
         Ok(Session {
             conn: Arc::new(conn),
             read_only: spec.read_only,
+            fast_dates,
         })
+    }
+
+    pub fn fast_dates(&self) -> bool {
+        self.fast_dates
+    }
+
+    /// Disable it if the session changes `NLS_DATE_LANGUAGE` to a non-English language.
+    pub fn set_fast_dates(&mut self, value: bool) {
+        self.fast_dates = value;
     }
 
     fn guard(&self, sql: &str) -> Result<(), OciError> {
@@ -70,22 +96,45 @@ impl Session {
     }
 
     pub fn query(&self, sql: &str, opts: QueryOptions) -> Result<QueryHandle, OciError> {
+        self.query_with(sql, &[], opts)
+    }
+
+    pub fn query_with(
+        &self,
+        sql: &str,
+        params: &[&dyn oracle::sql_type::ToSql],
+        opts: QueryOptions,
+    ) -> Result<QueryHandle, OciError> {
         self.guard(sql)?;
         let mut builder = self.conn.statement(sql);
         builder.fetch_array_size(opts.prefetch.max(1));
+        if opts.lob_locator {
+            builder.lob_locator();
+        }
         let stmt = builder.build()?;
-        let rs = stmt.into_result_set::<oracle::Row>(&[])?;
+        let rs = stmt.into_result_set::<oracle::Row>(params)?;
         let columns = rs.column_info().iter().map(column_meta).collect::<Vec<_>>();
         Ok(QueryHandle {
             rs,
             conn: self.conn.clone(),
             columns,
+            fast_dates: self.fast_dates,
+            lob_locator: opts.lob_locator,
+            lob_limit: opts.lob_limit,
         })
     }
 
     pub fn execute(&self, sql: &str) -> Result<u64, OciError> {
+        self.execute_with(sql, &[])
+    }
+
+    pub fn execute_with(
+        &self,
+        sql: &str,
+        params: &[&dyn oracle::sql_type::ToSql],
+    ) -> Result<u64, OciError> {
         self.guard(sql)?;
-        let stmt = self.conn.execute(sql, &[])?;
+        let stmt = self.conn.execute(sql, params)?;
         Ok(stmt.row_count()?)
     }
 
@@ -99,7 +148,7 @@ impl Session {
         Ok(())
     }
 
-    /// Cancela la ejecución en curso (`OCIBreak`). Seguro desde otro hilo.
+    /// Cancels the running execution (`OCIBreak`). Safe from another thread.
     pub fn cancel(&self) -> Result<(), OciError> {
         self.conn.break_execution()?;
         Ok(())
@@ -116,12 +165,17 @@ impl QueryHandle {
         &self.columns
     }
 
-    /// Devuelve como máximo `max` filas. Un lote vacío indica fin del resultado.
+    /// Returns at most `max` rows. An empty batch means end of result.
     pub fn next_batch(&mut self, max: usize) -> Result<Batch, OciError> {
         let mut rows = Vec::new();
         for _ in 0..max {
             match self.rs.next() {
-                Some(Ok(row)) => rows.push(map_row(&row)?),
+                Some(Ok(row)) => rows.push(map_row(
+                    &row,
+                    self.fast_dates,
+                    self.lob_locator,
+                    self.lob_limit,
+                )?),
                 Some(Err(e)) => return Err(e.into()),
                 None => break,
             }
@@ -132,11 +186,23 @@ impl QueryHandle {
         })
     }
 
-    /// Cancela la ejecución en curso (`OCIBreak`). La sesión sigue usable.
+    /// Cancels the running execution (`OCIBreak`). The session remains usable.
     pub fn cancel(&self) -> Result<(), OciError> {
         self.conn.break_execution()?;
         Ok(())
     }
+}
+
+fn session_uses_english_dates(conn: &Connection) -> bool {
+    let sql = "select value from nls_session_parameters where parameter = 'NLS_DATE_LANGUAGE'";
+    let Ok(row) = conn.query_row(sql, &[]) else {
+        return false;
+    };
+    let Ok(value) = row.get::<_, String>(0) else {
+        return false;
+    };
+    let value = value.to_ascii_uppercase();
+    value.starts_with("AMERICAN") || value.starts_with("ENGLISH")
 }
 
 fn column_meta(info: &oracle::ColumnInfo) -> ColumnMeta {
@@ -186,7 +252,41 @@ fn format_timestamp(t: &Timestamp, precision: u8, with_tz: bool) -> String {
     out
 }
 
-fn map_value(value: &oracle::SqlValue, info: &oracle::ColumnInfo) -> Result<Value, OciError> {
+fn read_lob(value: &oracle::SqlValue, limit: usize, nclob: bool) -> Result<String, OciError> {
+    let mut buf = Vec::new();
+    if nclob {
+        let mut lob: Nclob = value.get()?;
+        let mut reader = (&mut lob).take(limit as u64);
+        reader
+            .read_to_end(&mut buf)
+            .map_err(|e| OciError::Io(e.to_string()))?;
+    } else {
+        let mut lob: Clob = value.get()?;
+        let mut reader = (&mut lob).take(limit as u64);
+        reader
+            .read_to_end(&mut buf)
+            .map_err(|e| OciError::Io(e.to_string()))?;
+    }
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
+
+fn read_blob(value: &oracle::SqlValue, limit: usize) -> Result<Vec<u8>, OciError> {
+    let mut lob: oracle::sql_type::Blob = value.get()?;
+    let mut buf = Vec::new();
+    let mut reader = (&mut lob).take(limit as u64);
+    reader
+        .read_to_end(&mut buf)
+        .map_err(|e| OciError::Io(e.to_string()))?;
+    Ok(buf)
+}
+
+fn map_value(
+    value: &oracle::SqlValue,
+    info: &oracle::ColumnInfo,
+    fast_dates: bool,
+    lob_locator: bool,
+    lob_limit: usize,
+) -> Result<Value, OciError> {
     if value.is_null()? {
         return Ok(Value::Null);
     }
@@ -199,26 +299,76 @@ fn map_value(value: &oracle::SqlValue, info: &oracle::ColumnInfo) -> Result<Valu
         | OracleType::Long
         | OracleType::Rowid
         | OracleType::Json
-        | OracleType::CLOB
-        | OracleType::NCLOB => Ok(Value::Text(value.get::<String>()?)),
+        | OracleType::Xml => Ok(Value::Text(value.get::<String>()?)),
+        OracleType::CLOB => {
+            if lob_locator {
+                Ok(Value::Text(read_lob(value, lob_limit, false)?))
+            } else {
+                Ok(Value::Text(value.get::<String>()?))
+            }
+        }
+        OracleType::NCLOB => {
+            if lob_locator {
+                Ok(Value::Text(read_lob(value, lob_limit, true)?))
+            } else {
+                Ok(Value::Text(value.get::<String>()?))
+            }
+        }
         OracleType::Number(_, _)
         | OracleType::Float(_)
         | OracleType::BinaryFloat
         | OracleType::BinaryDouble => Ok(Value::Number(value.get::<String>()?)),
         OracleType::Date => {
             let t: Timestamp = value.get()?;
-            Ok(Value::Date(format_timestamp(&t, 0, false)))
+            if fast_dates {
+                Ok(Value::Date(format_timestamp(&t, 0, false)))
+            } else {
+                Ok(Value::Date(
+                    value
+                        .get::<String>()
+                        .unwrap_or_else(|_| format_timestamp(&t, 0, false)),
+                ))
+            }
         }
         OracleType::Timestamp(prec) => {
             let t: Timestamp = value.get()?;
-            Ok(Value::Timestamp(format_timestamp(&t, *prec, false)))
+            if fast_dates {
+                Ok(Value::Timestamp(format_timestamp(&t, *prec, false)))
+            } else {
+                Ok(Value::Timestamp(
+                    value
+                        .get::<String>()
+                        .unwrap_or_else(|_| format_timestamp(&t, *prec, false)),
+                ))
+            }
         }
         OracleType::TimestampTZ(prec) | OracleType::TimestampLTZ(prec) => {
             let t: Timestamp = value.get()?;
-            Ok(Value::Timestamp(format_timestamp(&t, *prec, true)))
+            if fast_dates {
+                Ok(Value::Timestamp(format_timestamp(&t, *prec, true)))
+            } else {
+                Ok(Value::Timestamp(
+                    value
+                        .get::<String>()
+                        .unwrap_or_else(|_| format_timestamp(&t, *prec, true)),
+                ))
+            }
         }
-        OracleType::Raw(_) | OracleType::LongRaw | OracleType::BLOB => {
-            Ok(Value::Binary(value.get::<Vec<u8>>()?))
+        OracleType::IntervalDS(_, _) => {
+            let interval: IntervalDS = value.get()?;
+            Ok(Value::Text(interval.to_string()))
+        }
+        OracleType::IntervalYM(_) => {
+            let interval: IntervalYM = value.get()?;
+            Ok(Value::Text(interval.to_string()))
+        }
+        OracleType::Raw(_) | OracleType::LongRaw => Ok(Value::Binary(value.get::<Vec<u8>>()?)),
+        OracleType::BLOB => {
+            if lob_locator {
+                Ok(Value::Binary(read_blob(value, lob_limit)?))
+            } else {
+                Ok(Value::Binary(value.get::<Vec<u8>>()?))
+            }
         }
         other => Err(OciError::Unsupported(format!(
             "Tipo Oracle no soportado todavía: {other}"
@@ -226,10 +376,15 @@ fn map_value(value: &oracle::SqlValue, info: &oracle::ColumnInfo) -> Result<Valu
     }
 }
 
-fn map_row(row: &oracle::Row) -> Result<Vec<Value>, OciError> {
+fn map_row(
+    row: &oracle::Row,
+    fast_dates: bool,
+    lob_locator: bool,
+    lob_limit: usize,
+) -> Result<Vec<Value>, OciError> {
     row.sql_values()
         .iter()
         .zip(row.column_info())
-        .map(|(value, info)| map_value(value, info))
+        .map(|(value, info)| map_value(value, info, fast_dates, lob_locator, lob_limit))
         .collect()
 }

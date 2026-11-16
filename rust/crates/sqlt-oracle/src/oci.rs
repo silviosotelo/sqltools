@@ -15,6 +15,7 @@ pub enum OciError {
     Init(String),
     ReadOnly,
     Unsupported(String),
+    Io(String),
     Oracle(oracle::Error),
 }
 
@@ -33,6 +34,7 @@ impl fmt::Display for OciError {
                 "La conexión es de solo lectura: solo se permiten SELECT/WITH/EXPLAIN/DESCRIBE"
             ),
             OciError::Unsupported(msg) => write!(f, "{msg}"),
+            OciError::Io(msg) => write!(f, "Error de E/S leyendo LOB: {msg}"),
             OciError::Oracle(e) => write!(f, "{e}"),
         }
     }

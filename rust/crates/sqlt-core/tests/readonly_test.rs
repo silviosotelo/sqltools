@@ -2,7 +2,7 @@
 use sqlt_core::readonly::is_read_only;
 
 #[test]
-fn solo_lectura_acepta_consultas() {
+fn read_only_accepts_queries() {
     assert!(is_read_only("select 1 from dual"));
     assert!(is_read_only("  SELECT * FROM t"));
     assert!(is_read_only(
@@ -15,7 +15,7 @@ fn solo_lectura_acepta_consultas() {
 }
 
 #[test]
-fn solo_lectura_bloquea_escrituras_y_plsql() {
+fn read_only_blocks_writes_and_plsql() {
     assert!(!is_read_only("insert into t values (1)"));
     assert!(!is_read_only("update t set a = 1"));
     assert!(!is_read_only("delete from t"));

@@ -111,7 +111,7 @@ mod tests {
     }
 
     #[test]
-    fn query_con_opciones() {
+    fn query_with_options() {
         let cmd = parse(&args(&[
             "query",
             "select 1 from dual",
@@ -134,7 +134,7 @@ mod tests {
     }
 
     #[test]
-    fn sql_en_varias_partes() {
+    fn sql_in_multiple_parts() {
         let cmd = parse(&args(&["query", "select", "1", "from", "dual"])).unwrap();
         match cmd {
             Command::Query { sql, .. } => assert_eq!(sql, "select 1 from dual"),
@@ -156,7 +156,7 @@ mod tests {
     }
 
     #[test]
-    fn errores_de_uso() {
+    fn usage_errors() {
         assert!(parse(&[]).is_err());
         assert!(parse(&args(&["query"])).is_err());
         assert!(parse(&args(&["query", "select 1", "--runs", "x"])).is_err());
@@ -166,7 +166,7 @@ mod tests {
     }
 
     #[test]
-    fn ayuda() {
+    fn help() {
         assert_eq!(parse(&args(&["--help"])).unwrap(), Command::Help);
         assert_eq!(parse(&args(&["diag"])).unwrap(), Command::Diag);
     }

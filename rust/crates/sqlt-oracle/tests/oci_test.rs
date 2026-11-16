@@ -25,7 +25,7 @@ fn cleanup(dirs: &[&PathBuf]) {
 }
 
 #[test]
-fn prioridad_dpi_sobre_sqlt_y_path() {
+fn dpi_has_priority_over_sqlt_and_path() {
     let dpi = make_dir("dpi");
     let sqlt = make_dir("sqlt");
     let path_dir = make_dir("path");
@@ -41,7 +41,7 @@ fn prioridad_dpi_sobre_sqlt_y_path() {
 }
 
 #[test]
-fn cae_a_sqlt_si_falta_dpi() {
+fn falls_back_to_sqlt_without_dpi() {
     let sqlt = make_dir("solo-sqlt");
     let got = locate_oci_dir_in(None, Some(&sqlt), None, &[]);
     assert_eq!(got, Some(sqlt.clone()));
@@ -49,7 +49,7 @@ fn cae_a_sqlt_si_falta_dpi() {
 }
 
 #[test]
-fn cae_a_path_y_luego_a_candidatos() {
+fn falls_back_to_path_then_candidates() {
     let path_dir = make_dir("path2");
     let path_env = std::env::join_paths([&path_dir]).unwrap();
     assert_eq!(
@@ -65,7 +65,7 @@ fn cae_a_path_y_luego_a_candidatos() {
 }
 
 #[test]
-fn sin_cliente_devuelve_none() {
+fn no_client_returns_none() {
     let empty = std::env::temp_dir().join(format!("sqlt-oci-empty-{}", std::process::id()));
     let _ = fs::remove_dir_all(&empty);
     fs::create_dir_all(&empty).unwrap();

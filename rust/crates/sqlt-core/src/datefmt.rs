@@ -393,7 +393,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn lenguaje_ingles() {
+    fn english_language() {
         assert!(language_is_english(None, None));
         assert!(language_is_english(
             Some("AMERICAN"),

@@ -38,7 +38,13 @@ fn run_query(
 ) -> Result<(), String> {
     let session = Session::open(spec).map_err(|e| e.to_string())?;
     let mut handle = session
-        .query(sql, QueryOptions { prefetch })
+        .query(
+            sql,
+            QueryOptions {
+                prefetch,
+                ..QueryOptions::default()
+            },
+        )
         .map_err(|e| e.to_string())?;
     let mut header = with_header;
     let mut printed = 0usize;
@@ -72,7 +78,13 @@ fn run_bench(spec: &ConnectSpec, sql: &str, runs: usize, prefetch: u32) -> Resul
     let mut total = 0usize;
     for _ in 0..runs {
         let mut handle = session
-            .query(sql, QueryOptions { prefetch })
+            .query(
+                sql,
+                QueryOptions {
+                    prefetch,
+                    ..QueryOptions::default()
+                },
+            )
             .map_err(|e| e.to_string())?;
         loop {
             let batch = handle.next_batch(1000).map_err(|e| e.to_string())?;

@@ -20,7 +20,7 @@ fn utf16_slice(s: &str, start: usize, end: usize) -> String {
 }
 
 #[test]
-fn dos_selects() {
+fn two_selects() {
     expect(
         "dos selects",
         "select 1 from dual;\nselect 2 from dual;",
@@ -30,7 +30,7 @@ fn dos_selects() {
 }
 
 #[test]
-fn punto_y_coma_en_texto() {
+fn semicolon_in_text() {
     expect(
         "punto y coma en texto",
         "select 'a;b' x from dual; select 2 from dual",
@@ -40,7 +40,7 @@ fn punto_y_coma_en_texto() {
 }
 
 #[test]
-fn comilla_escapada() {
+fn escaped_quote() {
     expect(
         "comilla escapada",
         "select 'it''s; ok' from dual;",
@@ -50,7 +50,7 @@ fn comilla_escapada() {
 }
 
 #[test]
-fn punto_y_coma_en_comentario_de_linea() {
+fn semicolon_in_line_comment() {
     expect(
         "punto y coma en comentario de línea",
         "select 1 -- uno; dos\nfrom dual;",
@@ -60,7 +60,7 @@ fn punto_y_coma_en_comentario_de_linea() {
 }
 
 #[test]
-fn punto_y_coma_en_comentario_de_bloque() {
+fn semicolon_in_block_comment() {
     expect(
         "punto y coma en comentario de bloque",
         "select /* a; b */ 1 from dual;",
@@ -70,7 +70,7 @@ fn punto_y_coma_en_comentario_de_bloque() {
 }
 
 #[test]
-fn literal_q_con_corchetes() {
+fn q_literal_with_brackets() {
     expect(
         "literal q'[ ]'",
         "select q'[a;b]' from dual; select 2 from dual",
@@ -80,7 +80,7 @@ fn literal_q_con_corchetes() {
 }
 
 #[test]
-fn literal_q_con_llaves() {
+fn q_literal_with_braces() {
     expect(
         "literal q'{ }'",
         "select q'{a;b}' from dual; select 2 from dual",
@@ -90,7 +90,7 @@ fn literal_q_con_llaves() {
 }
 
 #[test]
-fn identificador_entrecomillado() {
+fn quoted_identifier() {
     expect(
         "identificador entrecomillado",
         "select \"a;b\" from dual; select 2 from dual",
@@ -100,7 +100,7 @@ fn identificador_entrecomillado() {
 }
 
 #[test]
-fn bloque_anonimo_simple() {
+fn simple_anonymous_block() {
     expect(
         "bloque anónimo simple",
         "begin null; end;\nselect 1 from dual;",
@@ -110,7 +110,7 @@ fn bloque_anonimo_simple() {
 }
 
 #[test]
-fn bloque_con_if_loop_case() {
+fn block_with_if_loop_case() {
     let script = r#"begin
   if x then
     for i in 1..3 loop
@@ -141,7 +141,7 @@ end;"#;
 }
 
 #[test]
-fn declare_y_begin() {
+fn declare_and_begin() {
     expect(
         "declare + begin",
         "declare v number; begin v := 1; end;\nselect 2 from dual;",
@@ -151,7 +151,7 @@ fn declare_y_begin() {
 }
 
 #[test]
-fn bloques_anidados() {
+fn nested_blocks() {
     expect(
         "bloques anidados",
         "begin begin null; end; null; end;\nselect 1 from dual;",
@@ -161,7 +161,7 @@ fn bloques_anidados() {
 }
 
 #[test]
-fn create_procedure_con_barra() {
+fn create_procedure_with_slash() {
     let script = r#"create or replace procedure p is
 begin
   null;
@@ -181,7 +181,7 @@ end;"#;
 }
 
 #[test]
-fn create_package_y_body() {
+fn create_package_and_body() {
     let script = r#"create or replace package pk as
   procedure a;
 end pk;
@@ -205,7 +205,7 @@ end pk;"#;
 }
 
 #[test]
-fn create_table_es_sql_suelto() {
+fn create_table_is_plain_sql() {
     expect(
         "create table es SQL suelto",
         "create table t (a number);\nselect 1 from dual;",
@@ -229,7 +229,7 @@ end;"#;
 }
 
 #[test]
-fn sin_punto_y_coma_final() {
+fn no_trailing_semicolon() {
     expect(
         "sin punto y coma final",
         "select 1 from dual",
@@ -239,7 +239,7 @@ fn sin_punto_y_coma_final() {
 }
 
 #[test]
-fn comentarios_al_inicio() {
+fn leading_comments() {
     expect(
         "comentarios al inicio",
         "-- hola\nselect 1 from dual;\n/* x */ select 2 from dual;",
@@ -249,7 +249,7 @@ fn comentarios_al_inicio() {
 }
 
 #[test]
-fn barra_sola_cierra_sql() {
+fn standalone_slash_closes_sql() {
     expect(
         "barra sola cierra sql",
         "select 1 from dual\n/\nselect 2 from dual\n/",
@@ -259,17 +259,17 @@ fn barra_sola_cierra_sql() {
 }
 
 #[test]
-fn script_vacio() {
+fn empty_script() {
     expect("vacío", "  \n ; \n", &[], &[]);
 }
 
 #[test]
-fn solo_comentarios_no_produce_sentencias() {
+fn comments_only_produce_no_statements() {
     expect("solo comentarios", "-- hola\n/* x */\n", &[], &[]);
 }
 
 #[test]
-fn statement_at_igual_al_original() {
+fn statement_at_matches_original() {
     let v = split("select 1 from dual;\n\nselect 2 from dual;");
     assert_eq!(statement_at(&v, 5), Some(0));
     assert_eq!(statement_at(&v, 20), Some(0));
@@ -279,7 +279,7 @@ fn statement_at_igual_al_original() {
 }
 
 #[test]
-fn offsets_son_utf16_con_acentos_y_emoji() {
+fn offsets_are_utf16_with_accents_and_emoji() {
     let sql = "select 'ñ😀' from dual;\nselect 2 from dual;";
     let got = split(sql);
     assert_eq!(got.len(), 2);
@@ -296,7 +296,7 @@ fn offsets_son_utf16_con_acentos_y_emoji() {
 }
 
 #[test]
-fn end_coincide_con_el_texto_en_sql_y_plsql() {
+fn end_matches_text_in_sql_and_plsql() {
     for script in [
         "select 1 from dual;",
         "select 1 from dual",
@@ -312,7 +312,7 @@ fn end_coincide_con_el_texto_en_sql_y_plsql() {
 }
 
 #[test]
-fn crlf_conserva_texto_y_lineas() {
+fn crlf_preserves_text_and_lines() {
     let got = split("select 1 from dual;\r\nselect 2 from dual;\r\n");
     assert_eq!(got.len(), 2);
     assert_eq!(got[0].text, "select 1 from dual");

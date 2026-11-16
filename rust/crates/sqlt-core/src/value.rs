@@ -50,14 +50,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn null_y_binario_no_tienen_texto() {
+    fn null_and_binary_have_no_text() {
         assert!(Value::Null.is_null());
         assert_eq!(Value::Null.display(), None);
         assert_eq!(Value::Binary(vec![1, 2]).display(), None);
     }
 
     #[test]
-    fn numeros_conservan_la_cadena() {
+    fn numbers_preserve_the_string() {
         let v = Value::Number("12345678901234567890123456789012345678".to_string());
         assert_eq!(v.display(), Some("12345678901234567890123456789012345678"));
     }

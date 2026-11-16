@@ -30,7 +30,7 @@ fn values() -> HashMap<String, BindValue> {
 }
 
 #[test]
-fn nombres_unicos_en_orden() {
+fn unique_names_in_order() {
     assert_eq!(
         names("select * from t where a = :a and b = :b or c = :a"),
         vec!["a", "b"]
@@ -45,14 +45,14 @@ fn nombres_unicos_en_orden() {
 }
 
 #[test]
-fn sustitucion_auto_y_texto() {
+fn auto_and_text_substitution() {
     let (sql, warnings) = substitute("a = :n and b = :t", &values());
     assert_eq!(sql, "a = 42 and b = 'O''Brien'");
     assert!(warnings.is_empty());
 }
 
 #[test]
-fn fechas_con_y_sin_hora() {
+fn dates_with_and_without_time() {
     let (sql, _) = substitute(":d / :d2", &values());
     assert_eq!(
         sql,
@@ -61,44 +61,44 @@ fn fechas_con_y_sin_hora() {
 }
 
 #[test]
-fn null_vacio_y_string_numerico() {
+fn null_empty_and_numeric_string() {
     let (sql, _) = substitute(":z|:e|:s", &values());
     assert_eq!(sql, "NULL|NULL|'123'");
 }
 
 #[test]
-fn notacion_cientifica_es_numero() {
+fn scientific_notation_is_number() {
     let (sql, _) = substitute(":f", &values());
     assert_eq!(sql, "-1.5e3");
 }
 
 #[test]
-fn valores_invalidos_dan_null_con_aviso() {
+fn invalid_values_become_null_with_warning() {
     let (sql, warnings) = substitute(":bad :bd", &values());
     assert_eq!(sql, "NULL NULL");
     assert_eq!(warnings.len(), 2);
 }
 
 #[test]
-fn no_toca_textos_ni_comentarios() {
+fn does_not_touch_text_or_comments() {
     let (sql, _) = substitute("select ':n' x, :n y -- :n\n from t", &values());
     assert_eq!(sql, "select ':n' x, 42 y -- :n\n from t");
 }
 
 #[test]
-fn variable_sin_valor_es_null() {
+fn missing_variable_is_null() {
     let (sql, _) = substitute("a = :nueva", &values());
     assert_eq!(sql, "a = NULL");
 }
 
 #[test]
-fn nombres_sin_distinguir_mayusculas() {
+fn names_are_case_insensitive() {
     let (sql, _) = substitute("a = :N and b = :n", &values());
     assert_eq!(sql, "a = 42 and b = 42");
 }
 
 #[test]
-fn posicionales_tambien_se_sustituyen() {
+fn positional_binds_are_substituted() {
     let mut v = HashMap::new();
     v.insert(
         "1".to_string(),

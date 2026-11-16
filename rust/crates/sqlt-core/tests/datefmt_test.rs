@@ -14,7 +14,7 @@ fn fmt(f: &str, dt: (i32, u32, u32, u32, u32, u32)) -> String {
 }
 
 #[test]
-fn formatos_de_fecha_del_original() {
+fn original_date_formats() {
     assert_eq!(fmt("DD-MON-RR", FEB29), "29-FEB-24");
     assert_eq!(fmt("DD-MON-YYYY", FEB29), "29-FEB-2024");
     assert_eq!(fmt("YYYY-MM-DD HH24:MI:SS", FEB29), "2024-02-29 13:45:09");
@@ -40,7 +40,7 @@ fn formatos_de_fecha_del_original() {
 }
 
 #[test]
-fn bisiesto_y_principio_de_siglo() {
+fn leap_year_and_century_start() {
     assert_eq!(fmt("DD-MON-YYYY", MAR1_1900), "01-MAR-1900");
     assert_eq!(
         fmt("YYYY-MM-DD HH24:MI:SS", MAR1_1900),
@@ -54,7 +54,7 @@ fn bisiesto_y_principio_de_siglo() {
 }
 
 #[test]
-fn medianoche_y_doce_del_mediodia() {
+fn midnight_and_noon() {
     assert_eq!(
         fmt("DD/MM/YYYY HH24:MI:SS", JAN1_2026),
         "01/01/2026 23:59:59"
@@ -71,7 +71,7 @@ fn medianoche_y_doce_del_mediodia() {
 }
 
 #[test]
-fn meses_y_dias_en_tres_casos() {
+fn months_and_days_in_three_cases() {
     assert_eq!(fmt("MON", FEB29), "FEB");
     assert_eq!(fmt("Mon", FEB29), "Feb");
     assert_eq!(fmt("mon", FEB29), "feb");
@@ -84,7 +84,7 @@ fn meses_y_dias_en_tres_casos() {
 }
 
 #[test]
-fn formatos_no_soportados_devuelven_none() {
+fn unsupported_formats_return_none() {
     assert!(compile_date_format("dd-mon-rr").is_none());
     assert!(compile_date_format("FMDD-MON-YY").is_none());
     assert!(compile_date_format("DD-MON-RR HH24:MI:SSXFF").is_none());

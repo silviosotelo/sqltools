@@ -26,6 +26,12 @@ rust/
 - Oracle Instant Client **solo para la capa de base de datos** (fase P1). No se
   incluye en el repo por su licencia OTN.
 
+## Convenciones
+
+- Identificadores, funciones, tests y comentarios nuevos: **inglés snake_case**.
+- Textos visibles al usuario: español (i18n en P4).
+- Commits en inglés.
+
 ## CI
 
 Windows x64, Linux x64 y macOS Intel (`macos-15-intel`). El runner arm64 de

@@ -12,7 +12,7 @@ fn spec(vars: &[(&str, &str)]) -> Result<ConnectSpec, SpecError> {
 }
 
 #[test]
-fn alias_con_defaults() {
+fn alias_with_defaults() {
     let s = spec(&[
         ("SQLT_USER", "kmelot"),
         ("SQLT_PASS", "secreto"),
@@ -27,7 +27,7 @@ fn alias_con_defaults() {
 }
 
 #[test]
-fn conexion_directa_y_modo() {
+fn direct_connection_and_mode() {
     let s = spec(&[
         ("SQLT_USER", "sys"),
         ("SQLT_PASS", "x"),
@@ -48,7 +48,7 @@ fn conexion_directa_y_modo() {
 }
 
 #[test]
-fn faltan_variables_obligatorias() {
+fn missing_required_variables() {
     assert_eq!(spec(&[]).unwrap_err(), SpecError::Missing("SQLT_USER"));
     assert_eq!(
         spec(&[("SQLT_USER", "u")]).unwrap_err(),
@@ -61,7 +61,7 @@ fn faltan_variables_obligatorias() {
 }
 
 #[test]
-fn modo_invalido() {
+fn invalid_mode() {
     let err = spec(&[
         ("SQLT_USER", "u"),
         ("SQLT_PASS", "p"),
@@ -73,7 +73,7 @@ fn modo_invalido() {
 }
 
 #[test]
-fn parseo_de_modos() {
+fn mode_parsing() {
     assert_eq!(ConnectMode::parse(""), Some(ConnectMode::Normal));
     assert_eq!(ConnectMode::parse("normal"), Some(ConnectMode::Normal));
     assert_eq!(ConnectMode::parse("SYSDBA"), Some(ConnectMode::SysDba));
@@ -82,7 +82,7 @@ fn parseo_de_modos() {
 }
 
 #[test]
-fn direct_arma_la_cadena() {
+fn direct_builds_the_connect_string() {
     let s = ConnectSpec::direct("u", "p", "10.0.0.5", 1521, "anam");
     assert_eq!(s.connect_string(), "//10.0.0.5:1521/anam");
 }
