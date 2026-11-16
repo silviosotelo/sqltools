@@ -162,12 +162,15 @@ impl ConnectionStore {
     }
 
     pub fn remove(&mut self, id: &str) -> Result<(), StoreError> {
+        let save_password = self.get(id).map(|c| c.save_password).unwrap_or(false);
         let before = self.connections.len();
         self.connections.retain(|c| c.id != id);
         if self.connections.len() == before {
             return Err(StoreError::NotFound(format!("Connection {id} not found")));
         }
-        let _ = self.delete_password(id);
+        if save_password {
+            let _ = self.delete_password(id);
+        }
         self.save()
     }
 

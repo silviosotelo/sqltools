@@ -1,77 +1,78 @@
 # SQLTools Rust
 
-Reescritura en Rust de SQLTools (cliente Oracle para PL/SQL/APEX), con UI web
-(Tauri v2 + React) y objetivo multiplataforma: Windows x64, macOS Intel/Apple
-Silicon y Linux x64.
+Rust rewrite of SQLTools (Oracle client for PL/SQL/APEX developers), with a web UI
+(Tauri v2 + React). Target platforms: Windows x64, macOS Intel/Apple Silicon and
+Linux x64.
 
-Estado: **P2 (app Tauri)**. El port C++/Qt sigue intacto en la raíz del repo
-(rama `main`); esta rama (`rust`) contiene la implementación nueva.
+Status: **P2 (Tauri app)**. The C++/Qt port remains untouched at the repository
+root (branch `main`); this branch (`rust`) contains the new implementation.
 
-La app ya permite guardar conexiones (metadatos en JSON, contraseñas en el
-keyring del SO), conectar, editar SQL con CodeMirror (plegado, marcadores,
-autocompletado), ejecutar con resultados en streaming, cancelar, commit/rollback,
-ver historial y plan, y exportar CSV. La UI usa i18n es/en.
+The app can store connections (metadata in JSON, passwords only in the OS
+keyring), connect, edit SQL with CodeMirror (folding, bookmarks, autocomplete),
+execute with streaming results, cancel, commit/rollback, browse history and the
+execution plan, and export CSV. UI strings go through i18n (es/en).
 
-## Estructura
+## Structure
 
 ```
 rust/
-  crates/sqlt-core/    # lógica pura (partidor de sentencias, formato, binds...)
-  crates/sqlt-oracle/  # driver Oracle (ODPI-C), sesiones, lotes, cancelación
-  crates/sqlt-cli/     # harness headless: diag, query, bench
-  desktop/             # shell Tauri v2
-  web/                 # frontend React + TypeScript + Vite
+  crates/sqlt-core/    # pure logic (statement splitter, formatting, binds...)
+  crates/sqlt-oracle/  # Oracle driver (ODPI-C), sessions, batches, cancellation
+  crates/sqlt-app/     # connection store, keyring, application state
+  crates/sqlt-cli/     # headless harness: diag, query, bench
+  desktop/             # Tauri v2 shell and commands
+  web/                 # React + TypeScript + Vite frontend
 ```
 
-## Requisitos
+## Requirements
 
-- Rust stable (host MSVC en Windows; Xcode CLT en macOS; build-essential en Linux).
-- Node.js 22+ y npm.
-- Tauri v2: WebView2 en Windows, WebKitGTK en Linux.
-- Oracle Instant Client **solo para la capa de base de datos** (fase P1). No se
-  incluye en el repo por su licencia OTN.
+- Stable Rust (MSVC host on Windows; Xcode CLT on macOS; build-essential on Linux).
+- Node.js 22+ and npm.
+- Tauri v2: WebView2 on Windows, WebKitGTK on Linux.
+- Oracle Instant Client **only for the database layer**. It is not included in
+  the repository because of its OTN license.
 
-## Convenciones
+## Conventions
 
-- **Todo el código en inglés**: identificadores, funciones, tests, comentarios,
-  mensajes de error y salida del CLI.
-- **UI con i18n** (`rust/web/src/i18n.tsx`): nada de texto hardcodeado; diccionarios
-  `es`/`en`.
-- Commits en inglés.
+- **All code in English**: identifiers, functions, tests, comments, error
+  messages and CLI output.
+- **UI strings via i18n** (`rust/web/src/i18n.tsx`): no hardcoded text; `es`/`en`
+  dictionaries.
+- Commits in English.
 
 ## CI
 
-Windows x64, Linux x64 y macOS Intel (`macos-15-intel`). El runner arm64 de
-GitHub no está disponible para esta cuenta (los jobs quedan en cola y se
-cancelan a los 15 min), así que Apple Silicon se verifica con un runner propio o
-build local; el código Rust/Tauri es el mismo.
+Windows x64, Linux x64 and macOS Intel (`macos-15-intel`). The GitHub arm64
+runner is not available to this account (jobs stay queued and are cancelled
+after 15 minutes), so Apple Silicon is verified with a self-hosted runner or a
+local build; the Rust/Tauri code is the same.
 
-## Comandos
+## Commands
 
 ```bash
-# desde rust/
+# from rust/
 cargo fmt --all --check
 cargo clippy --workspace --exclude sqlt-desktop --all-targets -- -D warnings
 cargo test --workspace --exclude sqlt-desktop
 
-# Oracle (ver crates/sqlt-oracle/README.md para las variables de entorno)
+# Oracle (see crates/sqlt-oracle/README.md for environment variables)
 cargo run -p sqlt-cli -- diag
 
 # frontend
 npm --prefix web install
 npm --prefix web run build
 
-# app de escritorio
+# desktop app
 cargo build -p sqlt-desktop
 
-# empaquetado (desde rust/desktop; requiere el frontend ya construido)
+# bundle (from rust/desktop; the frontend must be built first)
 npx @tauri-apps/cli@^2 build
-# artefactos: target/release/bundle/{msi,nsis} (Windows), dmg/app (macOS), deb/appimage (Linux)
+# artifacts: target/release/bundle/{msi,nsis} (Windows), dmg/app (macOS), deb/appimage (Linux)
 ```
 
-La firma/notarización y los instaladores por SO se completan en P5; el empaquetado
-sin firma ya se verifica en P0 en Windows.
+Signing/notarization and per-OS installers are completed in P5; unsigned
+bundling is already verified on Windows in P0.
 
-## Licencia
+## License
 
-GPLv3. Ver `LICENSE` en la raíz y `NOTICE` en esta carpeta.
+GPLv3. See `LICENSE` at the repository root and `NOTICE` in this directory.

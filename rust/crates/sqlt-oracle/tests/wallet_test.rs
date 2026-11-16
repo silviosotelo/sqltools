@@ -247,7 +247,6 @@ fn wallet_resolution_cases() {
         Some(fixture.path("mac/wallets/dos"))
     );
     assert!(!by(&checks, "windows_high").ok);
-    eprintln!("checks after Wallet_Uno: {checks:?}");
     assert!(by(&checks, "windows_high")
         .message
         .contains("C:\\Wallet_Uno"));

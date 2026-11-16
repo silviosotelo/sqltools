@@ -458,10 +458,11 @@ pub fn inspect(tns_folder: &Path, home: &Path) -> Vec<AliasCheck> {
                 );
             } else {
                 check.ok = false;
-                let leaf = my_wallet_mac
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default();
+                let leaf = my_wallet
+                    .rsplit(['\\', '/'])
+                    .next()
+                    .unwrap_or_default()
+                    .to_string();
                 let parent = tns_folder
                     .parent()
                     .map(Path::to_path_buf)
