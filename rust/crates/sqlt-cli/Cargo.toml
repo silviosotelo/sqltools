@@ -6,4 +6,5 @@ license = "GPL-3.0-only"
 
 [dependencies]
 sqlt-core = { path = "../sqlt-core" }
+sqlt-meta = { path = "../sqlt-meta" }
 sqlt-oracle = { path = "../sqlt-oracle" }

@@ -5,7 +5,10 @@
 //! Golden source: `tests/meta_test.cpp` plus the formatting rules in
 //! `src/MetaDictionary/MetaObjects.cpp`.
 
+pub mod compare;
 pub mod loader;
+
+pub use compare::{compare_ddl, DdlComparison};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WriteSettings {

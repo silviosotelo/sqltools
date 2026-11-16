@@ -59,6 +59,9 @@ cargo test --workspace --exclude sqlt-desktop
 
 # Oracle (see crates/sqlt-oracle/README.md for environment variables)
 cargo run -p sqlt-cli -- diag
+cargo run -p sqlt-cli -- ddl --table CLIENTE --schema ANAMNESIS
+cargo run -p sqlt-cli -- compare-ddl ddl_CLIENTE_win.sql --table CLIENTE --schema ANAMNESIS
+# compare-ddl normalizes CRLF/BOM, prints the first differing line and exits 1 on mismatch
 
 # frontend
 npm --prefix web install

@@ -3930,6 +3930,7 @@ name = "sqlt-cli"
 version = "0.1.0"
 dependencies = [
  "sqlt-core",
+ "sqlt-meta",
  "sqlt-oracle",
 ]
 

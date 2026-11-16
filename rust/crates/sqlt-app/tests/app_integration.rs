@@ -85,6 +85,24 @@ fn catalog_and_ddl() {
     let meta_ddl = catalog::load_table_ddl_meta(&session, None, &first, options).expect("meta ddl");
 
     eprintln!("meta ddl: {} bytes", meta_ddl.len());
+
+    let comparison_path =
+        std::env::temp_dir().join(format!("sqlt-meta-compare-{}.sql", std::process::id()));
+    fs::write(&comparison_path, &meta_ddl).expect("write meta ddl");
+    let stored = fs::read_to_string(&comparison_path).expect("read meta ddl");
+    let identical = sqlt_meta::compare_ddl(&stored, &meta_ddl);
+    assert!(identical.identical, "{}", identical.report());
+    let altered = meta_ddl.replace("CREATE TABLE", "CREATE TABLE extra");
+    let different = sqlt_meta::compare_ddl(&altered, &meta_ddl);
+    assert!(!different.identical);
+    assert_eq!(different.first_difference, Some(1));
+    let _ = fs::remove_file(&comparison_path);
+    eprintln!(
+        "ddl compare: {} (synthetic difference: {})",
+        identical.report(),
+        different.differing_lines
+    );
+
     let ddl = catalog::load_ddl(&session, None, &first, "TABLE", options).expect("ddl");
     assert!(ddl.to_ascii_uppercase().contains("CREATE"), "{ddl}");
 

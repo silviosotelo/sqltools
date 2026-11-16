@@ -16,6 +16,15 @@ pub enum Command {
         runs: usize,
         prefetch: u32,
     },
+    Ddl {
+        schema: Option<String>,
+        table: String,
+    },
+    CompareDdl {
+        path: String,
+        schema: Option<String>,
+        table: String,
+    },
 }
 
 pub const USAGE: &str = "\
@@ -23,6 +32,8 @@ usage:
   sqlt-cli diag
   sqlt-cli query \"<sql>\" [--max-rows N] [--prefetch N] [--no-header]
   sqlt-cli bench \"<sql>\" [--runs N] [--prefetch N]
+  sqlt-cli ddl --table NAME [--schema S]
+  sqlt-cli compare-ddl \"<file>\" --table NAME [--schema S]
 
 Environment: SQLT_USER, SQLT_PASS, SQLT_ALIAS or SQLT_CONNECT,
              SQLT_OCI_DIR, SQLT_TNS_ADMIN, SQLT_MODE, SQLT_READ_ONLY, SQLT_PREFETCH";
@@ -98,6 +109,57 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
                 })
             }
         }
+        "ddl" | "compare-ddl" => {
+            let mut table: Option<String> = None;
+            let mut schema: Option<String> = None;
+            let mut path: Option<String> = None;
+            let mut i = 1usize;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--table" => {
+                        table = Some(
+                            args.get(i + 1)
+                                .ok_or_else(|| "missing value for --table".to_string())?
+                                .clone(),
+                        );
+                        i += 2;
+                    }
+                    "--schema" => {
+                        schema = Some(
+                            args.get(i + 1)
+                                .ok_or_else(|| "missing value for --schema".to_string())?
+                                .clone(),
+                        );
+                        i += 2;
+                    }
+                    flag if flag.starts_with("--") => {
+                        return Err(format!("unknown option: {flag}"));
+                    }
+                    value => {
+                        if path.is_none() {
+                            path = Some(value.to_string());
+                        } else {
+                            return Err(format!("unexpected argument: {value}"));
+                        }
+                        i += 1;
+                    }
+                }
+            }
+            let table = table.ok_or_else(|| "missing --table".to_string())?;
+            if cmd == "ddl" {
+                if path.is_some() {
+                    return Err("ddl does not accept a file path".to_string());
+                }
+                Ok(Command::Ddl { schema, table })
+            } else {
+                let path = path.ok_or_else(|| "compare-ddl expects a file path".to_string())?;
+                Ok(Command::CompareDdl {
+                    path,
+                    schema,
+                    table,
+                })
+            }
+        }
         other => Err(format!("unknown command: {other}\n\n{USAGE}")),
     }
 }
@@ -156,13 +218,49 @@ mod tests {
     }
 
     #[test]
+    fn ddl_and_compare() {
+        assert_eq!(
+            parse(&args(&[
+                "ddl",
+                "--table",
+                "CLIENTE",
+                "--schema",
+                "ANAMNESIS"
+            ]))
+            .unwrap(),
+            Command::Ddl {
+                schema: Some("ANAMNESIS".to_string()),
+                table: "CLIENTE".to_string(),
+            }
+        );
+        assert_eq!(
+            parse(&args(&[
+                "compare-ddl",
+                "ddl_CLIENTE_win.sql",
+                "--table",
+                "CLIENTE",
+            ]))
+            .unwrap(),
+            Command::CompareDdl {
+                path: "ddl_CLIENTE_win.sql".to_string(),
+                schema: None,
+                table: "CLIENTE".to_string(),
+            }
+        );
+        assert!(parse(&args(&["ddl"])).is_err());
+        assert!(parse(&args(&["ddl", "--table"])).is_err());
+        assert!(parse(&args(&["compare-ddl", "--table", "T"])).is_err());
+        assert!(parse(&args(&["ddl", "file.sql", "--table", "T"])).is_err());
+    }
+
+    #[test]
     fn usage_errors() {
         assert!(parse(&[]).is_err());
         assert!(parse(&args(&["query"])).is_err());
         assert!(parse(&args(&["query", "select 1", "--runs", "x"])).is_err());
-        assert!(parse(&args(&["query", "select 1", "--desconocida"])).is_err());
+        assert!(parse(&args(&["query", "select 1", "--unknown"])).is_err());
         assert!(parse(&args(&["diag", "extra"])).is_err());
-        assert!(parse(&args(&["otro"])).is_err());
+        assert!(parse(&args(&["other"])).is_err());
     }
 
     #[test]

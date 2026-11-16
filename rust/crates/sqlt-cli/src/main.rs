@@ -104,6 +104,33 @@ fn run_bench(spec: &ConnectSpec, sql: &str, runs: usize, prefetch: u32) -> Resul
     Ok(())
 }
 
+fn run_ddl(spec: &ConnectSpec, schema: Option<&str>, table: &str) -> Result<(), String> {
+    let session = Session::open(spec).map_err(|e| e.to_string())?;
+    let ddl = sqlt_meta::loader::load_table_ddl(&session, schema, table, QueryOptions::default())
+        .map_err(|e| e.to_string())?;
+    print!("{ddl}");
+    Ok(())
+}
+
+fn run_compare(
+    spec: &ConnectSpec,
+    path: &str,
+    schema: Option<&str>,
+    table: &str,
+) -> Result<(), String> {
+    let expected = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+    let session = Session::open(spec).map_err(|e| e.to_string())?;
+    let actual =
+        sqlt_meta::loader::load_table_ddl(&session, schema, table, QueryOptions::default())
+            .map_err(|e| e.to_string())?;
+    let comparison = sqlt_meta::compare_ddl(&expected, &actual);
+    println!("{}", comparison.report());
+    if !comparison.identical {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
 fn run_diag() -> Result<(), String> {
     match locate_oci_dir() {
         Ok(dir) => println!("OCI dir: {}", dir.display()),
@@ -149,6 +176,16 @@ fn main() {
         }) => ConnectSpec::from_env()
             .map_err(|e| e.to_string())
             .and_then(|spec| run_bench(&spec, &sql, runs, prefetch)),
+        Ok(Command::Ddl { schema, table }) => ConnectSpec::from_env()
+            .map_err(|e| e.to_string())
+            .and_then(|spec| run_ddl(&spec, schema.as_deref(), &table)),
+        Ok(Command::CompareDdl {
+            path,
+            schema,
+            table,
+        }) => ConnectSpec::from_env()
+            .map_err(|e| e.to_string())
+            .and_then(|spec| run_compare(&spec, &path, schema.as_deref(), &table)),
         Err(e) => Err(e),
     };
     if let Err(e) = result {
