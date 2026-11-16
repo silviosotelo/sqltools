@@ -323,6 +323,22 @@ fn explain_plan(
 }
 
 #[tauri::command]
+fn load_ddl_meta(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    schema: Option<String>,
+    name: String,
+) -> Result<String, String> {
+    let session = state.session(&connection_id)?;
+    catalog::load_table_ddl_meta(
+        &session,
+        schema.as_deref(),
+        &name,
+        state.query_options(&connection_id),
+    )
+}
+
+#[tauri::command]
 fn format_sql(sql: String, uppercase: bool) -> String {
     sqlt_core::format::format_sql(
         &sql,
@@ -355,6 +371,7 @@ fn main() {
             list_objects,
             list_columns,
             load_ddl,
+            load_ddl_meta,
             session_stats,
             list_constraints,
             list_indexes,

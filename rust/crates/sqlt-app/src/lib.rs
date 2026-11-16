@@ -7,7 +7,7 @@ pub mod store;
 
 pub use catalog::{
     list_columns, list_constraints, list_grants, list_indexes, list_objects, list_table_names,
-    list_triggers, load_ddl, session_stats,
+    list_triggers, load_ddl, load_table_ddl_meta, session_stats,
 };
 pub use state::{AppState, HistoryEntry};
 pub use store::{ConnectionConfig, ConnectionStore, StoreError};

@@ -3632,6 +3632,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlt-core",
+ "sqlt-meta",
  "sqlt-oracle",
 ]
 
@@ -3661,6 +3662,14 @@ dependencies = [
  "sqlt-oracle",
  "tauri",
  "tauri-build",
+]
+
+[[package]]
+name = "sqlt-meta"
+version = "0.1.0"
+dependencies = [
+ "sqlt-core",
+ "sqlt-oracle",
 ]
 
 [[package]]

@@ -63,6 +63,8 @@ export const api = {
     objectType: string,
   ) =>
     invoke<string>("load_ddl", { connectionId, schema, name, objectType }),
+  loadDdlMeta: (connectionId: string, schema: string | null, name: string) =>
+    invoke<string>("load_ddl_meta", { connectionId, schema, name }),
   sessionStats: (connectionId: string) =>
     invoke<StatEntry[]>("session_stats", { connectionId }),
   formatSql: (sql: string, uppercase: boolean) =>

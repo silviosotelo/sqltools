@@ -158,6 +158,14 @@ pub fn load_ddl(
         .ok_or_else(|| "DBMS_METADATA returned an empty DDL".to_string())
 }
 
+pub fn load_table_ddl_meta(
+    session: &Session,
+    schema: Option<&str>,
+    name: &str,
+    options: QueryOptions,
+) -> Result<String, String> {
+    sqlt_meta::loader::load_table_ddl(session, schema, name, options)
+}
 pub fn session_stats(
     session: &Session,
     options: QueryOptions,

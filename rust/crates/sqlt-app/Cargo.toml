@@ -9,4 +9,5 @@ keyring = "4.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sqlt-core = { path = "../sqlt-core" }
+sqlt-meta = { path = "../sqlt-meta" }
 sqlt-oracle = { path = "../sqlt-oracle" }

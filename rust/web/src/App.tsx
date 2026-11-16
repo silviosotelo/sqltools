@@ -404,14 +404,28 @@ export default function App() {
   const loadDdlFor = async (object: ObjectInfo) => {
     try {
       setSelectedObject(object);
-      setSql(
-        await api.loadDdl(
+      const owner = schema.trim() || null;
+      let ddl: string;
+      if (object.objectType === "TABLE") {
+        try {
+          ddl = await api.loadDdlMeta(selected, owner, object.name);
+        } catch {
+          ddl = await api.loadDdl(
+            selected,
+            owner,
+            object.name,
+            object.objectType,
+          );
+        }
+      } else {
+        ddl = await api.loadDdl(
           selected,
-          schema.trim() || null,
+          owner,
           object.name,
           object.objectType,
-        ),
-      );
+        );
+      }
+      setSql(ddl);
       setPanel("results");
       setStatus(t("loadDdl"));
     } catch (error) {

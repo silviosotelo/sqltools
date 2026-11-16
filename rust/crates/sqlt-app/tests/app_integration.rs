@@ -82,6 +82,9 @@ fn catalog_and_ddl() {
         columns.len()
     );
 
+    let meta_ddl = catalog::load_table_ddl_meta(&session, None, &first, options).expect("meta ddl");
+
+    eprintln!("meta ddl: {} bytes", meta_ddl.len());
     let ddl = catalog::load_ddl(&session, None, &first, "TABLE", options).expect("ddl");
     assert!(ddl.to_ascii_uppercase().contains("CREATE"), "{ddl}");
 
