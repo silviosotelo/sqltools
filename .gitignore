@@ -33,3 +33,12 @@ macIntel/paquete/
 macM/paquete/
 instantclient_arm64/
 build-arm64/
+
+# Rust / Tauri
+/rust/target/
+/rust/web/node_modules/
+/rust/web/dist/
+/rust/desktop/gen/
+
+# Scratch del método de trabajo (ledgers, briefs, reviews)
+/.superpowers/
