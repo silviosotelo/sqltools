@@ -1,0 +1,12 @@
+[package]
+name = "sqlt-app"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+
+[dependencies]
+keyring = "4.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlt-core = { path = "../sqlt-core" }
+sqlt-oracle = { path = "../sqlt-oracle" }

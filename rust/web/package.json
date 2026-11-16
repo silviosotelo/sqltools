@@ -9,7 +9,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "^6",
+    "@codemirror/lang-sql": "^6",
+    "@codemirror/state": "^6",
+    "@codemirror/view": "^6",
     "@tauri-apps/api": "^2",
+    "codemirror": "^6",
     "react": "^19",
     "react-dom": "^19"
   },

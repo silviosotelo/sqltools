@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Oracle cell values, without precision loss.
 
+use serde::{Deserialize, Serialize};
+
 /// Typed cell value. NUMBER travels as a canonical string (38 digits).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "lowercase")]
 pub enum Value {
     Null,
     Text(String),
@@ -17,8 +20,8 @@ impl Value {
         matches!(self, Value::Null)
     }
 
-    /// Display text. `None` for NULL (the UI decides how to render it).
-    /// y para binarios (la UI los muestra en hexadecimal si hace falta).
+    /// Display text. `None` for NULL (the UI decides how to render it) and for
+    /// binary values (the UI renders them as hexadecimal when needed).
     pub fn display(&self) -> Option<&str> {
         match self {
             Value::Null | Value::Binary(_) => None,
@@ -27,8 +30,9 @@ impl Value {
     }
 }
 
-/// Metadata de una columna del resultado.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Result column metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ColumnMeta {
     pub name: String,
     pub type_name: String,
@@ -36,10 +40,10 @@ pub struct ColumnMeta {
     pub numeric: bool,
 }
 
-/// Filas de un lote de resultados.
+/// One result row.
 pub type Row = Vec<Value>;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Batch {
     pub columns: Vec<ColumnMeta>,
     pub rows: Vec<Row>,
