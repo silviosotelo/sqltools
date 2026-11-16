@@ -763,3 +763,17 @@ tr.spacer td {
   background: #cfe3fb;
   border-color: #7aa7d8;
 }
+
+.hide-fold-gutter .cm-foldGutter {
+  display: none;
+}
+
+.show-ruler .cm-content {
+  background-image: linear-gradient(
+    90deg,
+    transparent 79ch,
+    #c8c8c8 79ch,
+    #c8c8c8 80ch,
+    transparent 80ch
+  );
+}

@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { autocompletion, type CompletionContext } from "@codemirror/autocomplete";
 import {
   copyLineDown,
+  cursorMatchingBracket,
   deleteCharForward,
   deleteGroupBackward,
   deleteGroupForward,
@@ -11,11 +12,14 @@ import {
   redo,
   selectAll,
   selectLine,
+  selectMatchingBracket,
   undo,
 } from "@codemirror/commands";
 import {
   foldAll,
   foldCode,
+  foldEffect,
+  foldable,
   foldedRanges,
   getIndentUnit,
   toggleFold,
@@ -188,6 +192,11 @@ export type EditorHandle = {
   scrollToCenter: () => void;
   findSelected: (forward: boolean) => void;
   toggleLineNumbers: () => void;
+  matchBracket: () => void;
+  selectToMatch: () => void;
+  foldToLevel: (level: number) => void;
+  toggleSyntaxGutter: () => void;
+  toggleRuler: () => void;
 };
 
 const keywords = [
@@ -734,6 +743,45 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
       const editor = view.current;
       if (!editor) return;
       editor.dom.classList.toggle("hide-line-numbers");
+    },
+    matchBracket: () => {
+      if (view.current) cursorMatchingBracket(view.current);
+    },
+    selectToMatch: () => {
+      if (view.current) selectMatchingBracket(view.current);
+    },
+    foldToLevel: (level) => {
+      const editor = view.current;
+      if (!editor) return;
+      const ranges: { from: number; to: number }[] = [];
+      for (let number = 1; number <= editor.state.doc.lines; number += 1) {
+        const line = editor.state.doc.line(number);
+        const range = foldable(editor.state, line.from, line.to);
+        if (range) ranges.push(range);
+      }
+      const unique = [
+        ...new Map(ranges.map((range) => [range.from, range])).values(),
+      ].sort((a, b) => a.from - b.from || b.to - a.to);
+      const stack: { to: number }[] = [];
+      const effects = [];
+      for (const range of unique) {
+        while (stack.length && stack[stack.length - 1].to <= range.from) {
+          stack.pop();
+        }
+        if (stack.length < level) effects.push(foldEffect.of(range));
+        stack.push({ to: range.to });
+      }
+      if (effects.length) editor.dispatch({ effects });
+    },
+    toggleSyntaxGutter: () => {
+      const editor = view.current;
+      if (!editor) return;
+      editor.dom.classList.toggle("hide-fold-gutter");
+    },
+    toggleRuler: () => {
+      const editor = view.current;
+      if (!editor) return;
+      editor.dom.classList.toggle("show-ruler");
     },
   }), []);
 

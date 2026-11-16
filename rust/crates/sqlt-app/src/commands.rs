@@ -53,6 +53,13 @@ const IMPLEMENTED: &[&str] = &[
     "Edit.FileFormat_Winows",
     "Edit.FileFormat_Unix",
     "Edit.FileFormat_Mac",
+    "Edit.FindMatch",
+    "Edit.FindMatchSelect",
+    "Edit.CollapseToLevel1",
+    "Edit.CollapseToLevel2",
+    "Edit.CollapseToLevel3",
+    "Edit.SyntaxGutter",
+    "Edit.Ruler",
     "Workspace.SaveQuick",
     "Workspace.OpenAutosaved",
     "Workspace.Copy",
@@ -218,7 +225,7 @@ mod tests {
                 .iter()
                 .filter(|command| command.implemented)
                 .count(),
-            123
+            130
         );
     }
 }

@@ -1124,6 +1124,27 @@ export default function App() {
       case "Edit.LineNumbers":
         editorRef.current?.toggleLineNumbers();
         break;
+      case "Edit.FindMatch":
+        editorRef.current?.matchBracket();
+        break;
+      case "Edit.FindMatchSelect":
+        editorRef.current?.selectToMatch();
+        break;
+      case "Edit.CollapseToLevel1":
+        editorRef.current?.foldToLevel(1);
+        break;
+      case "Edit.CollapseToLevel2":
+        editorRef.current?.foldToLevel(2);
+        break;
+      case "Edit.CollapseToLevel3":
+        editorRef.current?.foldToLevel(3);
+        break;
+      case "Edit.SyntaxGutter":
+        editorRef.current?.toggleSyntaxGutter();
+        break;
+      case "Edit.Ruler":
+        editorRef.current?.toggleRuler();
+        break;
       case "Workspace.SaveQuick":
         void saveWorkspace();
         break;
