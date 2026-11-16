@@ -1,6 +1,17 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { autocompletion, type CompletionContext } from "@codemirror/autocomplete";
-import { redo, selectAll, undo } from "@codemirror/commands";
+import {
+  copyLineDown,
+  deleteLine,
+  indentLess,
+  indentMore,
+  redo,
+  selectAll,
+  selectLine,
+  undo,
+} from "@codemirror/commands";
+import { foldAll, unfoldAll } from "@codemirror/language";
+import { findNext, findPrevious, openSearchPanel } from "@codemirror/search";
 import { sql, StandardSQL } from "@codemirror/lang-sql";
 import { EditorState, RangeSet, StateEffect, StateField } from "@codemirror/state";
 import {
@@ -69,8 +80,7 @@ const bookmarkGutter = gutter({
   initialSpacer: () => bookmarkMarker,
   domEventHandlers: {
     mousedown(view, line) {
-      const number = view.state.doc.lineAt(line.from).number;
-      view.dispatch({ effects: toggleBookmark.of(number) });
+      view.dispatch({ effects: toggleBookmark.of(line.from) });
       return true;
     },
   },
@@ -85,8 +95,27 @@ export type EditorHandle = {
   paste: () => Promise<void>;
   upper: () => void;
   lower: () => void;
+  invertCase: () => void;
+  capitalize: () => void;
   comment: () => void;
   uncomment: () => void;
+  selectLine: () => void;
+  deleteLine: () => void;
+  duplicateLine: () => void;
+  joinLines: () => void;
+  indent: () => void;
+  outdent: () => void;
+  find: () => void;
+  findNext: () => void;
+  findPrevious: () => void;
+  foldAll: () => void;
+  unfoldAll: () => void;
+  trimTrailing: () => void;
+  removeBlankLines: () => void;
+  sortLines: () => void;
+  toggleBookmark: () => void;
+  nextBookmark: () => void;
+  previousBookmark: () => void;
 };
 
 const keywords = [
@@ -221,6 +250,48 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
     if (changes.length) editor.dispatch({ changes });
   };
 
+  const mapLines = (map: (lines: string[]) => string[]) => {
+    const editor = view.current;
+    if (!editor) return;
+    const selection = editor.state.selection.main;
+    const wholeDocument = selection.from === selection.to;
+    const from = wholeDocument
+      ? 0
+      : editor.state.doc.lineAt(selection.from).from;
+    const to = wholeDocument
+      ? editor.state.doc.length
+      : editor.state.doc.lineAt(selection.to).to;
+    const lines = editor.state.sliceDoc(from, to).split("\n");
+    editor.dispatch({ changes: { from, to, insert: map(lines).join("\n") } });
+  };
+
+  const bookmarkPositions = (): number[] => {
+    const editor = view.current;
+    if (!editor) return [];
+    const positions: number[] = [];
+    editor.state.field(bookmarkField).between(0, editor.state.doc.length, (from) => {
+      positions.push(from);
+      return false;
+    });
+    return positions;
+  };
+
+  const jumpToBookmark = (forward: boolean) => {
+    const editor = view.current;
+    if (!editor) return;
+    const positions = bookmarkPositions();
+    if (!positions.length) return;
+    const head = editor.state.selection.main.head;
+    const target = forward
+      ? positions.find((position) => position > head) ?? positions[0]
+      : [...positions].reverse().find((position) => position < head) ??
+        positions[positions.length - 1];
+    editor.dispatch({
+      selection: { anchor: editor.state.doc.lineAt(target).from },
+      effects: EditorView.scrollIntoView(target, { y: "center" }),
+    });
+  };
+
   useImperativeHandle(ref, () => ({
     undo: () => {
       if (view.current) undo(view.current);
@@ -255,8 +326,72 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
     },
     upper: () => transformSelection((text) => text.toUpperCase()),
     lower: () => transformSelection((text) => text.toLowerCase()),
+    invertCase: () =>
+      transformSelection((text) =>
+        [...text]
+          .map((char) =>
+            char === char.toLowerCase()
+              ? char.toUpperCase()
+              : char.toLowerCase(),
+          )
+          .join(""),
+      ),
+    capitalize: () =>
+      transformSelection((text) =>
+        text.replace(/\b\w/g, (char) => char.toUpperCase()),
+      ),
     comment: () => toggleComments(true),
     uncomment: () => toggleComments(false),
+    selectLine: () => {
+      if (view.current) selectLine(view.current);
+    },
+    deleteLine: () => {
+      if (view.current) deleteLine(view.current);
+    },
+    duplicateLine: () => {
+      if (view.current) copyLineDown(view.current);
+    },
+    joinLines: () =>
+      mapLines((lines) => [
+        lines
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .join(" "),
+      ]),
+    indent: () => {
+      if (view.current) indentMore(view.current);
+    },
+    outdent: () => {
+      if (view.current) indentLess(view.current);
+    },
+    find: () => {
+      if (view.current) openSearchPanel(view.current);
+    },
+    findNext: () => {
+      if (view.current) findNext(view.current);
+    },
+    findPrevious: () => {
+      if (view.current) findPrevious(view.current);
+    },
+    foldAll: () => {
+      if (view.current) foldAll(view.current);
+    },
+    unfoldAll: () => {
+      if (view.current) unfoldAll(view.current);
+    },
+    trimTrailing: () =>
+      mapLines((lines) => lines.map((line) => line.replace(/\s+$/, ""))),
+    removeBlankLines: () =>
+      mapLines((lines) => lines.filter((line) => line.trim().length > 0)),
+    sortLines: () => mapLines((lines) => [...lines].sort((a, b) => a.localeCompare(b))),
+    toggleBookmark: () => {
+      const editor = view.current;
+      if (!editor) return;
+      const line = editor.state.doc.lineAt(editor.state.selection.main.head);
+      editor.dispatch({ effects: toggleBookmark.of(line.from) });
+    },
+    nextBookmark: () => jumpToBookmark(true),
+    previousBookmark: () => jumpToBookmark(false),
   }), []);
 
   useEffect(() => {

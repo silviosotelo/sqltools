@@ -706,6 +706,64 @@ export default function App() {
       case "Edit.UncommentLine":
         editorRef.current?.uncomment();
         break;
+      case "Edit.InvertCase":
+        editorRef.current?.invertCase();
+        break;
+      case "Edit.Capitalize":
+        editorRef.current?.capitalize();
+        break;
+      case "Edit.SelectLine":
+        editorRef.current?.selectLine();
+        break;
+      case "Edit.DeleteLine":
+        editorRef.current?.deleteLine();
+        break;
+      case "Edit.DupLineOrSelection":
+        editorRef.current?.duplicateLine();
+        break;
+      case "Edit.JoinLines":
+        editorRef.current?.joinLines();
+        break;
+      case "Edit.IndentSelection":
+        editorRef.current?.indent();
+        break;
+      case "Edit.UndentSelection":
+        editorRef.current?.outdent();
+        break;
+      case "Edit.Find":
+      case "Edit.Replace":
+        editorRef.current?.find();
+        break;
+      case "Edit.FindNext":
+        editorRef.current?.findNext();
+        break;
+      case "Edit.FindPrevious":
+        editorRef.current?.findPrevious();
+        break;
+      case "Edit.ExpandAllFolds":
+        editorRef.current?.unfoldAll();
+        break;
+      case "Edit.CollapseAllFolds":
+        editorRef.current?.foldAll();
+        break;
+      case "Edit.TrimTrailingSpaces":
+        editorRef.current?.trimTrailing();
+        break;
+      case "Edit.RemoveBlankLines":
+        editorRef.current?.removeBlankLines();
+        break;
+      case "Edit.Sort":
+        editorRef.current?.sortLines();
+        break;
+      case "Edit.ToggleBookmark":
+        editorRef.current?.toggleBookmark();
+        break;
+      case "Edit.NextBookmark":
+        editorRef.current?.nextBookmark();
+        break;
+      case "Edit.PreviousBookmark":
+        editorRef.current?.previousBookmark();
+        break;
       case "Workspace.Save":
         void saveWorkspace();
         break;

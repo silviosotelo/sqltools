@@ -28,6 +28,26 @@ const IMPLEMENTED: &[&str] = &[
     "Edit.Lowercase",
     "Edit.CommentLine",
     "Edit.UncommentLine",
+    "Edit.InvertCase",
+    "Edit.Capitalize",
+    "Edit.SelectLine",
+    "Edit.DeleteLine",
+    "Edit.DupLineOrSelection",
+    "Edit.JoinLines",
+    "Edit.IndentSelection",
+    "Edit.UndentSelection",
+    "Edit.Find",
+    "Edit.Replace",
+    "Edit.FindNext",
+    "Edit.FindPrevious",
+    "Edit.ExpandAllFolds",
+    "Edit.CollapseAllFolds",
+    "Edit.TrimTrailingSpaces",
+    "Edit.RemoveBlankLines",
+    "Edit.Sort",
+    "Edit.ToggleBookmark",
+    "Edit.NextBookmark",
+    "Edit.PreviousBookmark",
     "View.History",
     "File.New",
     "Session.Reconnect",
@@ -104,5 +124,26 @@ mod tests {
             .iter()
             .any(|command| command.name == "Workspace.Save" && command.implemented));
         assert!(commands.iter().any(|command| command.name.is_empty()));
+        for name in [
+            "Edit.Find",
+            "Edit.ToggleBookmark",
+            "Edit.SelectLine",
+            "Edit.TrimTrailingSpaces",
+            "Edit.CollapseAllFolds",
+        ] {
+            assert!(
+                commands
+                    .iter()
+                    .any(|command| command.name == name && command.implemented),
+                "{name} should be implemented"
+            );
+        }
+        assert_eq!(
+            commands
+                .iter()
+                .filter(|command| command.implemented)
+                .count(),
+            48
+        );
     }
 }

@@ -81,13 +81,22 @@ export type Workspace = {
   active: number;
 };
 
+export type KeywordCase = "Upper" | "Lower" | "Keep";
+
 export type FormatOptions = {
   indent: number;
   useTabs: boolean;
-  keywordCase: "Upper" | "Lower" | "Keep";
+  keywordCase: KeywordCase;
+  functionCase: KeywordCase;
+  identifierCase: KeywordCase;
   style: "Standard" | "River";
   commaLeading: boolean;
   andOrIndent: number | null;
+  contIndent: number | null;
+  joinIndent: number | null;
+  onNewLine: boolean;
+  spaceAfterComma: boolean;
+  spaceInParens: boolean;
   alignDeclarations: boolean;
   alignAssignments: boolean;
   blankAfterDeclare: boolean;

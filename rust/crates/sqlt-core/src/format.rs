@@ -29,11 +29,25 @@ pub struct FormatOptions {
     pub indent: usize,
     pub use_tabs: bool,
     pub keyword_case: KeywordCase,
+    /// Case of function names (a word directly followed by `(`).
+    pub function_case: KeywordCase,
+    /// Case of non-keyword identifiers.
+    pub identifier_case: KeywordCase,
     pub style: FormatStyle,
     /// Put the comma at the start of the line instead of the end.
     pub comma_leading: bool,
     /// Indentation of AND/OR; `None` derives it from the style.
     pub and_or_indent: Option<usize>,
+    /// If set, list items start on the keyword line and align at this column.
+    pub cont_indent: Option<usize>,
+    /// Indentation of JOIN lines; `None` derives it from the style.
+    pub join_indent: Option<usize>,
+    /// Put the ON clause of a join on its own line.
+    pub on_new_line: bool,
+    /// Space after `,` in SQL expressions.
+    pub space_after_comma: bool,
+    /// Space just inside `(` and `)`.
+    pub space_in_parens: bool,
     pub align_declarations: bool,
     pub align_assignments: bool,
     pub blank_after_declare: bool,
@@ -46,9 +60,16 @@ impl Default for FormatOptions {
             indent: 2,
             use_tabs: false,
             keyword_case: KeywordCase::Upper,
+            function_case: KeywordCase::Upper,
+            identifier_case: KeywordCase::Keep,
             style: FormatStyle::Standard,
             comma_leading: false,
             and_or_indent: None,
+            cont_indent: None,
+            join_indent: None,
+            on_new_line: false,
+            space_after_comma: true,
+            space_in_parens: false,
             align_declarations: false,
             align_assignments: false,
             blank_after_declare: false,
@@ -391,15 +412,19 @@ fn render(tokens: &[Token], options: &FormatOptions) -> String {
                 }
                 tight = false;
                 let upper = word.to_ascii_uppercase();
+                let is_keyword = KEYWORDS.contains(&upper.as_str());
                 let is_function = matches!(tokens.get(index + 1), Some(Token::Symbol('(')));
-                if KEYWORDS.contains(&upper.as_str()) || is_function {
-                    match options.keyword_case {
-                        KeywordCase::Upper => out.push_str(&upper),
-                        KeywordCase::Lower => out.push_str(&word.to_lowercase()),
-                        KeywordCase::Keep => out.push_str(word),
-                    }
+                let case = if is_keyword {
+                    options.keyword_case
+                } else if is_function {
+                    options.function_case
                 } else {
-                    out.push_str(word);
+                    options.identifier_case
+                };
+                match case {
+                    KeywordCase::Upper => out.push_str(&upper),
+                    KeywordCase::Lower => out.push_str(&word.to_lowercase()),
+                    KeywordCase::Keep => out.push_str(word),
                 }
             }
             Token::Text(text) => {
@@ -418,9 +443,23 @@ fn render(tokens: &[Token], options: &FormatOptions) -> String {
                     out.push(' ');
                 }
                 out.push('(');
+                if options.space_in_parens {
+                    out.push(' ');
+                }
             }
-            Token::Symbol(')') => out.push(')'),
-            Token::Symbol(',') => out.push_str(", "),
+            Token::Symbol(')') => {
+                if options.space_in_parens && !out.ends_with(' ') {
+                    out.push(' ');
+                }
+                out.push(')');
+            }
+            Token::Symbol(',') => {
+                out.push(',');
+                if options.space_after_comma {
+                    out.push(' ');
+                }
+                tight = !options.space_after_comma;
+            }
             Token::Symbol(';') => out.push(';'),
             Token::Symbol('.') => out.push('.'),
             Token::Symbol(':') => out.push(':'),
@@ -511,6 +550,21 @@ fn format_list(keyword: &str, body: &[Token], options: &FormatOptions) -> String
     if items.len() <= 1 {
         return format!("{prefix}{}", render(body, options));
     }
+    if let Some(width) = options.cont_indent {
+        let pad = " ".repeat(width);
+        let mut out = prefix.clone();
+        for (index, item) in items.iter().enumerate() {
+            if index > 0 {
+                out.push('\n');
+                out.push_str(&pad);
+            }
+            out.push_str(&render(item, options));
+            if index + 1 < items.len() {
+                out.push(',');
+            }
+        }
+        return out;
+    }
     if river {
         let pad = " ".repeat(prefix.len());
         let mut out = prefix.clone();
@@ -544,8 +598,9 @@ fn format_list(keyword: &str, body: &[Token], options: &FormatOptions) -> String
     format!("{}\n{}", clause_text(keyword, options), lines.join("\n"))
 }
 
-fn format_where(body: &[Token], options: &FormatOptions) -> String {
-    let indent = indent_unit(options);
+/// Splits a boolean expression at top-level AND/OR. The AND of `BETWEEN a AND b`
+/// stays with the first part.
+fn split_and_or(body: &[Token]) -> Vec<Vec<Token>> {
     let mut parts: Vec<Vec<Token>> = Vec::new();
     let mut current = Vec::new();
     let mut depth = 0i32;
@@ -574,6 +629,12 @@ fn format_where(body: &[Token], options: &FormatOptions) -> String {
         current.push(token.clone());
     }
     parts.push(current);
+    parts
+}
+
+fn format_where(body: &[Token], options: &FormatOptions) -> String {
+    let indent = indent_unit(options);
+    let parts = split_and_or(body);
     let river = options.style == FormatStyle::River;
     let prefix = if river {
         format!(" {} ", clause_text("WHERE", options))
@@ -660,10 +721,48 @@ fn format_from(body: &[Token], options: &FormatOptions) -> String {
     if joins.is_empty() {
         return format!("{prefix}{}", render(body, options));
     }
-    let join_indent = if river { "  ".to_string() } else { indent };
+    let join_indent = match options.join_indent {
+        Some(width) => " ".repeat(width),
+        None if river => "  ".to_string(),
+        None => indent.clone(),
+    };
     let mut out = format!("{prefix}{}", render(&joins[0], options));
     for join in joins.iter().skip(1) {
-        out.push_str(&format!("\n{join_indent}{}", render(join, options)));
+        let on_position = if options.on_new_line {
+            let mut depth = 0i32;
+            join.iter().position(|token| {
+                match token {
+                    Token::Symbol('(') => depth += 1,
+                    Token::Symbol(')') => depth -= 1,
+                    _ => {}
+                }
+                depth == 0 && matches!(token, Token::Word(word) if word.eq_ignore_ascii_case("on"))
+            })
+        } else {
+            None
+        };
+        let Some(position) = on_position else {
+            out.push_str(&format!("\n{join_indent}{}", render(join, options)));
+            continue;
+        };
+        out.push_str(&format!(
+            "\n{join_indent}{}",
+            render(&join[..position], options)
+        ));
+        let on_indent = format!("{join_indent}{}", indent_unit(options));
+        let parts = split_and_or(&join[position + 1..]);
+        out.push_str(&format!(
+            "\n{on_indent}{} {}",
+            clause_text("ON", options),
+            render(&parts[0], options)
+        ));
+        let cond_indent = match options.and_or_indent {
+            Some(width) => format!("{on_indent}{}", " ".repeat(width)),
+            None => format!("{on_indent}{}", indent_unit(options)),
+        };
+        for part in parts.iter().skip(1) {
+            out.push_str(&format!("\n{cond_indent}{}", render(part, options)));
+        }
     }
     out
 }
@@ -716,6 +815,8 @@ fn format_statement(tokens: &[Token], options: &FormatOptions) -> String {
             "INSERT INTO" => {
                 let mut body_options = *options;
                 body_options.keyword_case = KeywordCase::Keep;
+                body_options.function_case = KeywordCase::Keep;
+                body_options.identifier_case = KeywordCase::Keep;
                 let rendered = render(&body, &body_options);
                 let with_space = match rendered.find('(') {
                     Some(position) => {
@@ -1267,6 +1368,45 @@ mod tests {
     }
 
     #[test]
+    fn custom_structure_matches_cpp() {
+        let options = FormatOptions {
+            cont_indent: Some(7),
+            and_or_indent: Some(0),
+            ..standard()
+        };
+        assert_eq!(
+            format_sql("select a,b from t where x=1 and y=2", &options),
+            "SELECT a,\n       b\nFROM t\nWHERE x = 1\nAND y = 2"
+        );
+    }
+
+    #[test]
+    fn join_indent_matches_cpp() {
+        let options = FormatOptions {
+            join_indent: Some(4),
+            on_new_line: true,
+            ..standard()
+        };
+        assert_eq!(
+            format_sql("select a from t join u on t.id=u.id and t.x=u.x", &options),
+            "SELECT a\nFROM t\n    JOIN u\n      ON t.id = u.id\n        AND t.x = u.x"
+        );
+    }
+
+    #[test]
+    fn comma_and_paren_spacing_matches_cpp() {
+        let options = FormatOptions {
+            space_after_comma: false,
+            space_in_parens: true,
+            ..standard()
+        };
+        assert_eq!(
+            format_sql("select 1 from t where a in (1,2)", &options),
+            "SELECT 1\nFROM t\nWHERE a IN ( 1,2 )"
+        );
+    }
+
+    #[test]
     fn lowercase_keywords_matches_cpp() {
         let options = FormatOptions {
             keyword_case: KeywordCase::Lower,
@@ -1392,11 +1532,23 @@ mod tests {
     #[test]
     fn preserves_strings_and_comments() {
         let sql = "select 'a,b  from' x, \"Mi Col\" -- nota, from\nfrom t";
-        let formatted = format_sql(sql, &standard());
-        assert!(formatted.contains("'a,b  from'"));
-        assert!(formatted.contains("\"Mi Col\""));
-        assert!(formatted.contains("-- nota, from"));
-        assert!(formatted.contains("FROM t"));
+        assert_eq!(
+            format_sql(sql, &standard()),
+            "SELECT\n  'a,b  from' x,\n  \"Mi Col\" -- nota, from\nFROM t"
+        );
+    }
+
+    #[test]
+    fn function_and_identifier_case_matches_cpp() {
+        let options = FormatOptions {
+            function_case: KeywordCase::Lower,
+            identifier_case: KeywordCase::Lower,
+            ..standard()
+        };
+        assert_eq!(
+            format_sql("select NVL(A,B) from MI_TABLA", &options),
+            "SELECT nvl(a, b)\nFROM mi_tabla"
+        );
     }
 
     #[test]
