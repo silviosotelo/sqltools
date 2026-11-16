@@ -4,8 +4,13 @@ Reescritura en Rust de SQLTools (cliente Oracle para PL/SQL/APEX), con UI web
 (Tauri v2 + React) y objetivo multiplataforma: Windows x64, macOS Intel/Apple
 Silicon y Linux x64.
 
-Estado: **P1a (motor Oracle)**. El port C++/Qt sigue intacto en la raíz del repo
+Estado: **P2 (app Tauri)**. El port C++/Qt sigue intacto en la raíz del repo
 (rama `main`); esta rama (`rust`) contiene la implementación nueva.
+
+La app ya permite guardar conexiones (metadatos en JSON, contraseñas en el
+keyring del SO), conectar, editar SQL con CodeMirror (plegado, marcadores,
+autocompletado), ejecutar con resultados en streaming, cancelar, commit/rollback,
+ver historial y plan, y exportar CSV. La UI usa i18n es/en.
 
 ## Estructura
 
