@@ -133,6 +133,7 @@ export default function App() {
   const [cleanSql, setCleanSql] = useState("select * from dual");
   const [filePath, setFilePath] = useState("");
   const [fileEol, setFileEol] = useState("\n");
+  const [cleanEol, setCleanEol] = useState("\n");
   const [columns, setColumns] = useState<ColumnMeta[]>([]);
   const [rows, setRows] = useState<Value[][]>([]);
   const [scrollTop, setScrollTop] = useState(0);
@@ -611,7 +612,7 @@ export default function App() {
       setStatus(String(error));
     }
   };
-  const dirty = sql !== cleanSql;
+  const dirty = sql !== cleanSql || fileEol !== cleanEol;
 
   const confirmDiscard = () => !dirty || window.confirm(t("discardChanges"));
 
@@ -621,6 +622,7 @@ export default function App() {
     setCleanSql("");
     setFilePath("");
     setFileEol("\n");
+    setCleanEol("\n");
     setColumns([]);
     setRows([]);
     setPanel("results");
@@ -637,6 +639,7 @@ export default function App() {
       setCleanSql(file.text);
       setFilePath(path);
       setFileEol(file.eol);
+      setCleanEol(file.eol);
       setStatus(path);
     } catch (error) {
       setStatus(String(error));
@@ -654,6 +657,7 @@ export default function App() {
       await api.writeSqlFile(path, sql, fileEol);
       setFilePath(path);
       setCleanSql(sql);
+      setCleanEol(fileEol);
       setStatus(path);
     } catch (error) {
       setStatus(String(error));
@@ -671,6 +675,7 @@ export default function App() {
       setSql(file.text);
       setCleanSql(file.text);
       setFileEol(file.eol);
+      setCleanEol(file.eol);
       setStatus(filePath);
     } catch (error) {
       setStatus(String(error));
@@ -716,6 +721,9 @@ export default function App() {
       }
       setSql(file.sql);
       setCleanSql(file.sql);
+      setFilePath("");
+      setFileEol("\n");
+      setCleanEol("\n");
       setStatus(t("workspaceLoad"));
     } catch (error) {
       setStatus(String(error));
@@ -793,6 +801,9 @@ export default function App() {
       if (file) {
         setSql(file.sql);
         setCleanSql(file.sql);
+        setFilePath("");
+        setFileEol("\n");
+        setCleanEol("\n");
       }
       setStatus(t("workspaceLoad"));
     } catch (error) {

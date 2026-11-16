@@ -275,10 +275,26 @@ fn load_iot_info(
     name: &str,
     options: QueryOptions,
 ) -> Result<crate::IotInfo, String> {
-    let rows = fetch_rows(
+    // The index exists even when the IOT has no overflow segment, so it is
+    // queried without joining ALL_TABLES (the overflow is optional).
+    let index_rows = fetch_rows(
         session,
-        "select v1.include_column, v1.pct_threshold, v2.tablespace_name, \
-         v2.next_extent, v1.index_name \
+        "select index_name, include_column, pct_threshold from all_indexes \
+         where index_type = 'IOT - TOP' and table_owner = :1 and table_name = :2",
+        &[&schema, &name],
+        options,
+    )?;
+    let Some(index) = index_rows.first() else {
+        return Ok(crate::IotInfo::default());
+    };
+    let index_name = cell(index, 0);
+    let include_column = match number(index, 1) {
+        0 => None,
+        value => Some(value as usize),
+    };
+    let overflow_rows = fetch_rows(
+        session,
+        "select v2.tablespace_name, v2.next_extent \
          from all_indexes v1, all_tables v2 \
          where v1.index_type = 'IOT - TOP' and v1.table_name = v2.iot_name \
          and v1.table_name = :1 and v1.table_owner = v2.owner \
@@ -286,14 +302,16 @@ fn load_iot_info(
         &[&name, &schema],
         options,
     )?;
-    let Some(row) = rows.first() else {
-        return Ok(crate::IotInfo::default());
+    let (overflow_tablespace, overflow_next_extent) = match overflow_rows.first() {
+        Some(row) => (
+            option_cell(row, 0),
+            match number(row, 1) {
+                0 => None,
+                value => Some(value),
+            },
+        ),
+        None => (None, None),
     };
-    let include_column = match number(row, 0) {
-        0 => None,
-        value => Some(value as usize),
-    };
-    let index_name = cell(row, 4);
     let partitioning = load_iot_partitions(session, schema, &index_name, options)?;
     if include_column.is_some() && partitioning.is_some() {
         return Err(format!(
@@ -301,16 +319,13 @@ fn load_iot_info(
         ));
     }
     Ok(crate::IotInfo {
-        pct_threshold: match number(row, 1) {
+        pct_threshold: match number(index, 2) {
             0 => None,
             value => Some(value),
         },
         include_column,
-        overflow_tablespace: option_cell(row, 2),
-        overflow_next_extent: match number(row, 3) {
-            0 => None,
-            value => Some(value),
-        },
+        overflow_tablespace,
+        overflow_next_extent,
         partitioning,
     })
 }
