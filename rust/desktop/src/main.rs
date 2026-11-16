@@ -130,8 +130,17 @@ fn execute(
         .map(|d| d.as_secs())
         .unwrap_or_default();
     tauri::async_runtime::spawn_blocking(move || {
+        use sqlt_app::script::ScriptEvent;
         let started = Instant::now();
+        // Keep the first continuable failure so history does not show a script
+        // with failed statements as a clean success.
+        let mut first_error: Option<String> = None;
         let emit = |event| {
+            if let ScriptEvent::StatementError(message) = &event {
+                if first_error.is_none() {
+                    first_error = Some(message.clone());
+                }
+            }
             channel.send(query_event(event)).ok();
         };
         let outcome = if halt_on_error {
@@ -141,7 +150,7 @@ fn execute(
         };
         let elapsed_ms = started.elapsed().as_millis() as u64;
         let rows = outcome.as_ref().map(|script| script.last_rows).unwrap_or(0);
-        let error = outcome.as_ref().err().cloned();
+        let error = outcome.as_ref().err().cloned().or(first_error);
         state.record(HistoryEntry {
             connection_id,
             sql,
@@ -639,11 +648,15 @@ fn browser_target(url: &str) -> (String, Vec<String>) {
 }
 
 fn spawn_target(target: (String, Vec<String>)) -> Result<(), String> {
-    std::process::Command::new(target.0)
+    let mut child = std::process::Command::new(target.0)
         .args(target.1)
         .spawn()
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    // Reap the launcher so it does not stay as a zombie on Unix.
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
 }
 
 #[tauri::command]

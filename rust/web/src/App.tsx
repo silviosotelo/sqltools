@@ -171,7 +171,17 @@ export default function App() {
   const [showConnections, setShowConnections] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [installing, setInstalling] = useState(false);
-  const [haltOnError, setHaltOnError] = useState(true);
+  const [haltOnError, setHaltOnErrorState] = useState(
+    () => localStorage.getItem("sqlt.haltOnError") !== "false",
+  );
+  const setHaltOnError = (value: boolean) => {
+    setHaltOnErrorState(value);
+    try {
+      localStorage.setItem("sqlt.haltOnError", String(value));
+    } catch {
+      // Storage may be unavailable; the toggle still applies this session.
+    }
+  };
   const [snippetsOpen, setSnippetsOpen] = useState(false);
   const [snippetNames, setSnippetNames] = useState<string[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
