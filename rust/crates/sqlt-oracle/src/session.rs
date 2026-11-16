@@ -38,6 +38,10 @@ pub struct Session {
     /// Use the local fast formatter only when the session language is English.
     fast_dates: bool,
     dbms_output_enabled: std::sync::atomic::AtomicBool,
+    /// Serializes executions on this OCI session: result sets and
+    /// `DBMS_OUTPUT` belong to the session, so two concurrent scripts would
+    /// otherwise drain each other's lines.
+    execution: std::sync::Mutex<()>,
 }
 
 pub struct QueryHandle {
@@ -79,7 +83,21 @@ impl Session {
             read_only: spec.read_only,
             fast_dates,
             dbms_output_enabled: std::sync::atomic::AtomicBool::new(false),
+            execution: std::sync::Mutex::new(()),
         })
+    }
+
+    /// Blocks until this session is free. Callers hold the guard for the whole
+    /// statement cycle (execution plus `DBMS_OUTPUT` drain).
+    pub fn lock_execution(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.execution
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Non-blocking variant, used to detect a running execution.
+    pub fn try_lock_execution(&self) -> Option<std::sync::MutexGuard<'_, ()>> {
+        self.execution.try_lock().ok()
     }
 
     pub fn fast_dates(&self) -> bool {

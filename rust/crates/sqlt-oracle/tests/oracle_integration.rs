@@ -532,3 +532,24 @@ fn dbms_output_truncates_but_drains_everything() {
         .expect("drain remainder")
         .is_empty());
 }
+
+#[test]
+fn execution_lock_serializes_scripts() {
+    use std::sync::{mpsc, Arc};
+
+    let Some(spec) = spec() else { return };
+    let session = Arc::new(open(&spec));
+    let guard = session.lock_execution();
+    let other = Arc::clone(&session);
+    let (sender, receiver) = mpsc::channel();
+    let handle = thread::spawn(move || {
+        // The session is busy while the guard is held.
+        sender.send(other.try_lock_execution().is_none()).unwrap();
+        let _guard = other.lock_execution();
+        sender.send(true).unwrap();
+    });
+    assert!(receiver.recv_timeout(Duration::from_secs(5)).unwrap());
+    drop(guard);
+    assert!(receiver.recv_timeout(Duration::from_secs(5)).unwrap());
+    handle.join().unwrap();
+}

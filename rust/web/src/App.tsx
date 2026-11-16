@@ -329,6 +329,11 @@ export default function App() {
       setStatus(t("noConnection"));
       return;
     }
+    // The session runs one script at a time; ignore repeats while busy.
+    if (running) {
+      setStatus(t("alreadyRunning"));
+      return;
+    }
     setRows([]);
     setColumns([]);
     setOutput([]);
