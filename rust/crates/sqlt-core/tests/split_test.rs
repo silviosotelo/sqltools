@@ -16,13 +16,13 @@ fn expect(name: &str, script: &str, want: &[&str], plsql: &[bool]) {
 
 fn utf16_slice(s: &str, start: usize, end: usize) -> String {
     let units: Vec<u16> = s.encode_utf16().collect();
-    String::from_utf16(&units[start..end]).expect("rango UTF-16 válido")
+    String::from_utf16(&units[start..end]).expect("valid UTF-16 range")
 }
 
 #[test]
 fn two_selects() {
     expect(
-        "dos selects",
+        "two selects",
         "select 1 from dual;\nselect 2 from dual;",
         &["select 1 from dual", "select 2 from dual"],
         &[],
@@ -32,7 +32,7 @@ fn two_selects() {
 #[test]
 fn semicolon_in_text() {
     expect(
-        "punto y coma en texto",
+        "semicolon in text",
         "select 'a;b' x from dual; select 2 from dual",
         &["select 'a;b' x from dual", "select 2 from dual"],
         &[],
@@ -42,7 +42,7 @@ fn semicolon_in_text() {
 #[test]
 fn escaped_quote() {
     expect(
-        "comilla escapada",
+        "escaped quote",
         "select 'it''s; ok' from dual;",
         &["select 'it''s; ok' from dual"],
         &[],
@@ -52,7 +52,7 @@ fn escaped_quote() {
 #[test]
 fn semicolon_in_line_comment() {
     expect(
-        "punto y coma en comentario de línea",
+        "semicolon in line comment",
         "select 1 -- uno; dos\nfrom dual;",
         &["select 1 -- uno; dos\nfrom dual"],
         &[],
@@ -62,7 +62,7 @@ fn semicolon_in_line_comment() {
 #[test]
 fn semicolon_in_block_comment() {
     expect(
-        "punto y coma en comentario de bloque",
+        "semicolon in block comment",
         "select /* a; b */ 1 from dual;",
         &["select /* a; b */ 1 from dual"],
         &[],
@@ -72,7 +72,7 @@ fn semicolon_in_block_comment() {
 #[test]
 fn q_literal_with_brackets() {
     expect(
-        "literal q'[ ]'",
+        "q'[ ]' literal",
         "select q'[a;b]' from dual; select 2 from dual",
         &["select q'[a;b]' from dual", "select 2 from dual"],
         &[],
@@ -82,7 +82,7 @@ fn q_literal_with_brackets() {
 #[test]
 fn q_literal_with_braces() {
     expect(
-        "literal q'{ }'",
+        "q'{ }' literal",
         "select q'{a;b}' from dual; select 2 from dual",
         &["select q'{a;b}' from dual", "select 2 from dual"],
         &[],
@@ -92,7 +92,7 @@ fn q_literal_with_braces() {
 #[test]
 fn quoted_identifier() {
     expect(
-        "identificador entrecomillado",
+        "quoted identifier",
         "select \"a;b\" from dual; select 2 from dual",
         &["select \"a;b\" from dual", "select 2 from dual"],
         &[],
@@ -102,7 +102,7 @@ fn quoted_identifier() {
 #[test]
 fn simple_anonymous_block() {
     expect(
-        "bloque anónimo simple",
+        "simple anonymous block",
         "begin null; end;\nselect 1 from dual;",
         &["begin null; end;", "select 1 from dual"],
         &[true, false],
@@ -133,7 +133,7 @@ select 1 from dual;"#;
   v := case when 1=1 then 1 else 2 end;
 end;"#;
     expect(
-        "bloque con if/loop/case",
+        "block with if/loop/case",
         script,
         &[first, "select 1 from dual"],
         &[true, false],
@@ -153,7 +153,7 @@ fn declare_and_begin() {
 #[test]
 fn nested_blocks() {
     expect(
-        "bloques anidados",
+        "nested blocks",
         "begin begin null; end; null; end;\nselect 1 from dual;",
         &["begin begin null; end; null; end;", "select 1 from dual"],
         &[],
@@ -173,7 +173,7 @@ begin
   null;
 end;"#;
     expect(
-        "create procedure con /",
+        "create procedure with /",
         script,
         &[first, "select 1 from dual"],
         &[true, false],
@@ -197,7 +197,7 @@ end pk;"#;
   procedure a is begin null; end;
 end pk;"#;
     expect(
-        "create package y body",
+        "create package and body",
         script,
         &[spec, body],
         &[true, true],
@@ -207,7 +207,7 @@ end pk;"#;
 #[test]
 fn create_table_is_plain_sql() {
     expect(
-        "create table es SQL suelto",
+        "create table is plain SQL",
         "create table t (a number);\nselect 1 from dual;",
         &["create table t (a number)", "select 1 from dual"],
         &[false, false],
@@ -231,7 +231,7 @@ end;"#;
 #[test]
 fn no_trailing_semicolon() {
     expect(
-        "sin punto y coma final",
+        "no trailing semicolon",
         "select 1 from dual",
         &["select 1 from dual"],
         &[],
@@ -241,7 +241,7 @@ fn no_trailing_semicolon() {
 #[test]
 fn leading_comments() {
     expect(
-        "comentarios al inicio",
+        "leading comments",
         "-- hola\nselect 1 from dual;\n/* x */ select 2 from dual;",
         &["select 1 from dual", "select 2 from dual"],
         &[],
@@ -251,7 +251,7 @@ fn leading_comments() {
 #[test]
 fn standalone_slash_closes_sql() {
     expect(
-        "barra sola cierra sql",
+        "standalone slash closes sql",
         "select 1 from dual\n/\nselect 2 from dual\n/",
         &["select 1 from dual", "select 2 from dual"],
         &[],
@@ -260,12 +260,12 @@ fn standalone_slash_closes_sql() {
 
 #[test]
 fn empty_script() {
-    expect("vacío", "  \n ; \n", &[], &[]);
+    expect("empty", "  \n ; \n", &[], &[]);
 }
 
 #[test]
 fn comments_only_produce_no_statements() {
-    expect("solo comentarios", "-- hola\n/* x */\n", &[], &[]);
+    expect("comments only", "-- hola\n/* x */\n", &[], &[]);
 }
 
 #[test]

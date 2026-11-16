@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Paridad con los formatos soportados por src/Common/FastDateFormat.cpp
-// (validados contra TO_CHAR de Oracle en etapa1/sqlt_datefmt_test.cpp).
+// Parity with the formats supported by src/Common/FastDateFormat.cpp
+// (validated against Oracle TO_CHAR in etapa1/sqlt_datefmt_test.cpp).
 
 use sqlt_core::datefmt::compile_date_format;
 

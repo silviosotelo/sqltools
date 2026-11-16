@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Formateador rápido de fechas Oracle, port de `src/Common/FastDateFormat.cpp`.
+//! Fast Oracle date formatter, ported from `src/Common/FastDateFormat.cpp`.
 //!
-//! Solo cubre los elementos comunes en inglés. Si el formato usa algo no
+//! It only covers common English elements. If the format uses something not
 //! soportado, [`compile_date_format`] devuelve `None` y el llamador debe usar
-//! el formateo del driver (más lento, mismo resultado).
+//! the driver formatter (slower, same result).
 
 const MONTHS: [&str; 12] = [
     "January",
@@ -74,7 +74,7 @@ fn starts_with_ci(s: &str, tok: &str) -> bool {
             .all(|(a, b)| a.eq_ignore_ascii_case(b))
 }
 
-/// 0 = MAYÚSCULAS, 1 = Capitalizado, 2 = minúsculas, -1 = mixto.
+/// 0 = UPPERCASE, 1 = Capitalized, 2 = lowercase, -1 = mixed.
 fn case_of(s: &str, n: usize) -> i32 {
     let b = &s.as_bytes()[..n];
     if b.iter().all(|c| c.is_ascii_uppercase()) {
@@ -88,7 +88,7 @@ fn case_of(s: &str, n: usize) -> i32 {
     }
 }
 
-/// Compila un formato NLS. `None` = no soportado por el camino rápido.
+/// Compiles an NLS format. `None` = not supported by the fast path.
 pub fn compile_date_format(fmt: &str) -> Option<DateFormat> {
     if fmt.is_empty() {
         return None;
@@ -182,7 +182,7 @@ pub fn compile_date_format(fmt: &str) -> Option<DateFormat> {
             i += 3;
             continue;
         }
-        // Los tokens numéricos exigen MAYÚSCULAS exactas (como el original).
+        // Numeric tokens require exact UPPERCASE (as in the original).
         if rest.starts_with("MM") {
             items.push(Item::MM);
             i += 2;
@@ -366,8 +366,8 @@ impl DateFormat {
     }
 }
 
-/// Solo es seguro usar el formateador propio si el cliente Oracle está en
-/// inglés (nombres de mes y día).
+/// The local formatter is only safe when the Oracle client is in
+/// English (month and day names).
 pub fn language_is_english(date_language: Option<&str>, nls_lang: Option<&str>) -> bool {
     fn ok(v: Option<&str>) -> bool {
         match v {

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Especificación de conexión: usuario, destino, modo y preferencias.
+//! Connection specification: user, target, mode and preferences.
 
 use std::fmt;
 use std::path::PathBuf;
@@ -7,7 +7,7 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectTarget {
     Alias(String),
-    /// Cadena de conexión directa (por ejemplo `//host:1521/servicio`).
+    /// Direct connection string (for example `//host:1521/service`).
     Direct(String),
 }
 
@@ -50,11 +50,11 @@ pub enum SpecError {
 impl fmt::Display for SpecError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SpecError::Missing(name) => write!(f, "Falta la variable de entorno {name}"),
+            SpecError::Missing(name) => write!(f, "Missing environment variable {name}"),
             SpecError::InvalidMode(value) => {
                 write!(
                     f,
-                    "Modo de conexión inválido: {value} (usá NORMAL, SYSDBA o SYSOPER)"
+                    "Invalid connection mode: {value} (use NORMAL, SYSDBA or SYSOPER)"
                 )
             }
         }
@@ -64,10 +64,7 @@ impl fmt::Display for SpecError {
 impl std::error::Error for SpecError {}
 
 fn parse_bool(s: &str) -> bool {
-    matches!(
-        s.trim().to_ascii_lowercase().as_str(),
-        "1" | "true" | "yes" | "si" | "sí"
-    )
+    matches!(s.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes")
 }
 
 impl ConnectSpec {

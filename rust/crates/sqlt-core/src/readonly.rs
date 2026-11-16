@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Clasificación de sentencias para el modo de solo lectura.
+//! Statement classification for read-only mode.
 
 fn first_keyword(sql: &str) -> Option<String> {
     let chars: Vec<char> = sql.chars().collect();

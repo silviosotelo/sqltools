@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Harness headless de SQLTools Rust: diagnóstico, consultas y benchmark.
+//! Headless SQLTools Rust harness: diagnostics, queries and benchmarks.
 
 mod args;
 
@@ -68,7 +68,7 @@ fn run_query(
         print_batch(&batch, &mut header);
         printed += batch.rows.len();
     }
-    eprintln!("{printed} filas");
+    eprintln!("{printed} rows");
     Ok(())
 }
 
@@ -97,7 +97,7 @@ fn run_bench(spec: &ConnectSpec, sql: &str, runs: usize, prefetch: u32) -> Resul
     let secs = start.elapsed().as_secs_f64();
     if secs > 0.0 {
         println!(
-            "{total} filas en {secs:.3} s ({:.0} filas/s, {runs} ejecuciones)",
+            "{total} rows in {secs:.3} s ({:.0} rows/s, {runs} runs)",
             total as f64 / secs
         );
     }
@@ -111,17 +111,17 @@ fn run_diag() -> Result<(), String> {
     }
     println!(
         "TNS_ADMIN: {}",
-        std::env::var("SQLT_TNS_ADMIN").unwrap_or_else(|_| "(sin definir)".to_string())
+        std::env::var("SQLT_TNS_ADMIN").unwrap_or_else(|_| "(not set)".to_string())
     );
     match ConnectSpec::from_env() {
         Ok(spec) => match Session::open(&spec) {
             Ok(session) => match session.server_version() {
-                Ok(version) => println!("Servidor: {version}"),
-                Err(e) => println!("Servidor: ERROR: {e}"),
+                Ok(version) => println!("Server: {version}"),
+                Err(e) => println!("Server: ERROR: {e}"),
             },
-            Err(e) => println!("Conexión: ERROR: {e}"),
+            Err(e) => println!("Connection: ERROR: {e}"),
         },
-        Err(e) => println!("Conexión: SKIP: {e}"),
+        Err(e) => println!("Connection: SKIP: {e}"),
     }
     Ok(())
 }

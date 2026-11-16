@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Lógica de dominio pura, sin IO.
+//! Pure domain logic, no IO.
 
 pub mod binds;
 pub mod datefmt;

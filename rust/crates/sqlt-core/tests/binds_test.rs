@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Paridad con tests/bind_test.cpp del port C++/Qt.
+// Parity with tests/bind_test.cpp from the C++/Qt port.
 
 use std::collections::HashMap;
 

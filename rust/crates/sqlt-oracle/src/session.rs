@@ -11,7 +11,7 @@ use sqlt_core::datefmt::{compile_date_format, DateFormat};
 use sqlt_core::{Batch, ColumnMeta, Value};
 
 use crate::oci::{locate_oci_dir, prepare_oci_environment, OciError};
-use crate::spec::{ConnectMode, ConnectSpec};
+use crate::spec::{ConnectMode, ConnectSpec, ConnectTarget};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct QueryOptions {
@@ -54,7 +54,8 @@ impl Session {
             Some(dir) => dir.clone(),
             None => locate_oci_dir()?,
         };
-        prepare_oci_environment(&lib_dir, spec.tns_admin.as_deref())?;
+        let config_dir = resolve_config_dir(spec)?;
+        prepare_oci_environment(&lib_dir, config_dir.as_deref())?;
 
         let mut connector = Connector::new(
             spec.user.as_str(),
@@ -193,6 +194,25 @@ impl QueryHandle {
     }
 }
 
+fn resolve_config_dir(spec: &ConnectSpec) -> Result<Option<std::path::PathBuf>, OciError> {
+    let Some(folder) = &spec.tns_admin else {
+        return Ok(None);
+    };
+    let ConnectTarget::Alias(alias) = &spec.target else {
+        return Ok(Some(folder.clone()));
+    };
+    let home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_default();
+    let overlay_root = std::env::temp_dir().join("sqltools-tns");
+    let plan = crate::wallet::prepare(folder, alias, &overlay_root, &home);
+    if let Some(error) = plan.error {
+        return Err(OciError::Wallet(error));
+    }
+    Ok(Some(plan.tns_admin))
+}
+
 fn session_uses_english_dates(conn: &Connection) -> bool {
     let sql = "select value from nls_session_parameters where parameter = 'NLS_DATE_LANGUAGE'";
     let Ok(row) = conn.query_row(sql, &[]) else {
@@ -224,7 +244,7 @@ fn column_meta(info: &oracle::ColumnInfo) -> ColumnMeta {
 fn base_date_format() -> &'static DateFormat {
     static FMT: OnceLock<DateFormat> = OnceLock::new();
     FMT.get_or_init(|| {
-        compile_date_format("YYYY-MM-DD HH24:MI:SS").expect("formato de fecha base válido")
+        compile_date_format("YYYY-MM-DD HH24:MI:SS").expect("valid base date format")
     })
 }
 
@@ -371,7 +391,7 @@ fn map_value(
             }
         }
         other => Err(OciError::Unsupported(format!(
-            "Tipo Oracle no soportado todavía: {other}"
+            "Oracle type not supported yet: {other}"
         ))),
     }
 }
@@ -387,4 +407,36 @@ fn map_row(
         .zip(row.column_info())
         .map(|(value, info)| map_value(value, info, fast_dates, lob_locator, lob_limit))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_wallet_returns_wallet_error() {
+        let dir = std::env::temp_dir().join(format!("sqlt-session-wallet-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("tnsnames.ora"),
+            "db_high = (description=(address=(protocol=tcps)(port=1522)(host=h))\
+             (connect_data=(service_name=s))\
+             (security=(my_wallet_directory= C:\\Wallet_Missing_Sqlt)))\n",
+        )
+        .unwrap();
+        let spec = ConnectSpec {
+            user: "u".to_string(),
+            password: "p".to_string(),
+            target: ConnectTarget::Alias("db_high".to_string()),
+            mode: ConnectMode::Normal,
+            read_only: false,
+            oci_dir: None,
+            tns_admin: Some(dir.clone()),
+            prefetch: 1000,
+        };
+        let error = resolve_config_dir(&spec).unwrap_err();
+        assert!(matches!(error, OciError::Wallet(_)));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

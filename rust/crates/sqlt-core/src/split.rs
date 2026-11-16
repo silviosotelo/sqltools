@@ -1,30 +1,30 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Partidor de scripts SQL/PL-SQL, port de `ui/SqlSplitter.cpp` del port C++/Qt.
+//! SQL/PL-SQL script splitter, ported from the C++/Qt port's `ui/SqlSplitter.cpp`.
 //!
-//! Reglas:
-//! - SQL suelto termina en `;` fuera de textos y comentarios.
-//! - Un bloque anónimo (`BEGIN`/`DECLARE`) termina en el `;` que cierra su último
-//!   `END` (se cuentan BEGIN/IF/LOOP/CASE contra sus END).
-//! - `CREATE [OR REPLACE] PROCEDURE/FUNCTION/PACKAGE/TRIGGER/TYPE` y similares
-//!   terminan solo en una línea que contenga únicamente `/`.
-//! - Una línea con solo `/` siempre cierra la sentencia en curso.
+//! Rules:
+//! - Plain SQL ends at `;` outside text and comments.
+//! - An anonymous block (`BEGIN`/`DECLARE`) ends at the `;` closing its last
+//!   `END` (BEGIN/IF/LOOP/CASE are counted against their END).
+//! - `CREATE [OR REPLACE] PROCEDURE/FUNCTION/PACKAGE/TRIGGER/TYPE` and similar
+//!   end only at a line containing only `/`.
+//! - A line containing only `/` always closes the current statement.
 //!
-//! Las posiciones son unidades UTF-16 para que coincidan con CodeMirror y con
-//! `QString` del port original.
+//! Positions are UTF-16 units so they match CodeMirror and the original
+//! `QString` from the original port.
 
 /// Una sentencia del script.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Statement {
-    /// Offset UTF-16 del primer carácter útil.
+    /// UTF-16 offset of the first useful character.
     pub start: usize,
-    /// Offset UTF-16 del final de `text` (para SQL excluye el `;`; para PL/SQL
-    /// conserva el `;` final del `END`, igual que el port C++).
+    /// UTF-16 offset of the end of `text` (SQL excludes `;`; PL/SQL
+    /// keeps the final `END` `;`, same as the C++ port).
     pub end: usize,
-    /// Bloque PL/SQL (conserva el `;` final del `END` al ejecutar).
+    /// PL/SQL block (keeps the final `END` `;` when executing).
     pub plsql: bool,
-    /// Línea (desde 1) donde empieza.
+    /// Line (1-based) where it starts.
     pub start_line: usize,
-    /// Texto listo para ejecutar.
+    /// Text ready to execute.
     pub text: String,
 }
 
@@ -63,7 +63,7 @@ pub fn split(script: &str) -> Vec<Statement> {
     let chars: Vec<char> = script.chars().collect();
     let n = chars.len();
 
-    // Offset UTF-16 de cada índice de carácter (y del final).
+    // UTF-16 offset of each character index (and the end).
     let mut utf16 = Vec::with_capacity(n + 1);
     let mut acc = 0usize;
     for &c in &chars {
@@ -80,7 +80,7 @@ pub fn split(script: &str) -> Vec<Statement> {
         .collect();
     let line_of = |pos: usize| newlines.partition_point(|&p| p < pos) + 1;
 
-    // Si en `pos` empieza una línea que es solo '/', devuelve el fin de esa línea.
+    // If a line containing only '/' starts at `pos`, return that line's end.
     let is_slash_line = |pos: usize| -> Option<usize> {
         let mut line_start = pos;
         while line_start > 0 && chars[line_start - 1] != '\n' {
@@ -232,7 +232,7 @@ pub fn split(script: &str) -> Vec<Statement> {
             }
 
             if c == '/' {
-                // Línea que solo contiene '/'.
+                // Line containing only '/'.
                 if let Some(e) = is_slash_line(j) {
                     stmt_end = Some(j);
                     next = e;
@@ -281,7 +281,7 @@ pub fn split(script: &str) -> Vec<Statement> {
                         depth += 1;
                     } else if word == "end" {
                         // "end if", "end loop", "end case" cierran su propia estructura;
-                        // "end" a secas cierra BEGIN o una CASE-expresión.
+                        // A bare "end" closes BEGIN or a CASE expression.
                         let mut m = k;
                         while m < n && chars[m].is_whitespace() {
                             m += 1;
@@ -338,8 +338,8 @@ pub fn split(script: &str) -> Vec<Statement> {
     out
 }
 
-/// Índice de la sentencia que contiene la posición (o la anterior si cae en
-/// blancos entre dos); `None` si no hay.
+/// Index of the statement containing the position (or the previous one if it falls in
+/// whitespace between two); `None` if there is none.
 pub fn statement_at(stmts: &[Statement], position: usize) -> Option<usize> {
     let mut best = None;
     for (k, st) in stmts.iter().enumerate() {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Variables de enlace (`:nombre`) y sustitución por literales, port de
-//! `ui/BindParser.cpp`. Se localizan fuera de textos, comentarios y `q'[...]'`.
+//! Bind variables (`:name`) and literal substitution, ported from
+//! `ui/BindParser.cpp`. They are located outside text, comments and `q'[...]'`.
 
 use std::collections::HashMap;
 
@@ -137,7 +137,7 @@ fn scan(chars: &[char]) -> Vec<Hit> {
     hits
 }
 
-/// Nombres únicos, en orden de aparición, conservando el caso original.
+/// Unique names in order of appearance, preserving original case.
 pub fn names(sql: &str) -> Vec<String> {
     let chars: Vec<char> = sql.chars().collect();
     let mut seen = std::collections::HashSet::new();
@@ -228,7 +228,7 @@ pub fn literal(v: &BindValue) -> (String, Option<String>) {
             } else {
                 (
                     "NULL".to_string(),
-                    Some(format!("«{t}» no es un número: se usa NULL.")),
+                    Some(format!("{t} is not a number: using NULL.")),
                 )
             }
         }
@@ -244,7 +244,7 @@ pub fn literal(v: &BindValue) -> (String, Option<String>) {
                 (
                     "NULL".to_string(),
                     Some(format!(
-                        "«{t}» no es una fecha AAAA-MM-DD [HH:MM:SS]: se usa NULL."
+                        "{t} is not a date YYYY-MM-DD [HH:MM:SS]: using NULL."
                     )),
                 )
             }
@@ -267,7 +267,7 @@ pub fn literal(v: &BindValue) -> (String, Option<String>) {
     }
 }
 
-/// Sustituye de atrás hacia adelante para no desplazar posiciones.
+/// Replaces from the end backwards so positions are not shifted.
 pub fn substitute(sql: &str, values: &HashMap<String, BindValue>) -> (String, Vec<String>) {
     let chars: Vec<char> = sql.chars().collect();
     let hits = scan(&chars);

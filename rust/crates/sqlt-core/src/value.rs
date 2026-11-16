@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Valores de una celda Oracle, sin pérdida de precisión.
+//! Oracle cell values, without precision loss.
 
-/// Valor tipado de una celda. NUMBER viaja como string canónica (38 dígitos).
+/// Typed cell value. NUMBER travels as a canonical string (38 digits).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Value {
     Null,
@@ -17,7 +17,7 @@ impl Value {
         matches!(self, Value::Null)
     }
 
-    /// Texto listo para mostrar. `None` para NULL (la UI decide cómo pintarlo)
+    /// Display text. `None` for NULL (the UI decides how to render it).
     /// y para binarios (la UI los muestra en hexadecimal si hace falta).
     pub fn display(&self) -> Option<&str> {
         match self {

@@ -28,8 +28,10 @@ rust/
 
 ## Convenciones
 
-- Identificadores, funciones, tests y comentarios nuevos: **inglés snake_case**.
-- Textos visibles al usuario: español (i18n en P4).
+- **Todo el código en inglés**: identificadores, funciones, tests, comentarios,
+  mensajes de error y salida del CLI.
+- **UI con i18n** (`rust/web/src/i18n.tsx`): nada de texto hardcodeado; diccionarios
+  `es`/`en`.
 - Commits en inglés.
 
 ## CI

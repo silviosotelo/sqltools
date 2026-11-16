@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Parseo de argumentos del harness. Sin dependencias externas.
+//! CLI argument parsing. No external dependencies.
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
@@ -19,18 +19,18 @@ pub enum Command {
 }
 
 pub const USAGE: &str = "\
-uso:
+usage:
   sqlt-cli diag
   sqlt-cli query \"<sql>\" [--max-rows N] [--prefetch N] [--no-header]
   sqlt-cli bench \"<sql>\" [--runs N] [--prefetch N]
 
-Entorno: SQLT_USER, SQLT_PASS, SQLT_ALIAS o SQLT_CONNECT,
-          SQLT_OCI_DIR, SQLT_TNS_ADMIN, SQLT_MODE, SQLT_READ_ONLY, SQLT_PREFETCH";
+Environment: SQLT_USER, SQLT_PASS, SQLT_ALIAS or SQLT_CONNECT,
+             SQLT_OCI_DIR, SQLT_TNS_ADMIN, SQLT_MODE, SQLT_READ_ONLY, SQLT_PREFETCH";
 
 fn parse_u32(flag: &str, value: Option<&String>) -> Result<u32, String> {
-    let v = value.ok_or_else(|| format!("falta el valor de {flag}"))?;
+    let v = value.ok_or_else(|| format!("missing value for {flag}"))?;
     v.parse::<u32>()
-        .map_err(|_| format!("valor inválido para {flag}: {v}"))
+        .map_err(|_| format!("invalid value for {flag}: {v}"))
 }
 
 pub fn parse(args: &[String]) -> Result<Command, String> {
@@ -41,7 +41,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         "-h" | "--help" | "help" => Ok(Command::Help),
         "diag" => {
             if args.len() > 1 {
-                return Err("diag no acepta argumentos".to_string());
+                return Err("diag does not accept arguments".to_string());
             }
             Ok(Command::Diag)
         }
@@ -71,7 +71,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
                         i += 1;
                     }
                     flag if flag.starts_with("--") => {
-                        return Err(format!("opción desconocida: {flag}"));
+                        return Err(format!("unknown option: {flag}"));
                     }
                     value => {
                         sql_parts.push(value.to_string());
@@ -80,7 +80,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
                 }
             }
             if sql_parts.is_empty() {
-                return Err("falta el SQL".to_string());
+                return Err("missing SQL".to_string());
             }
             let sql = sql_parts.join(" ");
             if cmd == "query" {
@@ -98,7 +98,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
                 })
             }
         }
-        other => Err(format!("comando desconocido: {other}\n\n{USAGE}")),
+        other => Err(format!("unknown command: {other}\n\n{USAGE}")),
     }
 }
 

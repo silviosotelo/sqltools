@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Pruebas de integración contra Oracle real. Se saltan si faltan
+//! Integration tests against a real Oracle database. They are skipped when
 //! `SQLT_USER`/`SQLT_PASS` y `SQLT_ALIAS`/`SQLT_CONNECT`.
 
 use std::sync::Arc;
@@ -13,7 +13,7 @@ fn spec() -> Option<ConnectSpec> {
     match ConnectSpec::from_env() {
         Ok(s) => Some(s),
         Err(e) => {
-            eprintln!("SKIP integración Oracle: {e}");
+            eprintln!("SKIP Oracle integration: {e}");
             None
         }
     }
@@ -41,7 +41,7 @@ fn connect_and_select_dual() {
 fn common_types() {
     let Some(spec) = spec() else { return };
     let session = open(&spec);
-    let sql = "select 1 n, 1.5 d, 'ñandú' t, date '2024-02-29' f, \
+    let sql = "select 1 n, 1.5 d, 'áéíóú' t, date '2024-02-29' f, \
                timestamp '2024-02-29 13:45:09.123' ts, cast(null as varchar2(10)) z from dual";
     let mut q = session.query(sql, QueryOptions::default()).expect("query");
     let batch = q.next_batch(10).expect("fetch");
@@ -49,7 +49,7 @@ fn common_types() {
     let row = &batch.rows[0];
     assert_eq!(row[0], Value::Number("1".to_string()));
     assert_eq!(row[1], Value::Number("1.5".to_string()));
-    assert_eq!(row[2], Value::Text("ñandú".to_string()));
+    assert_eq!(row[2], Value::Text("áéíóú".to_string()));
     assert_eq!(row[3], Value::Date("2024-02-29 00:00:00".to_string()));
     match &row[4] {
         Value::Timestamp(s) => assert!(s.starts_with("2024-02-29 13:45:09.123"), "{s}"),
@@ -96,13 +96,13 @@ fn cancel_long_query_and_reuse_session() {
     thread::sleep(Duration::from_millis(500));
     session.cancel().expect("break");
     let result = handle.join().expect("join");
-    let err = result.expect_err("la consulta debía cancelarse");
+    let err = result.expect_err("the query should have been cancelled");
     let msg = err.to_string();
     assert!(msg.contains("ORA-01013"), "error inesperado: {msg}");
 
     let mut q = session
         .query("select 1 from dual", QueryOptions::default())
-        .expect("sesión reutilizable");
+        .expect("reusable session");
     assert_eq!(q.next_batch(1).expect("fetch").rows.len(), 1);
 }
 
@@ -135,7 +135,7 @@ fn batches_respect_max() {
 fn lobs_by_locator() {
     let Some(spec) = spec() else { return };
     let session = open(&spec);
-    let sql = "select to_clob('texto clob ñ'), to_nclob('nclob ñ'), \
+    let sql = "select to_clob('clob ñ'), to_nclob('nclob ñ'), \
                to_blob(hextoraw('0102030405')) from dual";
     let mut q = session
         .query(sql, QueryOptions::default())
@@ -143,7 +143,7 @@ fn lobs_by_locator() {
     let batch = q.next_batch(1).expect("fetch lobs");
     assert_eq!(batch.rows.len(), 1);
     let row = &batch.rows[0];
-    assert_eq!(row[0], Value::Text("texto clob ñ".to_string()));
+    assert_eq!(row[0], Value::Text("clob ñ".to_string()));
     assert_eq!(row[1], Value::Text("nclob ñ".to_string()));
     assert_eq!(row[2], Value::Binary(vec![1, 2, 3, 4, 5]));
 }
@@ -269,7 +269,7 @@ fn nls_spanish_uses_driver_format() {
         .expect("query fecha");
     let batch = q.next_batch(1).expect("fetch");
     let text = batch.rows[0][0].display().unwrap_or_default().to_string();
-    eprintln!("fecha con NLS español: {text}");
+    eprintln!("date with Spanish NLS: {text}");
     assert!(!text.is_empty());
 }
 
@@ -329,7 +329,7 @@ fn extreme_and_informative_numbers() {
         .query(sql, QueryOptions::default())
         .expect("query extremos");
     let batch = q.next_batch(1).expect("fetch extremos");
-    eprintln!("extremos: {:?}", batch.rows[0]);
+    eprintln!("extremes: {:?}", batch.rows[0]);
     assert_eq!(batch.rows[0].len(), 4);
 }
 

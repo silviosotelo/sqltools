@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
-//! Localización del Oracle Instant Client y arranque de ODPI-C.
+//! Oracle Instant Client location and ODPI-C initialization.
 //!
-//! Prioridad: `DPI_OCI_LIB_DIR` > `SQLT_OCI_DIR` > `PATH` > candidatos del
-//! sistema. Nunca se redistribuye el cliente; solo se lo ubica.
+//! Priority: `DPI_OCI_LIB_DIR` > `SQLT_OCI_DIR` > `PATH` > system candidates.
+//! The client is never redistributed; it is only located.
 
 use std::ffi::OsStr;
 use std::fmt;
@@ -16,6 +16,7 @@ pub enum OciError {
     ReadOnly,
     Unsupported(String),
     Io(String),
+    Wallet(String),
     Oracle(oracle::Error),
 }
 
@@ -24,17 +25,18 @@ impl fmt::Display for OciError {
         match self {
             OciError::NotFound { searched } => write!(
                 f,
-                "No se encontró el Oracle Instant Client (oci.dll / libclntsh). \
-                 Definí SQLT_OCI_DIR o DPI_OCI_LIB_DIR. Buscado en: {}",
+                "Oracle Instant Client (oci.dll / libclntsh) was not found. \
+                 Set SQLT_OCI_DIR or DPI_OCI_LIB_DIR. Searched: {}",
                 searched.join(", ")
             ),
-            OciError::Init(msg) => write!(f, "No se pudo inicializar ODPI-C: {msg}"),
+            OciError::Init(msg) => write!(f, "Could not initialize ODPI-C: {msg}"),
             OciError::ReadOnly => write!(
                 f,
-                "La conexión es de solo lectura: solo se permiten SELECT/WITH/EXPLAIN/DESCRIBE"
+                "The connection is read-only: only SELECT/WITH/EXPLAIN/DESCRIBE are allowed"
             ),
             OciError::Unsupported(msg) => write!(f, "{msg}"),
-            OciError::Io(msg) => write!(f, "Error de E/S leyendo LOB: {msg}"),
+            OciError::Io(msg) => write!(f, "I/O error while reading LOB: {msg}"),
+            OciError::Wallet(msg) => write!(f, "{msg}"),
             OciError::Oracle(e) => write!(f, "{e}"),
         }
     }
@@ -188,7 +190,7 @@ pub fn locate_oci_dir() -> Result<PathBuf, OciError> {
 static INIT: OnceLock<Result<(), String>> = OnceLock::new();
 
 /// Inicializa ODPI-C una sola vez. La primera llamada fija el cliente y el
-/// `TNS_ADMIN`; las siguientes reutilizan esa configuración.
+/// `TNS_ADMIN`; later calls reuse that configuration.
 pub fn prepare_oci_environment(lib_dir: &Path, config_dir: Option<&Path>) -> Result<(), OciError> {
     let result = INIT.get_or_init(|| {
         let mut params = oracle::InitParams::new();
