@@ -285,3 +285,54 @@ fn script_emits_dbms_output_lines() {
     assert_eq!(outcome.last_rows, 1);
     assert!(after_disable.is_empty(), "{after_disable:?}");
 }
+
+#[test]
+#[ignore = "requires a real Oracle connection"]
+fn failed_statement_output_does_not_leak() {
+    use sqlt_app::script::{run_script, ScriptEvent};
+
+    let user = std::env::var("SQLT_USER").expect("SQLT_USER");
+    let password = std::env::var("SQLT_PASS").expect("SQLT_PASS");
+    let alias = std::env::var("SQLT_ALIAS").expect("SQLT_ALIAS");
+    let path = std::env::temp_dir().join(format!("sqlt-app-leak-{}.json", std::process::id()));
+    let _ = fs::remove_file(&path);
+    let mut store = ConnectionStore::new(path.clone());
+    let mut config = ConnectionConfig::new("Leak", &user);
+    config.alias = Some(alias);
+    config.tns_admin = std::env::var("SQLT_TNS_ADMIN").ok();
+    config.oci_dir = std::env::var("SQLT_OCI_DIR").ok();
+    store.upsert(config.clone()).unwrap();
+    store.set_password(&config.id, &password).unwrap();
+    let state = AppState::with_store(store);
+    state.connect(&config.id).expect("connect");
+    let session = state.session(&config.id).expect("session");
+    session.enable_dbms_output().expect("enable dbms_output");
+    let options = state.query_options(&config.id);
+
+    let mut failed_output = Vec::new();
+    let failed = run_script(
+        &session,
+        "begin dbms_output.put_line('leak'); raise_application_error(-20001, 'boom'); end;",
+        options,
+        0,
+        None,
+        |event| {
+            if let ScriptEvent::Output(lines) = event {
+                failed_output.extend(lines);
+            }
+        },
+    );
+    assert!(failed.is_err(), "the block must fail");
+    assert!(failed_output.is_empty(), "{failed_output:?}");
+
+    // The next execution must not receive the failed statement's line.
+    let mut next_output = Vec::new();
+    run_script(&session, "select 1 from dual", options, 0, None, |event| {
+        if let ScriptEvent::Output(lines) = event {
+            next_output.extend(lines);
+        }
+    })
+    .expect("next script");
+    assert!(next_output.is_empty(), "{next_output:?}");
+    let _ = fs::remove_file(path);
+}

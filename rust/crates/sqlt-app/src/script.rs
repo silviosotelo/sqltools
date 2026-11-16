@@ -62,36 +62,15 @@ where
         if text.is_empty() {
             continue;
         }
-        let mut statement_rows = 0usize;
-        if returns_rows(text) {
-            let mut handle = session.query(text, options).map_err(|e| e.to_string())?;
-            emit(ScriptEvent::Columns(handle.columns().to_vec()));
-            loop {
-                let want = if max_rows == 0 {
-                    500
-                } else {
-                    max_rows.saturating_sub(statement_rows).min(500)
-                };
-                if want == 0 {
-                    break;
-                }
-                let batch = handle.next_batch(want).map_err(|e| e.to_string())?;
-                if batch.rows.is_empty() {
-                    break;
-                }
-                statement_rows += batch.rows.len();
-                emit(ScriptEvent::Batch(batch));
+        let statement_rows = match run_statement(session, text, options, max_rows, &mut emit) {
+            Ok(rows) => rows,
+            Err(error) => {
+                // Discard the failed statement's output so it cannot leak into
+                // the next execution; draining is never fatal.
+                let _ = session.dbms_output_lines(1000);
+                return Err(error);
             }
-        } else {
-            let affected = session.execute(text).map_err(|e| e.to_string())?;
-            statement_rows = affected as usize;
-        }
-        // Draining output is auxiliary: never turn a successful statement into
-        // an error because the DBMS_OUTPUT buffer could not be read.
-        let lines = session.dbms_output_lines(1000).unwrap_or_default();
-        if !lines.is_empty() {
-            emit(ScriptEvent::Output(lines));
-        }
+        };
         total += statement_rows;
         last_rows = statement_rows;
     }
@@ -99,6 +78,51 @@ where
         total_rows: total,
         last_rows,
     })
+}
+
+/// Runs one statement, streaming its result set, and emits the
+/// `DBMS_OUTPUT` lines it produced.
+fn run_statement<F>(
+    session: &Session,
+    text: &str,
+    options: QueryOptions,
+    max_rows: usize,
+    emit: &mut F,
+) -> Result<usize, String>
+where
+    F: FnMut(ScriptEvent),
+{
+    let mut statement_rows = 0usize;
+    if returns_rows(text) {
+        let mut handle = session.query(text, options).map_err(|e| e.to_string())?;
+        emit(ScriptEvent::Columns(handle.columns().to_vec()));
+        loop {
+            let want = if max_rows == 0 {
+                500
+            } else {
+                max_rows.saturating_sub(statement_rows).min(500)
+            };
+            if want == 0 {
+                break;
+            }
+            let batch = handle.next_batch(want).map_err(|e| e.to_string())?;
+            if batch.rows.is_empty() {
+                break;
+            }
+            statement_rows += batch.rows.len();
+            emit(ScriptEvent::Batch(batch));
+        }
+    } else {
+        let affected = session.execute(text).map_err(|e| e.to_string())?;
+        statement_rows = affected as usize;
+    }
+    // Draining output is auxiliary: never turn a successful statement into an
+    // error because the DBMS_OUTPUT buffer could not be read.
+    let lines = session.dbms_output_lines(1000).unwrap_or_default();
+    if !lines.is_empty() {
+        emit(ScriptEvent::Output(lines));
+    }
+    Ok(statement_rows)
 }
 
 #[cfg(test)]
