@@ -617,3 +617,20 @@ fn large_collections_are_summarized_without_materializing() {
         Value::Text("SYS.ODCINUMBERLIST(100 elements)".to_string())
     );
 }
+
+#[test]
+fn wide_collections_are_summarized_by_byte_budget() {
+    let Some(spec) = spec() else { return };
+    let session = open(&spec);
+    let mut query = session
+        .query(
+            "select sys.odcivarchar2list(rpad('x', 4000, 'x'), rpad('y', 4000, 'y'), rpad('z', 4000, 'z')) from dual",
+            QueryOptions::default(),
+        )
+        .expect("query wide collection");
+    let batch = query.next_batch(10).expect("fetch wide collection");
+    assert_eq!(
+        batch.rows[0][0],
+        Value::Text("SYS.ODCIVARCHAR2LIST(3 elements)".to_string())
+    );
+}

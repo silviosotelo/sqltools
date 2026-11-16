@@ -407,8 +407,39 @@ fn read_blob(value: &oracle::SqlValue, limit: usize) -> Result<Vec<u8>, OciError
 }
 
 /// Object/collection cells are rendered as text; cap what gets materialized.
+/// Cardinality limits skip huge collections early; the byte budget stops the
+/// `Display` formatter itself, covering wide `VARCHAR2` (up to 32,767 bytes
+/// with `MAX_STRING_SIZE=EXTENDED`).
 const MAX_COLLECTION_ELEMENTS: i32 = 50;
 const MAX_OBJECT_ATTRIBUTES: usize = 50;
+const MAX_OBJECT_TEXT_BYTES: usize = 4096;
+
+struct BudgetWriter {
+    text: String,
+    limit: usize,
+}
+
+impl std::fmt::Write for BudgetWriter {
+    fn write_str(&mut self, chunk: &str) -> std::fmt::Result {
+        if self.text.len() + chunk.len() > self.limit {
+            return Err(std::fmt::Error);
+        }
+        self.text.push_str(chunk);
+        Ok(())
+    }
+}
+
+/// Renders with `Display`, giving up (and dropping the partial text) once the
+/// byte budget is exceeded, so a single cell cannot allocate without bound.
+fn render_with_budget(value: &dyn std::fmt::Display) -> Option<String> {
+    use std::fmt::Write;
+    let mut writer = BudgetWriter {
+        text: String::new(),
+        limit: MAX_OBJECT_TEXT_BYTES,
+    };
+    write!(writer, "{value}").ok()?;
+    Some(writer.text)
+}
 
 fn is_lob_type(oratype: &OracleType) -> bool {
     matches!(
@@ -516,7 +547,9 @@ fn map_value(
                 if size > MAX_COLLECTION_ELEMENTS || lob_elements {
                     Ok(Value::Text(format!("{object_type}({size} elements)")))
                 } else {
-                    Ok(Value::Text(collection.to_string()))
+                    Ok(Value::Text(render_with_budget(&collection).unwrap_or_else(
+                        || format!("{object_type}({size} elements)"),
+                    )))
                 }
             } else {
                 let object: oracle::sql_type::Object = value.get()?;
@@ -528,7 +561,10 @@ fn map_value(
                 if oversized {
                     Ok(Value::Text(format!("{object_type}(...)")))
                 } else {
-                    Ok(Value::Text(object.to_string()))
+                    Ok(Value::Text(
+                        render_with_budget(&object)
+                            .unwrap_or_else(|| format!("{object_type}(...)")),
+                    ))
                 }
             }
         }
