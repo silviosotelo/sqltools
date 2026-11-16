@@ -145,6 +145,7 @@ export default function App() {
   const [profileOptions, setProfileOptions] = useState<FormatOptions | null>(
     null,
   );
+  const [showStatus, setShowStatus] = useState(true);
   const [commands, setCommands] = useState<CommandSpec[]>([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState("");
@@ -575,6 +576,57 @@ export default function App() {
     }
   };
 
+  const copyWorkspace = async () => {
+    try {
+      const workspace: Workspace = {
+        version: 1,
+        files: [{ name: "query.sql", sql }],
+        active: 0,
+      };
+      await navigator.clipboard.writeText(JSON.stringify(workspace));
+      setStatus(t("workspaceSave"));
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const pasteWorkspace = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      const workspace = JSON.parse(text) as Workspace;
+      const file = workspace.files?.[workspace.active] ?? workspace.files?.[0];
+      if (!file || typeof file.sql !== "string") {
+        setStatus(t("workspaceLoad"));
+        return;
+      }
+      setSql(file.sql);
+      setStatus(t("workspaceLoad"));
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const loadDdlWithDbmsMetadata = async () => {
+    if (!selectedObject) {
+      setStatus(t("selectObject"));
+      return;
+    }
+    try {
+      setSql(
+        await api.loadDdl(
+          selected,
+          schema.trim() || null,
+          selectedObject.name,
+          selectedObject.objectType,
+        ),
+      );
+      setPanel("results");
+      setStatus(t("loadDdl"));
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
   const toggleReadOnly = async () => {
     if (!selected) return;
     try {
@@ -642,6 +694,16 @@ export default function App() {
 
   const executeCommand = (name: string) => {
     setPaletteOpen(false);
+    const slot = /^Edit\.(SetRandomBookmark|GetRandomBookmark)\.(\d)$/.exec(name);
+    if (slot) {
+      const index = Number(slot[2]);
+      if (slot[1] === "SetRandomBookmark") {
+        editorRef.current?.setSlotBookmark(index);
+      } else {
+        editorRef.current?.goToSlotBookmark(index);
+      }
+      return;
+    }
     switch (name) {
       case "File.New":
         newFile();
@@ -789,6 +851,130 @@ export default function App() {
         break;
       case "Edit.PreviousBookmark":
         editorRef.current?.previousBookmark();
+        break;
+      case "Edit.RemoveallBookmarks":
+        editorRef.current?.clearBookmarks();
+        break;
+      case "Edit.CopyBookmarkedLines":
+        void editorRef.current?.copyBookmarkedLines();
+        break;
+      case "Edit.CutBookmarkedLines":
+        void editorRef.current?.cutBookmarkedLines();
+        break;
+      case "Edit.DeleteBookmarkedLines":
+        editorRef.current?.deleteBookmarkedLines();
+        break;
+      case "Edit.TabifySelectionAll":
+        editorRef.current?.tabifyAll();
+        break;
+      case "Edit.TabifySelectionLeading":
+        editorRef.current?.tabifyLeading();
+        break;
+      case "Edit.UntabifySelection":
+        editorRef.current?.untabify();
+        break;
+      case "Edit.TrimLeadingSpaces":
+        editorRef.current?.trimLeading();
+        break;
+      case "Edit.TrimExcessiveSpaces":
+        editorRef.current?.trimExcessive();
+        break;
+      case "Edit.RemoveExcessiveBlankLines":
+        editorRef.current?.removeExcessiveBlankLines();
+        break;
+      case "Edit.SplitLine":
+        editorRef.current?.splitLine();
+        break;
+      case "Edit.NormalizeKeyword":
+        editorRef.current?.normalizeKeyword();
+        break;
+      case "Edit.GoTo":
+        editorRef.current?.goToLine();
+        break;
+      case "Edit.DatetimeStamp":
+        editorRef.current?.timestamp();
+        break;
+      case "Script.ExecuteFromCursor":
+        void run(editorRef.current?.textFromCursor() ?? sql);
+        break;
+      case "Script.ExecuteCurrentAlt":
+        void run();
+        break;
+      case "Script.QuickQuery":
+        if (selectedObject) queryObject(selectedObject);
+        else setStatus(t("selectObject"));
+        break;
+      case "Script.LoadDDLWithDbmsMetadata":
+        void loadDdlWithDbmsMetadata();
+        break;
+      case "View.StatusBar":
+        setShowStatus((visible) => !visible);
+        break;
+      case "Edit.FormatSQL":
+        void formatSql();
+        break;
+      case "Edit.ToggleAllFolds":
+        editorRef.current?.toggleAllFolds();
+        break;
+      case "Edit.CollapseCurrentRegion":
+        editorRef.current?.collapseRegion();
+        break;
+      case "Edit.ExpandCurrentRegion":
+        editorRef.current?.expandRegion();
+        break;
+      case "Edit.ToggleCurrentRegion":
+        editorRef.current?.toggleRegion();
+        break;
+      case "Edit.SelectWord":
+        editorRef.current?.selectWord();
+        break;
+      case "Edit.CopyAppend":
+        void editorRef.current?.copyAppend();
+        break;
+      case "Edit.CutAppend":
+        void editorRef.current?.cutAppend();
+        break;
+      case "Edit.Delete":
+        editorRef.current?.deleteForward();
+        break;
+      case "Edit.DeleteWordBack":
+        editorRef.current?.deleteWordBack();
+        break;
+      case "Edit.DeletetoEndOfWord":
+        editorRef.current?.deleteToEndOfWord();
+        break;
+      case "Edit.ScrollUp":
+        editorRef.current?.scrollUp();
+        break;
+      case "Edit.ScrollDown":
+        editorRef.current?.scrollDown();
+        break;
+      case "Edit.ScrollToCenter":
+        editorRef.current?.scrollToCenter();
+        break;
+      case "Edit.FindSelectedNext":
+        editorRef.current?.findSelected(true);
+        break;
+      case "Edit.FindSelectedPrevious":
+        editorRef.current?.findSelected(false);
+        break;
+      case "Edit.LineNumbers":
+        editorRef.current?.toggleLineNumbers();
+        break;
+      case "Workspace.SaveQuick":
+        void saveWorkspace();
+        break;
+      case "Workspace.OpenAutosaved":
+        void loadWorkspace();
+        break;
+      case "Workspace.Copy":
+        void copyWorkspace();
+        break;
+      case "Workspace.Paste":
+        void pasteWorkspace();
+        break;
+      case "Workspace.OpenClose":
+        newFile();
         break;
       case "Workspace.Save":
         void saveWorkspace();
@@ -1404,7 +1590,7 @@ export default function App() {
           )}
         </section>
 
-        <footer className="status">{status}</footer>
+        {showStatus && <footer className="status">{status}</footer>}
       </main>
 
       {paletteOpen && (

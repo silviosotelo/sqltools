@@ -374,3 +374,7 @@ tr.spacer td {
   opacity: 0.6;
   font-family: ui-monospace, monospace;
 }
+
+.hide-line-numbers .cm-lineNumbers {
+  display: none;
+}

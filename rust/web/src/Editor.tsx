@@ -2,6 +2,9 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { autocompletion, type CompletionContext } from "@codemirror/autocomplete";
 import {
   copyLineDown,
+  deleteCharForward,
+  deleteGroupBackward,
+  deleteGroupForward,
   deleteLine,
   indentLess,
   indentMore,
@@ -10,8 +13,22 @@ import {
   selectLine,
   undo,
 } from "@codemirror/commands";
-import { foldAll, unfoldAll } from "@codemirror/language";
-import { findNext, findPrevious, openSearchPanel } from "@codemirror/search";
+import {
+  foldAll,
+  foldCode,
+  foldedRanges,
+  getIndentUnit,
+  toggleFold,
+  unfoldAll,
+  unfoldCode,
+} from "@codemirror/language";
+import {
+  findNext,
+  findPrevious,
+  openSearchPanel,
+  SearchQuery,
+  setSearchQuery,
+} from "@codemirror/search";
 import { sql, StandardSQL } from "@codemirror/lang-sql";
 import { EditorState, RangeSet, StateEffect, StateField } from "@codemirror/state";
 import {
@@ -43,12 +60,18 @@ class BookmarkMarker extends GutterMarker {
 
 const bookmarkMarker = new BookmarkMarker();
 const toggleBookmark = StateEffect.define<number>();
+const clearBookmarks = StateEffect.define<null>();
+const setSlot = StateEffect.define<[number, number]>();
 
 const bookmarkField = StateField.define<RangeSet<GutterMarker>>({
   create: () => RangeSet.empty,
   update(value, transaction) {
     let next = value.map(transaction.changes);
     for (const effect of transaction.effects) {
+      if (effect.is(clearBookmarks)) {
+        next = RangeSet.empty;
+        continue;
+      }
       if (effect.is(toggleBookmark)) {
         const line = transaction.state.doc.lineAt(effect.value);
         let exists = false;
@@ -62,6 +85,22 @@ const bookmarkField = StateField.define<RangeSet<GutterMarker>>({
           next = next.update({ add: [bookmarkMarker.range(line.from)] });
         }
       }
+    }
+    return next;
+  },
+});
+
+/// Ten named bookmark slots; positions map through document changes.
+const slotField = StateField.define<Map<number, number>>({
+  create: () => new Map(),
+  update(value, transaction) {
+    const next = new Map<number, number>();
+    for (const [slot, position] of value) {
+      next.set(slot, transaction.changes.mapPos(position));
+    }
+    for (const effect of transaction.effects) {
+      if (effect.is(clearBookmarks)) next.clear();
+      if (effect.is(setSlot)) next.set(effect.value[0], effect.value[1]);
     }
     return next;
   },
@@ -116,6 +155,38 @@ export type EditorHandle = {
   toggleBookmark: () => void;
   nextBookmark: () => void;
   previousBookmark: () => void;
+  setSlotBookmark: (slot: number) => void;
+  goToSlotBookmark: (slot: number) => void;
+  clearBookmarks: () => void;
+  copyBookmarkedLines: () => Promise<void>;
+  cutBookmarkedLines: () => Promise<void>;
+  deleteBookmarkedLines: () => void;
+  tabifyAll: () => void;
+  tabifyLeading: () => void;
+  untabify: () => void;
+  trimLeading: () => void;
+  trimExcessive: () => void;
+  removeExcessiveBlankLines: () => void;
+  splitLine: () => void;
+  normalizeKeyword: () => void;
+  goToLine: () => void;
+  timestamp: () => void;
+  textFromCursor: () => string;
+  toggleAllFolds: () => void;
+  collapseRegion: () => void;
+  expandRegion: () => void;
+  toggleRegion: () => void;
+  selectWord: () => void;
+  copyAppend: () => Promise<void>;
+  cutAppend: () => Promise<void>;
+  deleteForward: () => void;
+  deleteWordBack: () => void;
+  deleteToEndOfWord: () => void;
+  scrollUp: () => void;
+  scrollDown: () => void;
+  scrollToCenter: () => void;
+  findSelected: (forward: boolean) => void;
+  toggleLineNumbers: () => void;
 };
 
 const keywords = [
@@ -265,6 +336,40 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
     editor.dispatch({ changes: { from, to, insert: map(lines).join("\n") } });
   };
 
+  const bookmarkedLines = () => {
+    const editor = view.current;
+    if (!editor) return [];
+    const result: { from: number; to: number; text: string }[] = [];
+    editor.state.field(bookmarkField).between(0, editor.state.doc.length, (from) => {
+      const line = editor.state.doc.lineAt(from);
+      result.push({ from: line.from, to: line.to, text: line.text });
+      return false;
+    });
+    return result;
+  };
+
+  const removeBookmarkedLines = () => {
+    const editor = view.current;
+    if (!editor) return;
+    const marked = new Set(
+      bookmarkedLines().map((line) => editor.state.doc.lineAt(line.from).number),
+    );
+    if (!marked.size) return;
+    const kept: string[] = [];
+    for (let number = 1; number <= editor.state.doc.lines; number += 1) {
+      if (!marked.has(number)) kept.push(editor.state.doc.line(number).text);
+    }
+    editor.dispatch({
+      changes: { from: 0, to: editor.state.doc.length, insert: kept.join("\n") },
+      effects: clearBookmarks.of(null),
+    });
+  };
+
+  const indentWidth = (): number => {
+    const editor = view.current;
+    return editor ? getIndentUnit(editor.state) : 2;
+  };
+
   const bookmarkPositions = (): number[] => {
     const editor = view.current;
     if (!editor) return [];
@@ -392,6 +497,238 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
     },
     nextBookmark: () => jumpToBookmark(true),
     previousBookmark: () => jumpToBookmark(false),
+    setSlotBookmark: (slot) => {
+      const editor = view.current;
+      if (!editor) return;
+      editor.dispatch({
+        effects: setSlot.of([slot, editor.state.selection.main.head]),
+      });
+    },
+    goToSlotBookmark: (slot) => {
+      const editor = view.current;
+      if (!editor) return;
+      const position = editor.state.field(slotField).get(slot);
+      if (position === undefined) return;
+      editor.dispatch({
+        selection: { anchor: position },
+        effects: EditorView.scrollIntoView(position, { y: "center" }),
+      });
+    },
+    clearBookmarks: () => {
+      if (view.current) view.current.dispatch({ effects: clearBookmarks.of(null) });
+    },
+    copyBookmarkedLines: async () => {
+      const lines = bookmarkedLines();
+      if (!lines.length) return;
+      await navigator.clipboard.writeText(
+        lines.map((line) => line.text).join("\n"),
+      );
+    },
+    cutBookmarkedLines: async () => {
+      const lines = bookmarkedLines();
+      if (!lines.length) return;
+      await navigator.clipboard.writeText(
+        lines.map((line) => line.text).join("\n"),
+      );
+      removeBookmarkedLines();
+    },
+    deleteBookmarkedLines: () => removeBookmarkedLines(),
+    tabifyAll: () =>
+      mapLines((lines) =>
+        lines.map((line) =>
+          line.replace(new RegExp(" ".repeat(indentWidth()), "g"), "\t"),
+        ),
+      ),
+    tabifyLeading: () =>
+      mapLines((lines) =>
+        lines.map((line) => {
+          const match = /^ +/.exec(line);
+          if (!match) return line;
+          const tabs = Math.floor(match[0].length / indentWidth());
+          return "\t".repeat(tabs) + line.slice(tabs * indentWidth());
+        }),
+      ),
+    untabify: () =>
+      mapLines((lines) =>
+        lines.map((line) => line.replace(/\t/g, " ".repeat(indentWidth()))),
+      ),
+    trimLeading: () => mapLines((lines) => lines.map((line) => line.replace(/^\s+/, ""))),
+    trimExcessive: () =>
+      mapLines((lines) => lines.map((line) => line.replace(/ {2,}/g, " "))),
+    removeExcessiveBlankLines: () =>
+      mapLines((lines) =>
+        lines.filter(
+          (line, index) =>
+            !(line.trim() === "" && lines[index - 1]?.trim() === ""),
+        ),
+      ),
+    splitLine: () => {
+      const editor = view.current;
+      if (!editor) return;
+      const head = editor.state.selection.main.head;
+      editor.dispatch({
+        changes: { from: head, insert: "\n" },
+        selection: { anchor: head + 1 },
+      });
+    },
+    normalizeKeyword: () => {
+      const editor = view.current;
+      if (!editor) return;
+      const head = editor.state.selection.main.head;
+      const line = editor.state.doc.lineAt(head);
+      const offset = head - line.from;
+      let start = offset;
+      while (start > 0 && /[\w$#]/.test(line.text[start - 1])) start -= 1;
+      let end = offset;
+      while (end < line.text.length && /[\w$#]/.test(line.text[end])) end += 1;
+      if (start === end) return;
+      editor.dispatch({
+        changes: {
+          from: line.from + start,
+          to: line.from + end,
+          insert: line.text.slice(start, end).toUpperCase(),
+        },
+      });
+    },
+    goToLine: () => {
+      const editor = view.current;
+      if (!editor) return;
+      const answer = window.prompt("Line", "1");
+      if (!answer) return;
+      const number = Math.min(
+        Math.max(1, Number(answer) || 1),
+        editor.state.doc.lines,
+      );
+      const line = editor.state.doc.line(number);
+      editor.dispatch({
+        selection: { anchor: line.from },
+        effects: EditorView.scrollIntoView(line.from, { y: "center" }),
+      });
+    },
+    timestamp: () => {
+      const editor = view.current;
+      if (!editor) return;
+      const text = new Date()
+        .toISOString()
+        .slice(0, 19)
+        .replace("T", " ");
+      editor.dispatch(editor.state.replaceSelection(text));
+    },
+    textFromCursor: () => {
+      const editor = view.current;
+      if (!editor) return "";
+      return editor.state.sliceDoc(editor.state.selection.main.head);
+    },
+    toggleAllFolds: () => {
+      const editor = view.current;
+      if (!editor) return;
+      if (foldedRanges(editor.state).size) unfoldAll(editor);
+      else foldAll(editor);
+    },
+    collapseRegion: () => {
+      if (view.current) foldCode(view.current);
+    },
+    expandRegion: () => {
+      if (view.current) unfoldCode(view.current);
+    },
+    toggleRegion: () => {
+      if (view.current) toggleFold(view.current);
+    },
+    selectWord: () => {
+      const editor = view.current;
+      if (!editor) return;
+      const head = editor.state.selection.main.head;
+      const line = editor.state.doc.lineAt(head);
+      const offset = head - line.from;
+      let start = offset;
+      while (start > 0 && /[\w$#]/.test(line.text[start - 1])) start -= 1;
+      let end = offset;
+      while (end < line.text.length && /[\w$#]/.test(line.text[end])) end += 1;
+      if (start === end) return;
+      editor.dispatch({
+        selection: { anchor: line.from + start, head: line.from + end },
+      });
+    },
+    copyAppend: async () => {
+      const editor = view.current;
+      if (!editor) return;
+      const { from, to } = editor.state.selection.main;
+      if (from === to) return;
+      const text = editor.state.sliceDoc(from, to);
+      const current = await navigator.clipboard
+        .readText()
+        .catch(() => "");
+      await navigator.clipboard.writeText(
+        current ? `${current}\n${text}` : text,
+      );
+    },
+    cutAppend: async () => {
+      const editor = view.current;
+      if (!editor) return;
+      const { from, to } = editor.state.selection.main;
+      if (from === to) return;
+      const text = editor.state.sliceDoc(from, to);
+      const current = await navigator.clipboard
+        .readText()
+        .catch(() => "");
+      await navigator.clipboard.writeText(
+        current ? `${current}\n${text}` : text,
+      );
+      editor.dispatch({ changes: { from, to, insert: "" } });
+    },
+    deleteForward: () => {
+      const editor = view.current;
+      if (!editor) return;
+      if (editor.state.selection.main.empty) {
+        deleteCharForward(editor);
+      } else {
+        editor.dispatch(editor.state.replaceSelection(""));
+      }
+    },
+    deleteWordBack: () => {
+      if (view.current) deleteGroupBackward(view.current);
+    },
+    deleteToEndOfWord: () => {
+      if (view.current) deleteGroupForward(view.current);
+    },
+    scrollUp: () => {
+      const editor = view.current;
+      if (!editor) return;
+      editor.scrollDOM.scrollTop -= editor.defaultLineHeight * 3;
+    },
+    scrollDown: () => {
+      const editor = view.current;
+      if (!editor) return;
+      editor.scrollDOM.scrollTop += editor.defaultLineHeight * 3;
+    },
+    scrollToCenter: () => {
+      const editor = view.current;
+      if (!editor) return;
+      editor.dispatch({
+        effects: EditorView.scrollIntoView(
+          editor.state.selection.main.head,
+          { y: "center" },
+        ),
+      });
+    },
+    findSelected: (forward) => {
+      const editor = view.current;
+      if (!editor) return;
+      const { from, to } = editor.state.selection.main;
+      if (from === to) return;
+      editor.dispatch({
+        effects: setSearchQuery.of(
+          new SearchQuery({ search: editor.state.sliceDoc(from, to) }),
+        ),
+      });
+      if (forward) findNext(editor);
+      else findPrevious(editor);
+    },
+    toggleLineNumbers: () => {
+      const editor = view.current;
+      if (!editor) return;
+      editor.dom.classList.toggle("hide-line-numbers");
+    },
   }), []);
 
   useEffect(() => {
@@ -402,6 +739,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
         extensions: [
           basicSetup,
           bookmarkField,
+          slotField,
           bookmarkGutter,
           sql({ dialect: StandardSQL, upperCaseKeywords: true }),
           autocompletion({
