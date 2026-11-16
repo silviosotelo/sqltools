@@ -406,6 +406,22 @@ fn read_blob(value: &oracle::SqlValue, limit: usize) -> Result<Vec<u8>, OciError
     Ok(buf)
 }
 
+/// Object/collection cells are rendered as text; cap what gets materialized.
+const MAX_COLLECTION_ELEMENTS: i32 = 50;
+const MAX_OBJECT_ATTRIBUTES: usize = 50;
+
+fn is_lob_type(oratype: &OracleType) -> bool {
+    matches!(
+        oratype,
+        OracleType::CLOB
+            | OracleType::NCLOB
+            | OracleType::BLOB
+            | OracleType::BFILE
+            | OracleType::Long
+            | OracleType::LongRaw
+    )
+}
+
 fn map_value(
     value: &oracle::SqlValue,
     info: &oracle::ColumnInfo,
@@ -489,14 +505,31 @@ fn map_value(
             Ok(Value::Text(interval.to_string()))
         }
         OracleType::Object(object_type) => {
-            // Oracle objects and collections share `OracleType::Object`; both
-            // implement `Display` as `SCHEMA.TYPE(attr, ...)`.
+            // Oracle objects and collections share `OracleType::Object`. Their
+            // `Display` renders every element/attribute, so check a budget
+            // *before* materializing: a huge collection must not be built in
+            // memory just to be shown in one grid cell.
             if object_type.is_collection() {
                 let collection: oracle::sql_type::Collection = value.get()?;
-                Ok(Value::Text(collection.to_string()))
+                let size = collection.size()?;
+                let lob_elements = object_type.element_oracle_type().is_some_and(is_lob_type);
+                if size > MAX_COLLECTION_ELEMENTS || lob_elements {
+                    Ok(Value::Text(format!("{object_type}({size} elements)")))
+                } else {
+                    Ok(Value::Text(collection.to_string()))
+                }
             } else {
                 let object: oracle::sql_type::Object = value.get()?;
-                Ok(Value::Text(object.to_string()))
+                let oversized = object_type.num_attributes() > MAX_OBJECT_ATTRIBUTES
+                    || object_type
+                        .attributes()
+                        .iter()
+                        .any(|attribute| is_lob_type(attribute.oracle_type()));
+                if oversized {
+                    Ok(Value::Text(format!("{object_type}(...)")))
+                } else {
+                    Ok(Value::Text(object.to_string()))
+                }
             }
         }
         // A REF CURSOR is a child statement; the grid has no nested result

@@ -600,3 +600,20 @@ fn ref_cursor_maps_to_a_placeholder() {
     let batch = query.next_batch(10).expect("fetch ref cursor");
     assert_eq!(batch.rows[0][0], Value::Text("(REF CURSOR)".to_string()));
 }
+
+#[test]
+fn large_collections_are_summarized_without_materializing() {
+    let Some(spec) = spec() else { return };
+    let session = open(&spec);
+    let mut query = session
+        .query(
+            "select cast(collect(level) as sys.odcinumberlist) from dual connect by level <= 100",
+            QueryOptions::default(),
+        )
+        .expect("query large collection");
+    let batch = query.next_batch(10).expect("fetch large collection");
+    assert_eq!(
+        batch.rows[0][0],
+        Value::Text("SYS.ODCINUMBERLIST(100 elements)".to_string())
+    );
+}
