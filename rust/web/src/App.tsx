@@ -171,9 +171,13 @@ export default function App() {
   const [showConnections, setShowConnections] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [installing, setInstalling] = useState(false);
-  const [haltOnError, setHaltOnErrorState] = useState(
-    () => localStorage.getItem("sqlt.haltOnError") !== "false",
-  );
+  const [haltOnError, setHaltOnErrorState] = useState(() => {
+    try {
+      return localStorage.getItem("sqlt.haltOnError") !== "false";
+    } catch {
+      return true;
+    }
+  });
   const setHaltOnError = (value: boolean) => {
     setHaltOnErrorState(value);
     try {
