@@ -664,6 +664,26 @@ export default function App() {
     }
   };
 
+  const openFileAtCursor = async () => {
+    const path = editorRef.current?.wordAtCursor() ?? "";
+    if (!path) {
+      setStatus(t("noFile"));
+      return;
+    }
+    if (!confirmDiscard()) return;
+    try {
+      const file = await api.readSqlFile(path);
+      setSql(file.text);
+      setCleanSql(file.text);
+      setFilePath(path);
+      setFileEol(file.eol);
+      setCleanEol(file.eol);
+      setStatus(path);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
   const reloadFile = async () => {
     if (!filePath) {
       setStatus(t("noFile"));
@@ -980,7 +1000,11 @@ export default function App() {
         break;
       case "Edit.Find":
       case "Edit.Replace":
+      case "Edit.FindInFile":
         editorRef.current?.find();
+        break;
+      case "Edit.OpenFileUnderCursor":
+        void openFileAtCursor();
         break;
       case "Edit.FindNext":
         editorRef.current?.findNext();

@@ -197,6 +197,7 @@ export type EditorHandle = {
   foldToLevel: (level: number) => void;
   toggleSyntaxGutter: () => void;
   toggleRuler: () => void;
+  wordAtCursor: () => string;
 };
 
 const keywords = [
@@ -782,6 +783,19 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
       const editor = view.current;
       if (!editor) return;
       editor.dom.classList.toggle("show-ruler");
+    },
+    wordAtCursor: () => {
+      const editor = view.current;
+      if (!editor) return "";
+      const head = editor.state.selection.main.head;
+      const line = editor.state.doc.lineAt(head);
+      const offset = head - line.from;
+      const isWord = (char: string) => /[A-Za-z0-9_$#./\\:-]/.test(char);
+      let start = offset;
+      while (start > 0 && isWord(line.text[start - 1])) start -= 1;
+      let end = offset;
+      while (end < line.text.length && isWord(line.text[end])) end += 1;
+      return line.text.slice(start, end);
     },
   }), []);
 

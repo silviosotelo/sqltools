@@ -60,6 +60,8 @@ const IMPLEMENTED: &[&str] = &[
     "Edit.CollapseToLevel3",
     "Edit.SyntaxGutter",
     "Edit.Ruler",
+    "Edit.FindInFile",
+    "Edit.OpenFileUnderCursor",
     "Workspace.SaveQuick",
     "Workspace.OpenAutosaved",
     "Workspace.Copy",
@@ -225,7 +227,7 @@ mod tests {
                 .iter()
                 .filter(|command| command.implemented)
                 .count(),
-            130
+            132
         );
     }
 }
