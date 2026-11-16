@@ -266,4 +266,22 @@ fn script_emits_dbms_output_lines() {
     .expect("script");
     assert_eq!(outcome.last_rows, 1);
     assert_eq!(output, vec!["from script".to_string()]);
+
+    // A script that disables DBMS_OUTPUT must not fail while draining.
+    let mut after_disable = Vec::new();
+    let outcome = run_script(
+        &session,
+        "begin dbms_output.disable; end;",
+        options,
+        0,
+        None,
+        |event| {
+            if let ScriptEvent::Output(lines) = event {
+                after_disable.extend(lines);
+            }
+        },
+    )
+    .expect("script after disable");
+    assert_eq!(outcome.last_rows, 1);
+    assert!(after_disable.is_empty(), "{after_disable:?}");
 }

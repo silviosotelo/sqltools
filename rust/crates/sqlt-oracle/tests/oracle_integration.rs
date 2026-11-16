@@ -493,3 +493,42 @@ fn xmltype_maps_to_text() {
         other => panic!("unexpected xmltype value: {other:?}"),
     }
 }
+
+#[test]
+fn dbms_output_disable_inside_script_is_not_fatal() {
+    let Some(spec) = spec() else { return };
+    let session = open(&spec);
+    session.enable_dbms_output().expect("enable dbms_output");
+    session
+        .execute("begin dbms_output.put_line('before disable'); dbms_output.disable; end;")
+        .expect("disable inside the block");
+    let lines = session.dbms_output_lines(10).expect("drain after disable");
+    assert!(
+        lines.is_empty() || lines == vec!["before disable".to_string()],
+        "{lines:?}"
+    );
+    assert!(session
+        .dbms_output_lines(10)
+        .expect("drain disabled buffer")
+        .is_empty());
+}
+
+#[test]
+fn dbms_output_truncates_but_drains_everything() {
+    let Some(spec) = spec() else { return };
+    let session = open(&spec);
+    session.enable_dbms_output().expect("enable dbms_output");
+    session
+        .execute("begin for i in 1..1005 loop dbms_output.put_line('line ' || i); end loop; end;")
+        .expect("put 1005 lines");
+    let lines = session.dbms_output_lines(1000).expect("drain capped");
+    assert_eq!(lines.len(), 1001, "{lines:?}");
+    assert_eq!(lines[0], "line 1");
+    assert_eq!(lines[999], "line 1000");
+    assert_eq!(lines[1000], "-- 5 more DBMS_OUTPUT lines were truncated");
+    // The remaining lines were consumed, so a second drain is empty.
+    assert!(session
+        .dbms_output_lines(10)
+        .expect("drain remainder")
+        .is_empty());
+}

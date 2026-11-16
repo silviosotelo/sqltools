@@ -86,7 +86,9 @@ where
             let affected = session.execute(text).map_err(|e| e.to_string())?;
             statement_rows = affected as usize;
         }
-        let lines = session.dbms_output_lines(1000).map_err(|e| e.to_string())?;
+        // Draining output is auxiliary: never turn a successful statement into
+        // an error because the DBMS_OUTPUT buffer could not be read.
+        let lines = session.dbms_output_lines(1000).unwrap_or_default();
         if !lines.is_empty() {
             emit(ScriptEvent::Output(lines));
         }

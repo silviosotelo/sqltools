@@ -149,8 +149,14 @@ impl Session {
         Ok(())
     }
 
-    /// Drains up to `max` lines with `DBMS_OUTPUT.GET_LINE` (OUT binds).
-    /// Returns an empty vector when output was not enabled.
+    /// Drains the whole `DBMS_OUTPUT` buffer with `GET_LINE` (OUT binds),
+    /// keeping at most `max` lines and appending a marker when the rest was
+    /// truncated. Returns an empty vector when output was not enabled.
+    ///
+    /// Draining is auxiliary to the statement that produced the output, so an
+    /// OCI error (for example `DBMS_OUTPUT.DISABLE` run inside the script,
+    /// which purges the buffer and rejects `GET_LINE`) ends the drain instead of
+    /// failing the script; the lines collected so far are returned.
     pub fn dbms_output_lines(&self, max: usize) -> Result<Vec<String>, OciError> {
         if !self
             .dbms_output_enabled
@@ -159,20 +165,42 @@ impl Session {
             return Ok(Vec::new());
         }
         let mut lines = Vec::new();
-        for _ in 0..max {
-            let mut stmt = self
+        let mut truncated = 0usize;
+        loop {
+            let Ok(mut stmt) = self
                 .conn
                 .statement("begin dbms_output.get_line(:1, :2); end;")
-                .build()?;
+                .build()
+            else {
+                break;
+            };
             // An OUT string bind needs a buffer; `None::<String>` is empty.
-            stmt.execute(&[&OracleType::Varchar2(32767), &None::<i32>])?;
+            if stmt
+                .execute(&[&OracleType::Varchar2(32767), &None::<i32>])
+                .is_err()
+            {
+                break;
+            }
             // Status is 1 when the buffer is drained; the line is NULL then.
-            let status: i32 = stmt.bind_value(2)?;
+            let Ok(status) = stmt.bind_value::<_, i32>(2) else {
+                break;
+            };
             if status != 0 {
                 break;
             }
-            let line: String = stmt.bind_value(1)?;
-            lines.push(line);
+            let Ok(line) = stmt.bind_value::<_, String>(1) else {
+                break;
+            };
+            if lines.len() < max {
+                lines.push(line);
+            } else {
+                truncated += 1;
+            }
+        }
+        if truncated > 0 {
+            lines.push(format!(
+                "-- {truncated} more DBMS_OUTPUT lines were truncated"
+            ));
         }
         Ok(lines)
     }
