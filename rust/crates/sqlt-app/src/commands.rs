@@ -50,6 +50,9 @@ const IMPLEMENTED: &[&str] = &[
     "Edit.PreviousBookmark",
     "Edit.FormatSQL",
     "Edit.LineNumbers",
+    "Edit.FileFormat_Winows",
+    "Edit.FileFormat_Unix",
+    "Edit.FileFormat_Mac",
     "Workspace.SaveQuick",
     "Workspace.OpenAutosaved",
     "Workspace.Copy",
@@ -215,7 +218,7 @@ mod tests {
                 .iter()
                 .filter(|command| command.implemented)
                 .count(),
-            120
+            123
         );
     }
 }

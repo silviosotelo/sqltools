@@ -101,6 +101,21 @@ pub struct Partitioning {
     pub row_movement: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IotPartition {
+    pub name: String,
+    pub high_value: Option<String>,
+    pub tablespace: Option<String>,
+    pub next_extent: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IotPartitioning {
+    pub kind: PartitionKind,
+    pub columns: Vec<String>,
+    pub partitions: Vec<IotPartition>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct IotInfo {
     /// `ALL_INDEXES.pct_threshold` of the `IOT - TOP` index.
@@ -109,6 +124,8 @@ pub struct IotInfo {
     pub include_column: Option<usize>,
     pub overflow_tablespace: Option<String>,
     pub overflow_next_extent: Option<i64>,
+    /// Index partitions (`Index::writeIndexPartitions` for `IOT - TOP`).
+    pub partitioning: Option<IotPartitioning>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -194,6 +211,98 @@ fn write_storage_clause(
             "{indent}STORAGE (\n{indent}  NEXT       {value}\n{indent})\n"
         ));
     }
+}
+
+/// `Index::writeIndexPartitions` for an `IOT - TOP` index: no GLOBAL/LOCAL,
+/// key columns at +2 and per-partition storage at +4.
+fn write_iot_partitions(
+    out: &mut String,
+    partitioning: &IotPartitioning,
+    table_tablespace: Option<&str>,
+    settings: &WriteSettings,
+) {
+    let lower = settings.lower_db_name;
+    let keyword = match partitioning.kind {
+        PartitionKind::Range => "RANGE",
+        PartitionKind::Hash => "HASH",
+        PartitionKind::List => "LIST",
+    };
+    if partitioning.kind == PartitionKind::List {
+        let column = partitioning.columns.first().cloned().unwrap_or_default();
+        out.push_str(&format!(
+            "  PARTITION BY LIST ({})\n",
+            Table::display_name(&column, lower)
+        ));
+    } else {
+        out.push_str(&format!("  PARTITION BY {keyword} (\n"));
+        for (index, column) in partitioning.columns.iter().enumerate() {
+            let comma = if index + 1 < partitioning.columns.len() {
+                ","
+            } else {
+                ""
+            };
+            out.push_str(&format!(
+                "    {}{comma}\n",
+                Table::display_name(column, lower)
+            ));
+        }
+        out.push_str("  )\n");
+    }
+    out.push_str("  (\n");
+    let max_name = partitioning
+        .partitions
+        .iter()
+        .map(|partition| partition.name.len())
+        .max()
+        .unwrap_or(0);
+    let count = partitioning.partitions.len();
+    for (index, partition) in partitioning.partitions.iter().enumerate() {
+        let mut block = format!(
+            "    PARTITION {}",
+            Table::display_name(&partition.name, lower)
+        );
+        if partitioning.kind != PartitionKind::Hash {
+            let pad = max_name + 1 - partition.name.len();
+            let values = if partitioning.kind == PartitionKind::Range {
+                "VALUES LESS THAN"
+            } else {
+                "VALUES"
+            };
+            block.push_str(&" ".repeat(pad));
+            block.push_str(&format!(
+                "{values} ({})",
+                partition.high_value.clone().unwrap_or_default()
+            ));
+        }
+        if settings.storage_clause {
+            if let Some(tablespace) = &partition.tablespace {
+                let same =
+                    table_tablespace.is_some_and(|table| table.eq_ignore_ascii_case(tablespace));
+                if !same {
+                    block.push_str(&format!(
+                        "\n      TABLESPACE {}",
+                        Table::display_name(tablespace, lower)
+                    ));
+                }
+            }
+            if let Some(next) = partition.next_extent {
+                let value = if next % 1024 == 0 {
+                    format!("{} K", next / 1024)
+                } else {
+                    format!("{next}")
+                };
+                block.push_str(&format!(
+                    "\n      STORAGE (\n        NEXT       {value}\n      )"
+                ));
+            }
+        }
+        if index + 1 < count {
+            block.push(',');
+        }
+        out.push_str(&block);
+        out.push('\n');
+    }
+    out.push_str("  )\n");
 }
 
 /// One line per subpartition, names padded like `writeSubpartitions`.
@@ -456,6 +565,9 @@ impl Table {
                         lower,
                     );
                 }
+            }
+            if let Some(partitioning) = &iot.partitioning {
+                write_iot_partitions(&mut out, partitioning, self.tablespace.as_deref(), settings);
             }
         } else if let Some(duration) = self.temporary {
             out.push_str(match duration {

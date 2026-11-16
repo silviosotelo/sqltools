@@ -76,6 +76,7 @@ const translations = {
     findObject: "Buscar objeto",
     noFile: "No hay archivo abierto",
     discardChanges: "Hay cambios sin guardar. ¿Descartarlos?",
+    lineEnding: "Fin de línea",
     noResults: "Ejecutá una consulta para ver resultados.",
     constraints: "Restricciones",
     indexes: "Índices",
@@ -173,6 +174,7 @@ const translations = {
     findObject: "Find object",
     noFile: "No file is open",
     discardChanges: "There are unsaved changes. Discard them?",
+    lineEnding: "Line endings",
 
     noResults: "Run a query to see results.",
     constraints: "Constraints",

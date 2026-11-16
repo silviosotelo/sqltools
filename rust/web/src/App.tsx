@@ -856,6 +856,18 @@ export default function App() {
       case "File.Reload":
         void reloadFile();
         break;
+      case "Edit.FileFormat_Winows":
+        setFileEol("\r\n");
+        setStatus(`${t("lineEnding")}: CRLF`);
+        break;
+      case "Edit.FileFormat_Unix":
+        setFileEol("\n");
+        setStatus(`${t("lineEnding")}: LF`);
+        break;
+      case "Edit.FileFormat_Mac":
+        setFileEol("\r");
+        setStatus(`${t("lineEnding")}: CR`);
+        break;
       case "File.Close":
       case "File.CloseAll":
         newFile();

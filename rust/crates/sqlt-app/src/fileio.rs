@@ -17,6 +17,8 @@ pub struct FileText {
 pub fn detect_eol(text: &str) -> &'static str {
     if text.contains("\r\n") {
         "\r\n"
+    } else if text.contains('\r') {
+        "\r"
     } else {
         "\n"
     }
@@ -29,12 +31,12 @@ pub fn normalize_newlines(text: &str) -> (String, String) {
     (text.replace("\r\n", "\n").replace('\r', "\n"), eol)
 }
 
-/// Converts `\n` back to the requested EOL.
+/// Converts `\n` back to the requested EOL (`\r\n`, `\r` or `\n`).
 pub fn encode_newlines(text: &str, eol: &str) -> String {
-    if eol == "\r\n" {
-        text.replace('\n', "\r\n")
-    } else {
-        text.to_string()
+    match eol {
+        "\r\n" => text.replace('\n', "\r\n"),
+        "\r" => text.replace('\n', "\r"),
+        _ => text.to_string(),
     }
 }
 
@@ -60,12 +62,16 @@ mod tests {
         let (text, eol) = normalize_newlines("\u{feff}a\nb");
         assert_eq!(text, "a\nb");
         assert_eq!(eol, "\n");
+        let (text, eol) = normalize_newlines("a\rb\r");
+        assert_eq!(text, "a\nb\n");
+        assert_eq!(eol, "\r");
     }
 
     #[test]
     fn encodes_the_requested_line_ending() {
         assert_eq!(encode_newlines("a\nb", "\r\n"), "a\r\nb");
         assert_eq!(encode_newlines("a\nb", "\n"), "a\nb");
+        assert_eq!(encode_newlines("a\nb", "\r"), "a\rb");
     }
 
     #[test]

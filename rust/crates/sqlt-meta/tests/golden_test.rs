@@ -320,11 +320,69 @@ fn iot_with_overflow_matches_metobjects_layout() {
         include_column: Some(2),
         overflow_tablespace: Some("OVFL".to_string()),
         overflow_next_extent: Some(2048 * 1024),
+        partitioning: None,
     });
     table.tablespace = Some("DATA".to_string());
     table.next_extent = Some(1024 * 1024);
     let expected = "CREATE TABLE emp_iot (\n  id     NUMBER(10,0) NOT NULL,\n  name   VARCHAR2(50) NULL,\n  salary NUMBER(10,2) NULL,\n  CONSTRAINT pk_emp_iot PRIMARY KEY (\n    id\n  )\n)\n  ORGANIZATION INDEX INCLUDING name\n    TABLESPACE data\n    STORAGE (\n      NEXT       1024 K\n    )\n  PCTTHRESHOLD  20\n  OVERFLOW\n    TABLESPACE ovfl\n    STORAGE (\n      NEXT       2048 K\n    )\n/\n\n";
     assert_eq!(table.write_definition(&settings(true)), expected);
+}
+
+#[test]
+fn partitioned_iot_uses_index_partitions() {
+    use sqlt_meta::{IotInfo, IotPartition, IotPartitioning, PartitionKind};
+
+    let mut table = Table::new("APP", "EVENT_IOT");
+    table.columns = vec![
+        column("ID", "NUMBER", 22, 10, 0, false, ""),
+        column("EVENT_DATE", "DATE", 7, 0, 0, false, ""),
+        column("PAYLOAD", "VARCHAR2", 100, 0, 0, true, ""),
+    ];
+    table
+        .constraints
+        .push(constraint("PK_EVENT_IOT", 'P', &["ID", "EVENT_DATE"]));
+    table.iot = Some(IotInfo {
+        pct_threshold: None,
+        include_column: None,
+        overflow_tablespace: None,
+        overflow_next_extent: None,
+        partitioning: Some(IotPartitioning {
+            kind: PartitionKind::Range,
+            columns: vec!["EVENT_DATE".to_string()],
+            partitions: vec![
+                IotPartition {
+                    name: "P1".to_string(),
+                    high_value: Some("TO_DATE('2020-01-01', 'YYYY-MM-DD')".to_string()),
+                    tablespace: None,
+                    next_extent: None,
+                },
+                IotPartition {
+                    name: "P2".to_string(),
+                    high_value: Some("MAXVALUE".to_string()),
+                    tablespace: Some("DATA".to_string()),
+                    next_extent: Some(1024 * 1024),
+                },
+            ],
+        }),
+    });
+    table.tablespace = Some("DATA".to_string());
+    table.next_extent = Some(1024 * 1024);
+    let ddl = table.write_definition(&settings(true));
+    assert!(
+        ddl.contains("  PARTITION BY RANGE (\n    event_date\n  )\n  (\n"),
+        "{ddl}"
+    );
+    assert!(
+        ddl.contains("    PARTITION p1 VALUES LESS THAN (TO_DATE('2020-01-01', 'YYYY-MM-DD')),\n"),
+        "{ddl}"
+    );
+    assert!(
+        ddl.contains("    PARTITION p2 VALUES LESS THAN (MAXVALUE)\n      STORAGE ("),
+        "{ddl}"
+    );
+    let organization = ddl.find("ORGANIZATION INDEX").expect("iot clause");
+    let partitions = ddl.find("PARTITION BY RANGE").expect("partition clause");
+    assert!(organization < partitions, "{ddl}");
 }
 
 #[test]

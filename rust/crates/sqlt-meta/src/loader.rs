@@ -277,7 +277,8 @@ fn load_iot_info(
 ) -> Result<crate::IotInfo, String> {
     let rows = fetch_rows(
         session,
-        "select v1.include_column, v1.pct_threshold, v2.tablespace_name, v2.next_extent \
+        "select v1.include_column, v1.pct_threshold, v2.tablespace_name, \
+         v2.next_extent, v1.index_name \
          from all_indexes v1, all_tables v2 \
          where v1.index_type = 'IOT - TOP' and v1.table_name = v2.iot_name \
          and v1.table_name = :1 and v1.table_owner = v2.owner \
@@ -292,6 +293,13 @@ fn load_iot_info(
         0 => None,
         value => Some(value as usize),
     };
+    let index_name = cell(row, 4);
+    let partitioning = load_iot_partitions(session, schema, &index_name, options)?;
+    if include_column.is_some() && partitioning.is_some() {
+        return Err(format!(
+            "{schema}.{name} is a partitioned IOT with overflow; falling back to DBMS_METADATA"
+        ));
+    }
     Ok(crate::IotInfo {
         pct_threshold: match number(row, 1) {
             0 => None,
@@ -303,7 +311,80 @@ fn load_iot_info(
             0 => None,
             value => Some(value),
         },
+        partitioning,
     })
+}
+
+/// Index partitions of the `IOT - TOP` index (`Index::writeIndexPartitions`).
+fn load_iot_partitions(
+    session: &Session,
+    schema: &str,
+    index_name: &str,
+    options: QueryOptions,
+) -> Result<Option<crate::IotPartitioning>, String> {
+    use crate::{IotPartition, IotPartitioning, PartitionKind};
+
+    if index_name.is_empty() {
+        return Ok(None);
+    }
+    let rows = fetch_rows(
+        session,
+        "select partitioning_type, subpartitioning_type from all_part_indexes \
+         where owner = :1 and index_name = :2",
+        &[&schema, &index_name],
+        options,
+    )?;
+    let Some(row) = rows.first() else {
+        return Ok(None);
+    };
+    let subpartitioning = cell(row, 1);
+    if !subpartitioning.is_empty() && subpartitioning != "NONE" {
+        return Err(format!(
+            "{schema}.{index_name} is a subpartitioned IOT index; falling back to DBMS_METADATA"
+        ));
+    }
+    let kind = match cell(row, 0).as_str() {
+        "RANGE" => PartitionKind::Range,
+        "HASH" => PartitionKind::Hash,
+        "LIST" => PartitionKind::List,
+        other => {
+            return Err(format!(
+                "{schema}.{index_name} uses unsupported IOT partitioning {other}; falling back to DBMS_METADATA"
+            ))
+        }
+    };
+    let columns = fetch_rows(
+        session,
+        "select column_name from all_part_key_columns \
+         where owner = :1 and name = :2 and object_type = 'INDEX' \
+         order by column_position",
+        &[&schema, &index_name],
+        options,
+    )?;
+    let partitions = fetch_rows(
+        session,
+        "select partition_name, high_value, tablespace_name, next_extent \
+         from all_ind_partitions where index_owner = :1 and index_name = :2 \
+         order by partition_position",
+        &[&schema, &index_name],
+        options,
+    )?;
+    Ok(Some(IotPartitioning {
+        kind,
+        columns: columns.iter().map(|row| cell(row, 0)).collect(),
+        partitions: partitions
+            .iter()
+            .map(|row| IotPartition {
+                name: cell(row, 0),
+                high_value: option_cell(row, 1),
+                tablespace: option_cell(row, 2),
+                next_extent: match number(row, 3) {
+                    0 => None,
+                    value => Some(value),
+                },
+            })
+            .collect(),
+    }))
 }
 
 /// Range/list/hash partitions. Unsupported types return an error so the caller
@@ -523,11 +604,8 @@ pub fn load_table(
             table.iot = Some(load_iot_info(session, schema, name, options)?);
         }
     }
-    load_partitioning(session, schema, name, options, row_movement, &mut table)?;
-    if table.iot.is_some() && table.partitioning.is_some() {
-        return Err(format!(
-            "{schema}.{name} is a partitioned IOT; falling back to DBMS_METADATA"
-        ));
+    if table.iot.is_none() {
+        load_partitioning(session, schema, name, options, row_movement, &mut table)?;
     }
     load_comments(session, schema, name, options, &mut table)?;
     load_indexes(session, schema, name, options, &mut table)?;
