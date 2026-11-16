@@ -81,6 +81,19 @@ export type Workspace = {
   active: number;
 };
 
+export type FormatOptions = {
+  indent: number;
+  useTabs: boolean;
+  keywordCase: "Upper" | "Lower" | "Keep";
+  style: "Standard" | "River";
+  commaLeading: boolean;
+  andOrIndent: number | null;
+  alignDeclarations: boolean;
+  alignAssignments: boolean;
+  blankAfterDeclare: boolean;
+  blankBeforeException: boolean;
+};
+
 export type ConstraintInfo = {
   name: string;
   kind: string;

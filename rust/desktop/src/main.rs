@@ -397,15 +397,49 @@ fn export_csv(
 
 #[tauri::command]
 fn format_sql(sql: String, uppercase: bool) -> String {
-    sqlt_core::format::format_sql(
-        &sql,
-        &sqlt_core::format::FormatOptions {
-            uppercase_keywords: uppercase,
-            indent: 2,
-            comma_leading: false,
-            style: sqlt_core::format::FormatStyle::Standard,
+    use sqlt_core::format::{FormatOptions, KeywordCase};
+    let options = FormatOptions {
+        keyword_case: if uppercase {
+            KeywordCase::Upper
+        } else {
+            KeywordCase::Keep
         },
-    )
+        ..FormatOptions::default()
+    };
+    sqlt_core::format::format_sql(&sql, &options)
+}
+
+#[tauri::command]
+fn format_sql_with(sql: String, options: sqlt_core::format::FormatOptions) -> String {
+    sqlt_core::format::format_sql(&sql, &options)
+}
+
+#[tauri::command]
+fn infer_format_profile(sql: String) -> sqlt_core::format::FormatOptions {
+    sqlt_core::format::infer_from_example(&sql)
+}
+
+#[tauri::command]
+fn list_format_profiles() -> Result<Vec<String>, String> {
+    sqlt_app::profiles::profile_names().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn save_format_profile(
+    name: String,
+    options: sqlt_core::format::FormatOptions,
+) -> Result<(), String> {
+    sqlt_app::profiles::save_profile(&name, &options).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn load_format_profile(name: String) -> Result<sqlt_core::format::FormatOptions, String> {
+    sqlt_app::profiles::load_profile(&name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_format_profile(name: String) -> Result<(), String> {
+    sqlt_app::profiles::delete_profile(&name).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -454,6 +488,12 @@ fn main() {
             migrate_legacy_connections,
             export_csv,
             format_sql,
+            format_sql_with,
+            infer_format_profile,
+            list_format_profiles,
+            save_format_profile,
+            load_format_profile,
+            delete_format_profile,
             check_updates,
             explain_plan
         ])

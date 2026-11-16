@@ -8,6 +8,7 @@ import type {
   CommandSpec,
   ConnectionConfig,
   ConstraintInfo,
+  FormatOptions,
   GrantInfo,
   HistoryEntry,
   IndexInfo,
@@ -139,6 +140,11 @@ export default function App() {
     y: number;
   } | null>(null);
   const [stats, setStats] = useState<StatEntry[]>([]);
+  const [profiles, setProfiles] = useState<string[]>([]);
+  const [profile, setProfile] = useState("");
+  const [profileOptions, setProfileOptions] = useState<FormatOptions | null>(
+    null,
+  );
   const [commands, setCommands] = useState<CommandSpec[]>([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState("");
@@ -156,6 +162,7 @@ export default function App() {
 
   useEffect(() => {
     void api.listCommands().then(setCommands);
+    void api.listFormatProfiles().then(setProfiles);
   }, []);
 
   useEffect(() => {
@@ -497,7 +504,52 @@ export default function App() {
 
   const formatSql = async () => {
     try {
-      setSql(await api.formatSql(sql, true));
+      setSql(
+        profileOptions
+          ? await api.formatSqlWith(sql, profileOptions)
+          : await api.formatSql(sql, true),
+      );
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const selectProfile = async (name: string) => {
+    setProfile(name);
+    if (!name) {
+      setProfileOptions(null);
+      return;
+    }
+    try {
+      setProfileOptions(await api.loadFormatProfile(name));
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const saveProfile = async () => {
+    const name = window.prompt(t("profileName"), profile || "custom");
+    if (!name) return;
+    try {
+      const options = await api.inferFormatProfile(sql);
+      await api.saveFormatProfile(name, options);
+      setProfiles(await api.listFormatProfiles());
+      setProfile(name);
+      setProfileOptions(options);
+      setStatus(t("profileSaved"));
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const deleteProfile = async () => {
+    if (!profile) return;
+    if (!window.confirm(`${t("deleteProfile")} ${profile}?`)) return;
+    try {
+      await api.deleteFormatProfile(profile);
+      setProfiles(await api.listFormatProfiles());
+      setProfile("");
+      setProfileOptions(null);
     } catch (error) {
       setStatus(String(error));
     }
@@ -923,6 +975,31 @@ export default function App() {
             ))}
           </div>
         </details>
+
+        <details open>
+          <summary>{t("formatterProfiles")}</summary>
+          <label>
+            {t("profile")}
+            <select
+              value={profile}
+              onChange={(event) => void selectProfile(event.target.value)}
+            >
+              <option value="">{t("defaultProfile")}</option>
+              {profiles.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="row">
+            <button onClick={() => void saveProfile()}>{t("saveProfile")}</button>
+            <button onClick={() => void deleteProfile()} disabled={!profile}>
+              {t("deleteProfile")}
+            </button>
+          </div>
+        </details>
+
         <button onClick={() => void checkUpdates()}>{t("checkUpdates")}</button>
       </aside>
 

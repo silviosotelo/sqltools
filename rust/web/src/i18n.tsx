@@ -79,6 +79,13 @@ const translations = {
     importLegacy: "Importar conexiones antiguas",
     legacyPath: "Ruta del connections/list legado (JSON)",
     checkUpdates: "Buscar actualizaciones",
+    formatterProfiles: "Perfiles de formato",
+    profile: "Perfil",
+    saveProfile: "Guardar perfil",
+    deleteProfile: "Eliminar perfil",
+    profileName: "Nombre del perfil",
+    defaultProfile: "Estándar",
+    profileSaved: "Perfil guardado",
   },
   en: {
     "app.title": "SQLTools",
@@ -150,6 +157,13 @@ const translations = {
     importLegacy: "Import legacy connections",
     legacyPath: "Path to the legacy connections/list (JSON)",
     checkUpdates: "Check for updates",
+    formatterProfiles: "Formatter profiles",
+    profile: "Profile",
+    saveProfile: "Save profile",
+    deleteProfile: "Delete profile",
+    profileName: "Profile name",
+    defaultProfile: "Standard",
+    profileSaved: "Profile saved",
   },
 } as const;
 

@@ -5,6 +5,7 @@ pub mod catalog;
 pub mod commands;
 pub mod export;
 pub mod migrate;
+pub mod profiles;
 pub mod state;
 pub mod store;
 pub mod workspace;

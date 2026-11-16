@@ -4,6 +4,7 @@ import type {
   CommandSpec,
   ConnectionConfig,
   ConstraintInfo,
+  FormatOptions,
   GrantInfo,
   HistoryEntry,
   IndexInfo,
@@ -83,6 +84,17 @@ export const api = {
   checkUpdates: () => invoke<string>("check_updates"),
   formatSql: (sql: string, uppercase: boolean) =>
     invoke<string>("format_sql", { sql, uppercase }),
+  formatSqlWith: (sql: string, options: FormatOptions) =>
+    invoke<string>("format_sql_with", { sql, options }),
+  inferFormatProfile: (sql: string) =>
+    invoke<FormatOptions>("infer_format_profile", { sql }),
+  listFormatProfiles: () => invoke<string[]>("list_format_profiles"),
+  saveFormatProfile: (name: string, options: FormatOptions) =>
+    invoke<void>("save_format_profile", { name, options }),
+  loadFormatProfile: (name: string) =>
+    invoke<FormatOptions>("load_format_profile", { name }),
+  deleteFormatProfile: (name: string) =>
+    invoke<void>("delete_format_profile", { name }),
   listConstraints: (
     connectionId: string,
     schema: string | null,
