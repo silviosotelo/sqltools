@@ -108,6 +108,7 @@ const IMPLEMENTED: &[&str] = &[
     "Script.ExecuteCurrentAlt",
     "Script.QuickQuery",
     "Script.LoadDDLWithDbmsMetadata",
+    "Script.FindObject",
     "View.StatusBar",
     "View.History",
     "View.Properties",
@@ -209,7 +210,7 @@ mod tests {
                 .iter()
                 .filter(|command| command.implemented)
                 .count(),
-            114
+            115
         );
     }
 }

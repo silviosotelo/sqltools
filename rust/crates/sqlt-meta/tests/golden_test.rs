@@ -25,6 +25,19 @@ fn column(
     }
 }
 
+fn constraint(name: &str, kind: char, columns: &[&str]) -> Constraint {
+    Constraint {
+        name: name.to_string(),
+        kind,
+        generated: false,
+        columns: columns.iter().map(|value| value.to_string()).collect(),
+        condition: None,
+        ref_table: None,
+        ref_columns: Vec::new(),
+        delete_rule: None,
+    }
+}
+
 fn table() -> Table {
     let mut table = Table::new("ANAMNESIS", "CLIENTE");
     table.columns = vec![
@@ -97,15 +110,9 @@ fn indexes_constraints_comments_grants() {
         columns: vec!["CI".to_string()],
         tablespace: None,
     });
-    table.constraints.push(Constraint {
-        name: "PK_CLIENTE".to_string(),
-        kind: 'P',
-        columns: vec!["ID_CLIENTE".to_string()],
-        condition: None,
-        ref_table: None,
-        ref_columns: Vec::new(),
-        delete_rule: None,
-    });
+    table
+        .constraints
+        .push(constraint("PK_CLIENTE", 'P', &["ID_CLIENTE"]));
     table.grants.push(Grant {
         grantee: "REPORTE".to_string(),
         privileges: vec!["SELECT".to_string(), "UPDATE".to_string()],
@@ -136,6 +143,9 @@ fn range_partitions_match_metobjects_layout() {
     table.partitioning = Some(Partitioning {
         kind: PartitionKind::Range,
         columns: vec!["FECHA".to_string()],
+        sub_kind: None,
+        sub_columns: Vec::new(),
+        sub_templates: Vec::new(),
         interval: None,
         partitions: vec![
             Partition {
@@ -143,12 +153,14 @@ fn range_partitions_match_metobjects_layout() {
                 high_value: Some("TO_DATE('2019-01-01', 'YYYY-MM-DD')".to_string()),
                 tablespace: None,
                 next_extent: None,
+                subpartitions: Vec::new(),
             },
             Partition {
                 name: "P_MAX".to_string(),
                 high_value: Some("MAXVALUE".to_string()),
                 tablespace: Some("DATA".to_string()),
                 next_extent: Some(1024 * 1024),
+                subpartitions: Vec::new(),
             },
         ],
         row_movement: true,
@@ -166,6 +178,9 @@ fn hash_partitions_omit_values() {
     table.partitioning = Some(Partitioning {
         kind: PartitionKind::Hash,
         columns: vec!["ID".to_string()],
+        sub_kind: None,
+        sub_columns: Vec::new(),
+        sub_templates: Vec::new(),
         interval: None,
         partitions: vec![
             Partition {
@@ -173,12 +188,14 @@ fn hash_partitions_omit_values() {
                 high_value: None,
                 tablespace: None,
                 next_extent: None,
+                subpartitions: Vec::new(),
             },
             Partition {
                 name: "P2".to_string(),
                 high_value: None,
                 tablespace: None,
                 next_extent: None,
+                subpartitions: Vec::new(),
             },
         ],
         row_movement: false,
@@ -202,12 +219,16 @@ fn list_partitions_use_single_key() {
     table.partitioning = Some(Partitioning {
         kind: PartitionKind::List,
         columns: vec!["REGION".to_string(), "IGNORED".to_string()],
+        sub_kind: None,
+        sub_columns: Vec::new(),
+        sub_templates: Vec::new(),
         interval: None,
         partitions: vec![Partition {
             name: "P_NORTE".to_string(),
             high_value: Some("'N'".to_string()),
             tablespace: None,
             next_extent: None,
+            subpartitions: Vec::new(),
         }],
         row_movement: false,
     });
@@ -217,6 +238,93 @@ fn list_partitions_use_single_key() {
         ddl.contains("    PARTITION p_norte VALUES ('N')\n"),
         "{ddl}"
     );
+}
+
+#[test]
+fn composite_partitions_use_template() {
+    use sqlt_meta::{Partition, PartitionKind, Partitioning, Subpartition};
+
+    let mut table = Table::new("APP", "VENTAS");
+    table.columns = vec![
+        column("ID", "NUMBER", 22, 10, 0, false, ""),
+        column("REGION", "CHAR", 1, 0, 0, false, ""),
+        column("FECHA", "DATE", 7, 0, 0, false, ""),
+    ];
+    let templates = vec![
+        Subpartition {
+            name: "SP_N".to_string(),
+            high_value: Some("'N'".to_string()),
+            tablespace: None,
+        },
+        Subpartition {
+            name: "SP_S".to_string(),
+            high_value: Some("'S'".to_string()),
+            tablespace: None,
+        },
+    ];
+    table.partitioning = Some(Partitioning {
+        kind: PartitionKind::Range,
+        columns: vec!["FECHA".to_string()],
+        sub_kind: Some(PartitionKind::List),
+        sub_columns: vec!["REGION".to_string()],
+        sub_templates: templates.clone(),
+        interval: None,
+        partitions: vec![
+            Partition {
+                name: "P1".to_string(),
+                high_value: Some("TO_DATE('2020-01-01', 'YYYY-MM-DD')".to_string()),
+                tablespace: None,
+                next_extent: None,
+                subpartitions: templates.clone(),
+            },
+            Partition {
+                name: "P2".to_string(),
+                high_value: Some("TO_DATE('2021-01-01', 'YYYY-MM-DD')".to_string()),
+                tablespace: None,
+                next_extent: None,
+                subpartitions: vec![
+                    Subpartition {
+                        name: "SP_N".to_string(),
+                        high_value: Some("'N'".to_string()),
+                        tablespace: Some("OTHER".to_string()),
+                    },
+                    Subpartition {
+                        name: "SP_S".to_string(),
+                        high_value: Some("'S'".to_string()),
+                        tablespace: Some("OTHER".to_string()),
+                    },
+                ],
+            },
+        ],
+        row_movement: false,
+    });
+    let expected = "CREATE TABLE ventas (\n  id     NUMBER(10,0) NOT NULL,\n  region CHAR(1)      NOT NULL,\n  fecha  DATE         NOT NULL\n)\n  PARTITION BY RANGE (\n    fecha\n  )\n  SUBPARTITION BY LIST (region)\n  SUBPARTITION TEMPLATE\n  (\n    SUBPARTITION sp_n VALUES ('N'),\n    SUBPARTITION sp_s VALUES ('S')\n  )\n  (\n    PARTITION p1 VALUES LESS THAN (TO_DATE('2020-01-01', 'YYYY-MM-DD')),\n    PARTITION p2 VALUES LESS THAN (TO_DATE('2021-01-01', 'YYYY-MM-DD'))\n      (\n        SUBPARTITION sp_n VALUES ('N') TABLESPACE other,\n        SUBPARTITION sp_s VALUES ('S') TABLESPACE other\n      )\n  )\n/\n\n";
+    assert_eq!(table.write_definition(&settings(false)), expected);
+}
+
+#[test]
+fn iot_with_overflow_matches_metobjects_layout() {
+    use sqlt_meta::IotInfo;
+
+    let mut table = Table::new("APP", "EMP_IOT");
+    table.columns = vec![
+        column("ID", "NUMBER", 22, 10, 0, false, ""),
+        column("NAME", "VARCHAR2", 50, 0, 0, true, ""),
+        column("SALARY", "NUMBER", 22, 10, 2, true, ""),
+    ];
+    table
+        .constraints
+        .push(constraint("PK_EMP_IOT", 'P', &["ID"]));
+    table.iot = Some(IotInfo {
+        pct_threshold: Some(20),
+        include_column: Some(2),
+        overflow_tablespace: Some("OVFL".to_string()),
+        overflow_next_extent: Some(2048 * 1024),
+    });
+    table.tablespace = Some("DATA".to_string());
+    table.next_extent = Some(1024 * 1024);
+    let expected = "CREATE TABLE emp_iot (\n  id     NUMBER(10,0) NOT NULL,\n  name   VARCHAR2(50) NULL,\n  salary NUMBER(10,2) NULL,\n  CONSTRAINT pk_emp_iot PRIMARY KEY (\n    id\n  )\n)\n  ORGANIZATION INDEX INCLUDING name\n    TABLESPACE data\n    STORAGE (\n      NEXT       1024 K\n    )\n  PCTTHRESHOLD  20\n  OVERFLOW\n    TABLESPACE ovfl\n    STORAGE (\n      NEXT       2048 K\n    )\n/\n\n";
+    assert_eq!(table.write_definition(&settings(true)), expected);
 }
 
 #[test]

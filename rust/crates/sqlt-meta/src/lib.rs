@@ -73,21 +73,42 @@ pub enum PartitionKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Subpartition {
+    pub name: String,
+    pub high_value: Option<String>,
+    pub tablespace: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Partition {
     pub name: String,
     /// `ALL_TAB_PARTITIONS.high_value` (LONG), printed verbatim.
     pub high_value: Option<String>,
     pub tablespace: Option<String>,
     pub next_extent: Option<i64>,
+    pub subpartitions: Vec<Subpartition>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Partitioning {
     pub kind: PartitionKind,
     pub columns: Vec<String>,
+    pub sub_kind: Option<PartitionKind>,
+    pub sub_columns: Vec<String>,
+    pub sub_templates: Vec<Subpartition>,
     pub interval: Option<String>,
     pub partitions: Vec<Partition>,
     pub row_movement: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct IotInfo {
+    /// `ALL_INDEXES.pct_threshold` of the `IOT - TOP` index.
+    pub pct_threshold: Option<i64>,
+    /// `ALL_INDEXES.include_column` (1-based column position).
+    pub include_column: Option<usize>,
+    pub overflow_tablespace: Option<String>,
+    pub overflow_next_extent: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,6 +133,8 @@ pub struct Constraint {
     pub name: String,
     /// Oracle constraint type: C, P, U or R.
     pub kind: char,
+    /// `SYS_C...` names are system-generated and are not printed.
+    pub generated: bool,
     pub columns: Vec<String>,
     pub condition: Option<String>,
     pub ref_table: Option<String>,
@@ -139,11 +162,115 @@ pub struct Table {
     pub cache: bool,
     /// Range/list/hash partitioning (`Table::writePartitions`).
     pub partitioning: Option<Partitioning>,
+    /// `Some` for index-organized tables (`ALL_TABLES.iot_type = 'IOT'`).
+    pub iot: Option<IotInfo>,
     pub comments: Option<String>,
     pub indexes: Vec<Index>,
     pub constraints: Vec<Constraint>,
     pub triggers: Vec<Trigger>,
     pub grants: Vec<Grant>,
+}
+
+fn write_storage_clause(
+    out: &mut String,
+    indent: &str,
+    tablespace: Option<&str>,
+    next: Option<i64>,
+    lower: bool,
+) {
+    if let Some(tablespace) = tablespace {
+        out.push_str(&format!(
+            "{indent}TABLESPACE {}\n",
+            Table::display_name(tablespace, lower)
+        ));
+    }
+    if let Some(next) = next {
+        let value = if next % 1024 == 0 {
+            format!("{} K", next / 1024)
+        } else {
+            format!("{next}")
+        };
+        out.push_str(&format!(
+            "{indent}STORAGE (\n{indent}  NEXT       {value}\n{indent})\n"
+        ));
+    }
+}
+
+/// One line per subpartition, names padded like `writeSubpartitions`.
+fn subpartition_lines(
+    items: &[Subpartition],
+    kind: PartitionKind,
+    indent: &str,
+    table_tablespace: Option<&str>,
+    lower: bool,
+) -> String {
+    let max_name = items.iter().map(|item| item.name.len()).max().unwrap_or(0);
+    let mut out = String::new();
+    for (index, item) in items.iter().enumerate() {
+        out.push_str(&format!(
+            "{indent}SUBPARTITION {}",
+            Table::display_name(&item.name, lower)
+        ));
+        if kind != PartitionKind::Hash {
+            let pad = max_name + 1 - item.name.len();
+            let values = if kind == PartitionKind::Range {
+                "VALUES LESS THAN"
+            } else {
+                "VALUES"
+            };
+            out.push_str(&" ".repeat(pad));
+            out.push_str(&format!(
+                "{values} ({})",
+                item.high_value.clone().unwrap_or_default()
+            ));
+        }
+        if let Some(tablespace) = &item.tablespace {
+            let same = table_tablespace.is_some_and(|table| table.eq_ignore_ascii_case(tablespace));
+            if !same {
+                out.push_str(&format!(
+                    " TABLESPACE {}",
+                    Table::display_name(tablespace, lower)
+                ));
+            }
+        }
+        if index + 1 < items.len() {
+            out.push(',');
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// `Table::writeSubpartitions`: per-partition subpartitions are omitted when
+/// they match the template (the template covers them).
+fn subpartitions_are_default(
+    partition: &Partition,
+    templates: &[Subpartition],
+    table_tablespace: Option<&str>,
+) -> bool {
+    if templates.is_empty() || partition.subpartitions.len() != templates.len() {
+        return false;
+    }
+    partition
+        .subpartitions
+        .iter()
+        .zip(templates)
+        .all(|(actual, template)| {
+            if actual.high_value != template.high_value {
+                return false;
+            }
+            match &template.tablespace {
+                Some(tablespace) => actual
+                    .tablespace
+                    .as_deref()
+                    .is_some_and(|value| value.eq_ignore_ascii_case(tablespace)),
+                None => match (table_tablespace, actual.tablespace.as_deref()) {
+                    (Some(table), Some(value)) => table.eq_ignore_ascii_case(value),
+                    (None, None) => true,
+                    _ => false,
+                },
+            }
+        })
 }
 
 impl Table {
@@ -157,6 +284,7 @@ impl Table {
             temporary: None,
             cache: false,
             partitioning: None,
+            iot: None,
             comments: None,
             indexes: Vec::new(),
             constraints: Vec::new(),
@@ -248,7 +376,7 @@ impl Table {
             let raw_len = Table::raw_name_len(&column.name);
             let name_pad = " ".repeat(max_name + 1 - raw_len);
             let type_pad = " ".repeat(max_type.saturating_sub(types[index].len()) + 1);
-            let comma = if index + 1 < self.columns.len() {
+            let comma = if index + 1 < self.columns.len() || self.iot.is_some() {
                 ","
             } else {
                 ""
@@ -260,33 +388,88 @@ impl Table {
             ));
         }
 
-        let storage =
-            settings.storage_clause && (self.tablespace.is_some() || self.next_extent.is_some());
+        // `Table::WritePrimaryKeyForIOT`: the PK is part of the column list.
+        if self.iot.is_some() {
+            if let Some(pk) = self
+                .constraints
+                .iter()
+                .find(|constraint| constraint.kind == 'P')
+            {
+                let name = if pk.generated {
+                    String::new()
+                } else {
+                    format!("CONSTRAINT {} ", Table::display_name(&pk.name, lower))
+                };
+                out.push_str(&format!("  {name}PRIMARY KEY (\n"));
+                for (index, column) in pk.columns.iter().enumerate() {
+                    let comma = if index + 1 < pk.columns.len() {
+                        ","
+                    } else {
+                        ""
+                    };
+                    out.push_str(&format!(
+                        "    {}{comma}\n",
+                        Table::display_name(column, lower)
+                    ));
+                }
+                out.push_str("  )\n");
+            }
+        }
+
         out.push_str(")\n");
         // `MetaObjects::Table::WriteDefinition`: a temporary table replaces the
         // storage clause with ON COMMIT, then CACHE is printed either way.
-        if let Some(duration) = self.temporary {
+        if let Some(iot) = &self.iot {
+            out.push_str("  ORGANIZATION INDEX");
+            if let Some(position) = iot.include_column {
+                if let Some(column) = position
+                    .checked_sub(1)
+                    .and_then(|index| self.columns.get(index))
+                {
+                    out.push_str(&format!(
+                        " INCLUDING {}",
+                        Table::display_name(&column.name, lower)
+                    ));
+                }
+            }
+            out.push('\n');
+            if settings.storage_clause {
+                write_storage_clause(
+                    &mut out,
+                    "    ",
+                    self.tablespace.as_deref(),
+                    self.next_extent,
+                    lower,
+                );
+            }
+            if iot.include_column.is_some() {
+                if let Some(threshold) = iot.pct_threshold.filter(|value| *value != 50) {
+                    out.push_str(&format!("  PCTTHRESHOLD {threshold:>3}\n"));
+                }
+                out.push_str("  OVERFLOW\n");
+                if settings.storage_clause {
+                    write_storage_clause(
+                        &mut out,
+                        "    ",
+                        iot.overflow_tablespace.as_deref(),
+                        iot.overflow_next_extent,
+                        lower,
+                    );
+                }
+            }
+        } else if let Some(duration) = self.temporary {
             out.push_str(match duration {
                 TemporaryDuration::Preserve => "  ON COMMIT PRESERVE ROWS\n",
                 TemporaryDuration::Delete => "  ON COMMIT DELETE ROWS\n",
             });
-        } else if storage {
-            if let Some(tablespace) = &self.tablespace {
-                out.push_str(&format!(
-                    "  TABLESPACE {}\n",
-                    Table::display_name(tablespace, lower)
-                ));
-            }
-            if let Some(next) = self.next_extent {
-                let value = if next % 1024 == 0 {
-                    format!("{} K", next / 1024)
-                } else {
-                    format!("{next}")
-                };
-                out.push_str("  STORAGE (\n");
-                out.push_str(&format!("    NEXT       {value}\n"));
-                out.push_str("  )\n");
-            }
+        } else if settings.storage_clause {
+            write_storage_clause(
+                &mut out,
+                "  ",
+                self.tablespace.as_deref(),
+                self.next_extent,
+                lower,
+            );
         }
         if let Some(partitioning) = &self.partitioning {
             self.write_partitions(&mut out, partitioning, settings);
@@ -338,6 +521,49 @@ impl Table {
         if let Some(interval) = &partitioning.interval {
             out.push_str(&format!("  INTERVAL ({interval})\n"));
         }
+        if let Some(sub_kind) = partitioning.sub_kind {
+            let sub_keyword = match sub_kind {
+                PartitionKind::Range => "RANGE",
+                PartitionKind::Hash => "HASH",
+                PartitionKind::List => "LIST",
+            };
+            if sub_kind == PartitionKind::List {
+                let column = partitioning
+                    .sub_columns
+                    .first()
+                    .cloned()
+                    .unwrap_or_default();
+                out.push_str(&format!(
+                    "  SUBPARTITION BY LIST ({})\n",
+                    Table::display_name(&column, lower)
+                ));
+            } else {
+                out.push_str(&format!("  SUBPARTITION BY {sub_keyword} (\n"));
+                for (index, column) in partitioning.sub_columns.iter().enumerate() {
+                    let comma = if index + 1 < partitioning.sub_columns.len() {
+                        ","
+                    } else {
+                        ""
+                    };
+                    out.push_str(&format!(
+                        "    {}{comma}\n",
+                        Table::display_name(column, lower)
+                    ));
+                }
+                out.push_str("  )\n");
+            }
+        }
+        if !partitioning.sub_templates.is_empty() {
+            out.push_str("  SUBPARTITION TEMPLATE\n  (\n");
+            out.push_str(&subpartition_lines(
+                &partitioning.sub_templates,
+                partitioning.sub_kind.unwrap_or(PartitionKind::Range),
+                "    ",
+                self.tablespace.as_deref(),
+                lower,
+            ));
+            out.push_str("  )\n");
+        }
         out.push_str("  (\n");
         let max_name = partitioning
             .partitions
@@ -385,6 +611,23 @@ impl Table {
                 block.push_str(&format!(
                     "\n      STORAGE (\n        NEXT       {value}\n      )"
                 ));
+            }
+            if !partition.subpartitions.is_empty()
+                && !subpartitions_are_default(
+                    partition,
+                    &partitioning.sub_templates,
+                    self.tablespace.as_deref(),
+                )
+            {
+                block.push_str("\n      (\n");
+                block.push_str(&subpartition_lines(
+                    &partition.subpartitions,
+                    partitioning.sub_kind.unwrap_or(PartitionKind::Range),
+                    "        ",
+                    self.tablespace.as_deref(),
+                    lower,
+                ));
+                block.push_str("      )");
             }
             if index + 1 < count {
                 block.push(',');

@@ -73,6 +73,7 @@ const translations = {
     typeSequence: "Secuencias",
     typeType: "Tipos",
     typeSynonym: "Sinónimos",
+    findObject: "Buscar objeto",
     noResults: "Ejecutá una consulta para ver resultados.",
     constraints: "Restricciones",
     indexes: "Índices",
@@ -167,6 +168,8 @@ const translations = {
     typeSequence: "Sequences",
     typeType: "Types",
     typeSynonym: "Synonyms",
+    findObject: "Find object",
+
     noResults: "Run a query to see results.",
     constraints: "Constraints",
     indexes: "Indexes",

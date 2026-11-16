@@ -177,9 +177,11 @@ fn load_constraints(
         let constraint_name = cell(&row, 0);
         let kind = cell(&row, 1).chars().next().unwrap_or('C');
         let entry = by_name.entry(constraint_name.clone()).or_insert_with(|| {
+            let generated = constraint_name.to_ascii_uppercase().starts_with("SYS_C");
             let mut constraint = Constraint {
                 name: constraint_name,
                 kind,
+                generated,
                 columns: Vec::new(),
                 condition: option_cell(&row, 2),
                 ref_table: None,
@@ -264,8 +266,47 @@ fn load_grants(
     Ok(())
 }
 
-/// Range/list/hash partitions. Subpartitioned tables and unsupported types
-/// return an error so the caller falls back to `DBMS_METADATA`.
+/// IOT metadata from the `IOT - TOP` index and its overflow segment, mirroring
+/// `Loader_Index::load_iot_overflow`.
+fn load_iot_info(
+    session: &Session,
+    schema: &str,
+    name: &str,
+    options: QueryOptions,
+) -> Result<crate::IotInfo, String> {
+    let rows = fetch_rows(
+        session,
+        "select v1.include_column, v1.pct_threshold, v2.tablespace_name, v2.next_extent \
+         from all_indexes v1, all_tables v2 \
+         where v1.index_type = 'IOT - TOP' and v1.table_name = v2.iot_name \
+         and v1.table_name = :1 and v1.table_owner = v2.owner \
+         and v1.table_owner = :2",
+        &[&name, &schema],
+        options,
+    )?;
+    let Some(row) = rows.first() else {
+        return Ok(crate::IotInfo::default());
+    };
+    let include_column = match number(row, 0) {
+        0 => None,
+        value => Some(value as usize),
+    };
+    Ok(crate::IotInfo {
+        pct_threshold: match number(row, 1) {
+            0 => None,
+            value => Some(value),
+        },
+        include_column,
+        overflow_tablespace: option_cell(row, 2),
+        overflow_next_extent: match number(row, 3) {
+            0 => None,
+            value => Some(value),
+        },
+    })
+}
+
+/// Range/list/hash partitions. Unsupported types return an error so the caller
+/// falls back to `DBMS_METADATA`.
 fn load_partitioning(
     session: &Session,
     schema: &str,
@@ -274,7 +315,7 @@ fn load_partitioning(
     row_movement: bool,
     table: &mut Table,
 ) -> Result<(), String> {
-    use crate::{Partition, PartitionKind, Partitioning};
+    use crate::{Partition, PartitionKind, Partitioning, Subpartition};
 
     let rows = fetch_rows(
         session,
@@ -286,12 +327,17 @@ fn load_partitioning(
     let Some(row) = rows.first() else {
         return Ok(());
     };
-    let subpartitioning = cell(row, 1);
-    if !subpartitioning.is_empty() && subpartitioning != "NONE" {
-        return Err(format!(
-            "{schema}.{name} is subpartitioned; falling back to DBMS_METADATA"
-        ));
-    }
+    let sub_kind = match cell(row, 1).as_str() {
+        "" | "NONE" => None,
+        "RANGE" => Some(PartitionKind::Range),
+        "HASH" => Some(PartitionKind::Hash),
+        "LIST" => Some(PartitionKind::List),
+        other => {
+            return Err(format!(
+                "{schema}.{name} uses unsupported subpartitioning {other}; falling back to DBMS_METADATA"
+            ))
+        }
+    };
     let kind = match cell(row, 0).as_str() {
         "RANGE" => PartitionKind::Range,
         "HASH" => PartitionKind::Hash,
@@ -326,20 +372,83 @@ fn load_partitioning(
         &[&schema, &name],
         options,
     )?;
+    let sub_columns = if sub_kind.is_some() {
+        fetch_rows(
+            session,
+            "select column_name from all_subpart_key_columns \
+             where owner = :1 and name = :2 and object_type = 'TABLE' \
+             order by column_position",
+            &[&schema, &name],
+            options,
+        )?
+        .iter()
+        .map(|row| cell(row, 0))
+        .collect()
+    } else {
+        Vec::new()
+    };
+    let sub_templates = if sub_kind.is_some() {
+        fetch_rows(
+            session,
+            "select subpartition_name, high_bound, tablespace_name \
+             from all_subpartition_templates \
+             where user_name = :1 and table_name = :2 \
+             order by subpartition_position",
+            &[&schema, &name],
+            options,
+        )?
+        .iter()
+        .map(|row| Subpartition {
+            name: cell(row, 0),
+            high_value: option_cell(row, 1),
+            tablespace: option_cell(row, 2),
+        })
+        .collect()
+    } else {
+        Vec::new()
+    };
+    let mut by_partition: HashMap<String, Vec<Subpartition>> = HashMap::new();
+    if sub_kind.is_some() {
+        let rows = fetch_rows(
+            session,
+            "select partition_name, subpartition_name, high_value, tablespace_name \
+             from all_tab_subpartitions where table_owner = :1 and table_name = :2 \
+             order by partition_name, subpartition_position",
+            &[&schema, &name],
+            options,
+        )?;
+        for row in rows {
+            by_partition
+                .entry(cell(&row, 0))
+                .or_default()
+                .push(Subpartition {
+                    name: cell(&row, 1),
+                    high_value: option_cell(&row, 2),
+                    tablespace: option_cell(&row, 3),
+                });
+        }
+    }
     table.partitioning = Some(Partitioning {
         kind,
         columns: columns.iter().map(|row| cell(row, 0)).collect(),
+        sub_kind,
+        sub_columns,
+        sub_templates,
         interval,
         partitions: partitions
             .iter()
-            .map(|row| Partition {
-                name: cell(row, 0),
-                high_value: option_cell(row, 1),
-                tablespace: option_cell(row, 2),
-                next_extent: match number(row, 3) {
-                    0 => None,
-                    value => Some(value),
-                },
+            .map(|row| {
+                let name = cell(row, 0);
+                Partition {
+                    subpartitions: by_partition.remove(&name).unwrap_or_default(),
+                    name,
+                    high_value: option_cell(row, 1),
+                    tablespace: option_cell(row, 2),
+                    next_extent: match number(row, 3) {
+                        0 => None,
+                        value => Some(value),
+                    },
+                }
             })
             .collect(),
         row_movement,
@@ -388,7 +497,11 @@ pub fn load_table(
         options,
     )?;
     let mut row_movement = false;
-    if let Some(row) = storage.first() {
+    let base = storage
+        .iter()
+        .find(|row| cell(row, 5) != "IOT_OVERFLOW")
+        .or_else(|| storage.first());
+    if let Some(row) = base {
         let tablespace = cell(row, 0);
         if !tablespace.is_empty() {
             table.tablespace = Some(tablespace);
@@ -404,14 +517,17 @@ pub fn load_table(
             });
         }
         table.cache = cell(row, 4) == "Y";
-        if !cell(row, 5).is_empty() {
-            return Err(format!(
-                "{schema}.{name} is index-organized; falling back to DBMS_METADATA"
-            ));
-        }
         row_movement = cell(row, 6) == "ENABLED";
+        if cell(row, 5) == "IOT" {
+            table.iot = Some(load_iot_info(session, schema, name, options)?);
+        }
     }
     load_partitioning(session, schema, name, options, row_movement, &mut table)?;
+    if table.iot.is_some() && table.partitioning.is_some() {
+        return Err(format!(
+            "{schema}.{name} is a partitioned IOT; falling back to DBMS_METADATA"
+        ));
+    }
     load_comments(session, schema, name, options, &mut table)?;
     load_indexes(session, schema, name, options, &mut table)?;
     load_constraints(session, schema, name, options, &mut table)?;

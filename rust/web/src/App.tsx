@@ -430,6 +430,29 @@ export default function App() {
     }
   };
 
+  const findObject = async () => {
+    if (!isConnected) {
+      setStatus(t("noConnection"));
+      return;
+    }
+    const name = window.prompt(t("findObject"));
+    if (!name) return;
+    try {
+      const all = await api.listObjects(selected, schema.trim() || null, null);
+      const lower = name.trim().toLowerCase();
+      const match =
+        all.find((object) => object.name.toLowerCase() === lower) ??
+        all.find((object) => object.name.toLowerCase().includes(lower));
+      if (!match) {
+        setStatus(`${t("findObject")}: ${name}`);
+        return;
+      }
+      await openObject(match);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
   const chooseType = (type: string) => {
     setObjectType(type);
     if (isConnected) void loadObjects(type);
@@ -935,6 +958,9 @@ export default function App() {
       case "Script.QuickQuery":
         if (selectedObject) queryObject(selectedObject);
         else setStatus(t("selectObject"));
+        break;
+      case "Script.FindObject":
+        void findObject();
         break;
       case "Script.LoadDDLWithDbmsMetadata":
         void loadDdlWithDbmsMetadata();
