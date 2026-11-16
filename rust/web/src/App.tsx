@@ -170,6 +170,8 @@ export default function App() {
   const [showConnections, setShowConnections] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [installing, setInstalling] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<"file" | "app">("app");
   const [commands, setCommands] = useState<CommandSpec[]>([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState("");
@@ -856,6 +858,34 @@ export default function App() {
     }
   };
 
+  const createTemplate = async () => {
+    const name = window.prompt(t("templateName"));
+    if (!name) return;
+    const body = editorRef.current?.selectedText() || sql;
+    try {
+      await api.saveTemplate(name, body);
+      setStatus(`${t("templateSaved")}: ${name}`);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const expandTemplate = async () => {
+    const name = window.prompt(t("templateName"));
+    if (!name) return;
+    try {
+      const template = await api.loadTemplate(name);
+      if (!template) {
+        setStatus(`${t("templateMissing")}: ${name}`);
+        return;
+      }
+      editorRef.current?.insertText(template.body);
+      setStatus(`${t("templateExpanded")}: ${name}`);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
   const copyFileLocation = async () => {
     if (!filePath) {
       setStatus(t("noFile"));
@@ -1242,6 +1272,20 @@ export default function App() {
         break;
       case "Edit.ColumnInsertNumber":
         editorRef.current?.insertColumnNumbers();
+        break;
+      case "Edit.CreateTemplate":
+        void createTemplate();
+        break;
+      case "Edit.ExpandTemplate":
+        void expandTemplate();
+        break;
+      case "Edit.FileSettings":
+        setSettingsSection("file");
+        setSettingsOpen(true);
+        break;
+      case "Edit.PermanentSettings":
+        setSettingsSection("app");
+        setSettingsOpen(true);
         break;
       case "Edit.ColumnSelection":
       case "Edit.StreamSelection":
@@ -2170,6 +2214,62 @@ export default function App() {
                   {!command.implemented && <em>{t("notImplemented")}</em>}
                 </button>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+      {settingsOpen && (
+        <div
+          className="palette-backdrop"
+          onClick={() => setSettingsOpen(false)}
+        >
+          <div
+            className="settings-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2>
+              {settingsSection === "file"
+                ? t("fileSettings")
+                : t("permanentSettings")}
+            </h2>
+            {settingsSection === "app" && (
+              <label className="field-row">
+                <span>{t("app.language")}</span>
+                <select
+                  value={language}
+                  onChange={(event) =>
+                    setLanguage(event.target.value as "es" | "en")
+                  }
+                >
+                  <option value="es">Español</option>
+                  <option value="en">English</option>
+                </select>
+              </label>
+            )}
+            <fieldset className="settings-eol">
+              <legend>{t("lineEnding")}</legend>
+              {(
+                [
+                  ["\n", "LF"],
+                  ["\r\n", "CRLF"],
+                  ["\r", "CR"],
+                ] as const
+              ).map(([value, label]) => (
+                <label key={label}>
+                  <input
+                    type="radio"
+                    name="eol"
+                    checked={fileEol === value}
+                    onChange={() => setFileEol(value)}
+                  />
+                  {label}
+                </label>
+              ))}
+            </fieldset>
+            <div className="row">
+              <button className="plain" onClick={() => setSettingsOpen(false)}>
+                {t("close")}
+              </button>
             </div>
           </div>
         </div>

@@ -100,6 +100,11 @@ export type UpdateProgress = {
   total: number | null;
 };
 
+export type Template = {
+  name: string;
+  body: string;
+};
+
 export type FormatOptions = {
   indent: number;
   useTabs: boolean;

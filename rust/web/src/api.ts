@@ -12,6 +12,7 @@ import type {
   ObjectInfo,
   QueryEvent,
   StatEntry,
+  Template,
   TriggerInfo,
   UpdateInfo,
   UpdateProgress,
@@ -85,6 +86,13 @@ export const api = {
   pickSqlFile: () => invoke<string | null>("pick_sql_file"),
   pickSqlSavePath: (suggested: string | null) =>
     invoke<string | null>("pick_sql_save_path", { suggested }),
+  listTemplates: () => invoke<string[]>("list_templates"),
+  loadTemplate: (name: string) =>
+    invoke<Template | null>("load_template", { name }),
+  saveTemplate: (name: string, body: string) =>
+    invoke<void>("save_template", { name, body }),
+  deleteTemplate: (name: string) =>
+    invoke<void>("delete_template", { name }),
   readSqlFile: (path: string) => invoke<FileText>("read_sql_file", { path }),
   writeSqlFile: (path: string, text: string, eol: string) =>
     invoke<void>("write_sql_file", { path, text, eol }),

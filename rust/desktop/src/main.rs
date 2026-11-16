@@ -340,6 +340,26 @@ fn list_commands() -> Vec<sqlt_app::CommandSpec> {
 }
 
 #[tauri::command]
+fn list_templates() -> Result<Vec<String>, String> {
+    sqlt_app::templates::list_templates().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn load_template(name: String) -> Result<Option<sqlt_app::templates::Template>, String> {
+    sqlt_app::templates::load_template(&name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn save_template(name: String, body: String) -> Result<(), String> {
+    sqlt_app::templates::save_template(&name, &body).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_template(name: String) -> Result<(), String> {
+    sqlt_app::templates::delete_template(&name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn read_sql_file(path: String) -> Result<sqlt_app::fileio::FileText, String> {
     sqlt_app::fileio::read_sql_file(&path)
 }
@@ -611,6 +631,10 @@ fn main() {
             list_triggers,
             list_grants,
             list_commands,
+            list_templates,
+            load_template,
+            save_template,
+            delete_template,
             read_sql_file,
             write_sql_file,
             pick_sql_file,

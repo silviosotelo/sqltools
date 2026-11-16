@@ -798,3 +798,35 @@ tr.spacer td {
   border-left: 1px solid #e2e2e2;
   vertical-align: top;
 }
+
+.settings-modal {
+  width: min(460px, 92vw);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #7a7a7a;
+  border-radius: 3px;
+  background: #fff;
+  box-shadow: 0 8px 26px #0004;
+}
+
+.settings-modal h2 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.settings-eol {
+  display: flex;
+  gap: 12px;
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid #c8c8c8;
+}
+
+.settings-eol label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}

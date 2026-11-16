@@ -10,6 +10,7 @@ pub mod profiles;
 pub mod script;
 pub mod state;
 pub mod store;
+pub mod templates;
 pub mod workspace;
 
 pub use catalog::{

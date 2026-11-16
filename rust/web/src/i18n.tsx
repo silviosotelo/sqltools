@@ -107,6 +107,14 @@ const translations = {
     installUpdate: "Instalar actualización",
     updateProgress: "Descargando",
     updateInstalled: "Actualización instalada; reiniciá la app",
+    settings: "Ajustes",
+    fileSettings: "Ajustes del archivo",
+    permanentSettings: "Ajustes de la aplicación",
+    close: "Cerrar",
+    templateName: "Nombre de la plantilla",
+    templateSaved: "Plantilla guardada",
+    templateMissing: "No existe la plantilla",
+    templateExpanded: "Plantilla insertada",
     formatterProfiles: "Perfiles de formato",
     profile: "Perfil",
     saveProfile: "Guardar perfil",
@@ -214,6 +222,14 @@ const translations = {
     installUpdate: "Install update",
     updateProgress: "Downloading",
     updateInstalled: "Update installed; restart the app",
+    settings: "Settings",
+    fileSettings: "File settings",
+    permanentSettings: "Application settings",
+    close: "Close",
+    templateName: "Template name",
+    templateSaved: "Template saved",
+    templateMissing: "Template not found",
+    templateExpanded: "Template inserted",
     formatterProfiles: "Formatter profiles",
     profile: "Profile",
     saveProfile: "Save profile",
@@ -234,8 +250,26 @@ type I18nValue = {
 
 const I18nContext = createContext<I18nValue | null>(null);
 
+const LANGUAGE_KEY = "sqlt.language";
+
+function storedLanguage(): Language {
+  try {
+    return localStorage.getItem(LANGUAGE_KEY) === "en" ? "en" : "es";
+  } catch {
+    return "es";
+  }
+}
+
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [language, setLanguage] = useState<Language>("es");
+  const [language, setLanguageState] = useState<Language>(storedLanguage);
+  const setLanguage = (next: Language) => {
+    setLanguageState(next);
+    try {
+      localStorage.setItem(LANGUAGE_KEY, next);
+    } catch {
+      // Storage can be unavailable; the UI still switches for this session.
+    }
+  };
   const value = useMemo<I18nValue>(() => {
     const t = (key: MessageKey) => translations[language][key] ?? key;
     return { language, setLanguage, t };

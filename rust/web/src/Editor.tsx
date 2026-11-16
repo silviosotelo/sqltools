@@ -373,6 +373,8 @@ export type EditorHandle = {
   justifyColumn: (mode: "left" | "right" | "center") => void;
   insertColumn: () => void;
   insertColumnNumbers: () => void;
+  selectedText: () => string;
+  insertText: (text: string) => void;
   wordAtCursor: () => string;
 };
 
@@ -1072,6 +1074,17 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
         });
       }
       editor.dispatch({ changes });
+    },
+    selectedText: () => {
+      const editor = view.current;
+      if (!editor) return "";
+      const { from, to } = editor.state.selection.main;
+      return editor.state.sliceDoc(from, to);
+    },
+    insertText: (text) => {
+      const editor = view.current;
+      if (!editor) return;
+      editor.dispatch(editor.state.replaceSelection(text));
     },
     wordAtCursor: () => {
       const editor = view.current;
