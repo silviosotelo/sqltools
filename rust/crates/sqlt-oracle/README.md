@@ -29,8 +29,13 @@ cargo test -p sqlt-oracle --test oracle_integration -- --nocapture
 ```
 
 Covers `select 1 from dual`, common types, cancellation with `ORA-01013` and a
-reusable session, 100k-row batches and read-only mode. The ignored
-`golden_dates_260k` compares 260,052 dates × 13 formats against `TO_CHAR`.
+reusable session, 100k-row batches, read-only mode, `DBMS_OUTPUT` (OUT binds)
+and `XMLTYPE` mapping to text. The ignored `golden_dates_260k` compares 260,052
+dates × 13 formats against `TO_CHAR`.
+
+`Session::enable_dbms_output` plus `Session::dbms_output_lines` drain
+`DBMS_OUTPUT.GET_LINE`; the app calls them through the `enable_dbms_output`
+command and shows the lines in the Output panel.
 
 ## CLI
 

@@ -39,7 +39,7 @@ type Draft = {
   savePassword: boolean;
 };
 
-type Panel = "results" | "history" | "plan" | "object" | "stats";
+type Panel = "results" | "history" | "plan" | "object" | "stats" | "output";
 
 const objectTypes = [
   { value: "", key: "typeAll" },
@@ -161,6 +161,7 @@ export default function App() {
     y: number;
   } | null>(null);
   const [stats, setStats] = useState<StatEntry[]>([]);
+  const [output, setOutput] = useState<string[]>([]);
   const [profiles, setProfiles] = useState<string[]>([]);
   const [profile, setProfile] = useState("");
   const [profileOptions, setProfileOptions] = useState<FormatOptions | null>(
@@ -330,6 +331,7 @@ export default function App() {
     }
     setRows([]);
     setColumns([]);
+    setOutput([]);
     setScrollTop(0);
     setRunning(true);
     setStatus("");
@@ -342,6 +344,9 @@ export default function App() {
           setRows([]);
         } else if (event.type === "batch") {
           setRows((current) => [...current, ...event.data.rows]);
+        } else if (event.type === "output") {
+          setOutput((current) => [...current, ...event.data]);
+          setPanel("output");
         } else if (event.type === "done") {
           setRunning(false);
           const label = event.data.rows === 1 ? t("row") : t("rows");
@@ -788,6 +793,16 @@ export default function App() {
     }
   };
 
+  const enableDbmsOutput = async () => {
+    if (!selected) return;
+    try {
+      await api.enableDbmsOutput(selected);
+      setStatus(t("dbmsOutputEnabled"));
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
   const refreshObjectCache = async () => {
     columnCache.current.clear();
     if (!isConnected) return;
@@ -1009,6 +1024,9 @@ export default function App() {
         break;
       case "Session.EnableSessionStatistics":
         void showStats();
+        break;
+      case "Session.EnableDbmsOutput":
+        void enableDbmsOutput();
         break;
       case "Script.Execute":
         void run();
@@ -1899,6 +1917,12 @@ export default function App() {
               >
                 {t("stats")}
               </button>
+              <button
+                className={panel === "output" ? "active" : ""}
+                onClick={() => setPanel("output")}
+              >
+                {t("output")}
+              </button>
             </nav>
             <button
               className="tb"
@@ -2154,6 +2178,13 @@ export default function App() {
                 )}
               </div>
             )}
+
+            {panel === "output" &&
+              (output.length === 0 ? (
+                <p className="no-results">{t("noOutput")}</p>
+              ) : (
+                <pre className="plan output">{output.join("\n")}</pre>
+              ))}
 
             {panel === "stats" && (
               <table className="grid">

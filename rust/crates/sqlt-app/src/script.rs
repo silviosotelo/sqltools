@@ -10,6 +10,8 @@ use sqlt_oracle::{QueryOptions, Session};
 pub enum ScriptEvent {
     Columns(Vec<ColumnMeta>),
     Batch(Batch),
+    /// `DBMS_OUTPUT` lines drained after a statement.
+    Output(Vec<String>),
 }
 
 /// Statements that produce a result set. Everything else (DML, DDL, PL/SQL)
@@ -83,6 +85,10 @@ where
         } else {
             let affected = session.execute(text).map_err(|e| e.to_string())?;
             statement_rows = affected as usize;
+        }
+        let lines = session.dbms_output_lines(1000).map_err(|e| e.to_string())?;
+        if !lines.is_empty() {
+            emit(ScriptEvent::Output(lines));
         }
         total += statement_rows;
         last_rows = statement_rows;

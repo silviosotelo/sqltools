@@ -37,6 +37,7 @@ pub struct Session {
     read_only: bool,
     /// Use the local fast formatter only when the session language is English.
     fast_dates: bool,
+    dbms_output_enabled: std::sync::atomic::AtomicBool,
 }
 
 pub struct QueryHandle {
@@ -77,6 +78,7 @@ impl Session {
             conn: Arc::new(conn),
             read_only: spec.read_only,
             fast_dates,
+            dbms_output_enabled: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -137,6 +139,42 @@ impl Session {
         self.guard(sql)?;
         let stmt = self.conn.execute(sql, params)?;
         Ok(stmt.row_count()?)
+    }
+
+    /// `DBMS_OUTPUT.ENABLE(NULL)`; lines are collected by `dbms_output_lines`.
+    pub fn enable_dbms_output(&self) -> Result<(), OciError> {
+        self.execute("begin dbms_output.enable(null); end;")?;
+        self.dbms_output_enabled
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// Drains up to `max` lines with `DBMS_OUTPUT.GET_LINE` (OUT binds).
+    /// Returns an empty vector when output was not enabled.
+    pub fn dbms_output_lines(&self, max: usize) -> Result<Vec<String>, OciError> {
+        if !self
+            .dbms_output_enabled
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return Ok(Vec::new());
+        }
+        let mut lines = Vec::new();
+        for _ in 0..max {
+            let mut stmt = self
+                .conn
+                .statement("begin dbms_output.get_line(:1, :2); end;")
+                .build()?;
+            // An OUT string bind needs a buffer; `None::<String>` is empty.
+            stmt.execute(&[&OracleType::Varchar2(32767), &None::<i32>])?;
+            // Status is 1 when the buffer is drained; the line is NULL then.
+            let status: i32 = stmt.bind_value(2)?;
+            if status != 0 {
+                break;
+            }
+            let line: String = stmt.bind_value(1)?;
+            lines.push(line);
+        }
+        Ok(lines)
     }
 
     pub fn commit(&self) -> Result<(), OciError> {

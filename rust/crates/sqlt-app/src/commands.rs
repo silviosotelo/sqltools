@@ -159,6 +159,7 @@ const IMPLEMENTED: &[&str] = &[
     "Session.Rollback",
     "Session.Cancel",
     "Session.EnableSessionStatistics",
+    "Session.EnableDbmsOutput",
     "Script.Execute",
     "Script.ExecuteCurrent",
     "Script.ExplainPlan",
@@ -244,7 +245,7 @@ mod tests {
                 .iter()
                 .filter(|command| command.implemented)
                 .count(),
-            149
+            150
         );
     }
 }

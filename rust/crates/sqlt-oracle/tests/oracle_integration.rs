@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Integration tests against a real Oracle database. They are skipped when
-//! `SQLT_USER`/`SQLT_PASS` y `SQLT_ALIAS`/`SQLT_CONNECT`.
+//! `SQLT_USER`/`SQLT_PASS` and `SQLT_ALIAS`/`SQLT_CONNECT` are missing.
 
 use std::sync::Arc;
 use std::thread;
@@ -20,7 +20,7 @@ fn spec() -> Option<ConnectSpec> {
 }
 
 fn open(spec: &ConnectSpec) -> Session {
-    Session::open(spec).unwrap_or_else(|e| panic!("no se pudo conectar: {e}"))
+    Session::open(spec).unwrap_or_else(|e| panic!("could not connect: {e}"))
 }
 
 #[test]
@@ -53,7 +53,7 @@ fn common_types() {
     assert_eq!(row[3], Value::Date("2024-02-29 00:00:00".to_string()));
     match &row[4] {
         Value::Timestamp(s) => assert!(s.starts_with("2024-02-29 13:45:09.123"), "{s}"),
-        other => panic!("timestamp inesperado: {other:?}"),
+        other => panic!("unexpected timestamp: {other:?}"),
     }
     assert_eq!(row[5], Value::Null);
 }
@@ -98,7 +98,7 @@ fn cancel_long_query_and_reuse_session() {
     let result = handle.join().expect("join");
     let err = result.expect_err("the query should have been cancelled");
     let msg = err.to_string();
-    assert!(msg.contains("ORA-01013"), "error inesperado: {msg}");
+    assert!(msg.contains("ORA-01013"), "unexpected error: {msg}");
 
     let mut q = session
         .query("select 1 from dual", QueryOptions::default())
@@ -327,8 +327,8 @@ fn extreme_and_informative_numbers() {
     let sql = "select 1e-10, 1e100, binary_double_nan, binary_double_infinity from dual";
     let mut q = session
         .query(sql, QueryOptions::default())
-        .expect("query extremos");
-    let batch = q.next_batch(1).expect("fetch extremos");
+        .expect("query extremes");
+    let batch = q.next_batch(1).expect("fetch extremes");
     eprintln!("extremes: {:?}", batch.rows[0]);
     assert_eq!(batch.rows[0].len(), 4);
 }
@@ -347,7 +347,7 @@ fn xmltype_by_support() {
             assert_eq!(batch.rows[0].len(), 1);
         }
         Err(err) => {
-            eprintln!("xmltype no soportado: {err}");
+            eprintln!("xmltype unsupported: {err}");
             assert!(matches!(err, OciError::Unsupported(_)));
         }
     }
@@ -389,7 +389,7 @@ fn parse_iso(s: &str) -> Option<(i32, u32, u32, u32, u32, u32)> {
 }
 
 #[test]
-#[ignore = "golden lento: 260 000 fechas contra TO_CHAR"]
+#[ignore = "slow golden: 260,000 dates against TO_CHAR"]
 fn golden_dates_260k() {
     use sqlt_core::datefmt::compile_date_format;
     let Some(spec) = spec() else { return };
@@ -445,14 +445,51 @@ fn golden_dates_260k() {
                 if got != want {
                     bad += 1;
                     if bad <= 3 {
-                        eprintln!("{fmt}: {iso} oracle=[{want}] nuestro=[{got}]");
+                        eprintln!("{fmt}: {iso} oracle=[{want}] ours=[{got}]");
                     }
                 }
             }
         }
-        eprintln!("{fmt}: {total} fechas, {bad} diferencias");
+        eprintln!("{fmt}: {total} dates, {bad} differences");
         assert_eq!(bad, 0, "{fmt}");
         total_fail += bad;
     }
-    eprintln!("golden fechas: {} diferencias", total_fail);
+    eprintln!("golden dates: {} differences", total_fail);
+}
+
+#[test]
+fn dbms_output_uses_out_binds() {
+    let Some(spec) = spec() else { return };
+    let session = open(&spec);
+    assert!(session
+        .dbms_output_lines(10)
+        .expect("buffer before enable")
+        .is_empty());
+    session.enable_dbms_output().expect("enable dbms_output");
+    session
+        .execute("begin dbms_output.put_line('first'); dbms_output.put_line('second'); end;")
+        .expect("put_line");
+    let lines = session.dbms_output_lines(10).expect("get_line");
+    assert_eq!(lines, vec!["first".to_string(), "second".to_string()]);
+    assert!(session
+        .dbms_output_lines(10)
+        .expect("drained buffer")
+        .is_empty());
+}
+
+#[test]
+fn xmltype_maps_to_text() {
+    let Some(spec) = spec() else { return };
+    let session = open(&spec);
+    let mut q = session
+        .query(
+            "select xmltype('<root><item>42</item></root>') from dual",
+            QueryOptions::default(),
+        )
+        .expect("query xmltype");
+    let batch = q.next_batch(10).expect("fetch xmltype");
+    match &batch.rows[0][0] {
+        Value::Text(text) => assert!(text.contains("<item>42</item>"), "{text}"),
+        other => panic!("unexpected xmltype value: {other:?}"),
+    }
 }

@@ -45,6 +45,8 @@ export const api = {
     });
   },
   toggleReadOnly: (id: string) => invoke<boolean>("toggle_read_only", { id }),
+  enableDbmsOutput: (connectionId: string) =>
+    invoke<void>("enable_dbms_output", { connectionId }),
   cancel: (id: string) => invoke<void>("cancel", { id }),
   commit: (id: string) => invoke<void>("commit", { id }),
   rollback: (id: string) => invoke<void>("rollback", { id }),

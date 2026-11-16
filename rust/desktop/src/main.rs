@@ -13,6 +13,7 @@ use tauri::State;
 enum QueryEvent {
     Columns(Vec<ColumnMeta>),
     Batch(Batch),
+    Output(Vec<String>),
     Done {
         #[serde(rename = "rows")]
         rows: usize,
@@ -76,6 +77,17 @@ fn disconnect(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String>
 }
 
 #[tauri::command]
+fn enable_dbms_output(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+) -> Result<(), String> {
+    state
+        .session(&connection_id)?
+        .enable_dbms_output()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn execute(
     state: State<'_, Arc<AppState>>,
     connection_id: String,
@@ -99,6 +111,7 @@ fn execute(
             let payload = match event {
                 ScriptEvent::Columns(columns) => QueryEvent::Columns(columns),
                 ScriptEvent::Batch(batch) => QueryEvent::Batch(batch),
+                ScriptEvent::Output(lines) => QueryEvent::Output(lines),
             };
             channel.send(payload).ok();
         });
@@ -614,6 +627,7 @@ fn main() {
             delete_connection,
             connect,
             disconnect,
+            enable_dbms_output,
             toggle_read_only,
             execute,
             cancel,
