@@ -102,6 +102,12 @@ const IMPLEMENTED: &[&str] = &[
     "View.Toolbar",
     "View.NextPane",
     "View.PrevPane",
+    "View.ExplainPlan",
+    "View.ObjectTreeSetFocus",
+    "Window.NextPane",
+    "Window.PreviousPane",
+    "Edit.FormatSQLwithSettings",
+    "Tools.SessionDdlGridSettings",
     "Workspace.OpenQuick",
     "Edit.SelectWord",
     "Edit.CopyAppend",
@@ -338,7 +344,7 @@ mod tests {
                 .iter()
                 .filter(|command| command.implemented)
                 .count(),
-            187
+            193
         );
     }
 }

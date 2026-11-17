@@ -224,21 +224,37 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [showToolbar, setShowToolbar] = useState(true);
   const objectsFilterRef = useRef<HTMLInputElement | null>(null);
-  const resultsRef = useRef<HTMLDivElement | null>(null);
+  const dataPanelRef = useRef<HTMLElement | null>(null);
+  const profileDetailsRef = useRef<HTMLDetailsElement | null>(null);
+  const profileSelectRef = useRef<HTMLSelectElement | null>(null);
 
   /** 0 = objects filter, 1 = editor, 2 = results. */
-  const activePane = () => {
-    const active = document.activeElement;
-    if (objectsFilterRef.current && (objectsFilterRef.current === active || objectsFilterRef.current.contains(active))) return 0;
-    if (resultsRef.current && active && resultsRef.current.contains(active)) return 2;
-    return 1;
-  };
+  const lastPane = useRef(1);
+  useEffect(() => {
+    const onFocus = (event: FocusEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      if (objectsFilterRef.current?.contains(target)) lastPane.current = 0;
+      else if (dataPanelRef.current?.contains(target)) lastPane.current = 2;
+      else if (target.closest(".cm-editor")) lastPane.current = 1;
+    };
+    document.addEventListener("focusin", onFocus);
+    return () => document.removeEventListener("focusin", onFocus);
+  }, []);
+
+  /**
+   * A dialog (or the palette) holds the focus when a command runs, so the
+   * focused element says nothing about the pane the user was in; `focusin`
+   * keeps the last real pane. 0 = objects filter, 1 = editor, 2 = results.
+   */
+  const activePane = () => lastPane.current;
 
   const focusPane = (index: number) => {
     const next = ((index % 3) + 3) % 3;
+    lastPane.current = next;
     if (next === 0) objectsFilterRef.current?.focus();
     else if (next === 1) editorRef.current?.focus();
-    else resultsRef.current?.focus();
+    else dataPanelRef.current?.focus();
   };
   const [stats, setStats] = useState<StatEntry[]>([]);
   const [output, setOutput] = useState<string[]>([]);
@@ -1866,10 +1882,27 @@ export default function App() {
         setShowToolbar(!showToolbar);
         break;
       case "View.NextPane":
+      case "Window.NextPane":
         focusPane(activePane() + 1);
         break;
       case "View.PrevPane":
+      case "Window.PreviousPane":
         focusPane(activePane() - 1);
+        break;
+      case "View.ExplainPlan":
+        setPanel("plan");
+        break;
+      case "View.ObjectTreeSetFocus":
+        objectsFilterRef.current?.focus();
+        break;
+      case "Edit.FormatSQLwithSettings":
+        if (profileDetailsRef.current) profileDetailsRef.current.open = true;
+        profileSelectRef.current?.focus();
+        setStatus(t("formatterProfiles"));
+        break;
+      case "Tools.SessionDdlGridSettings":
+        setSettingsSection("app");
+        setSettingsOpen(true);
         break;
       case "Workspace.OpenQuick":
         void loadWorkspace();
@@ -2610,12 +2643,13 @@ export default function App() {
             </div>
           </details>
 
-          <details className="side-section">
+          <details className="side-section" ref={profileDetailsRef}>
             <summary>{t("formatterProfiles")}</summary>
             <div className="section-body">
               <label className="field-row">
                 <span>{t("profile")}</span>
                 <select
+                  ref={profileSelectRef}
                   value={profile}
                   onChange={(event) => void selectProfile(event.target.value)}
                 >
@@ -2766,12 +2800,10 @@ export default function App() {
             <span className="hint">{t("bookmarkHint")}</span>
           </div>
 
-          <section className="content">
+          <section className="content" ref={dataPanelRef} tabIndex={-1}>
             {panel === "results" && (
               <div
                 className="results"
-                ref={resultsRef}
-                tabIndex={-1}
                 onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
               >
                 {columns.length === 0 ? (
