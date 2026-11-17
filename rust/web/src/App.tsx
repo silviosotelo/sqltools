@@ -189,6 +189,21 @@ export default function App() {
       return true;
     }
   });
+  const [substitution, setSubstitutionState] = useState(() => {
+    try {
+      return localStorage.getItem("sqlt.substitution") === "true";
+    } catch {
+      return false;
+    }
+  });
+  const setSubstitution = (value: boolean) => {
+    setSubstitutionState(value);
+    try {
+      localStorage.setItem("sqlt.substitution", String(value));
+    } catch {
+      // Storage may be unavailable; the toggle still applies this session.
+    }
+  };
   const setHaltOnError = (value: boolean) => {
     setHaltOnErrorState(value);
     try {
@@ -360,6 +375,62 @@ export default function App() {
     }
   };
 
+  const substituteVariables = (
+    text: string,
+    offset: number | null,
+  ): { text: string; offset: number | null } | null => {
+    const values = new Map<string, string>();
+    let out = "";
+    let inQuote = false;
+    let mapped: number | null = null;
+    for (let index = 0; index < text.length; index += 1) {
+      if (offset !== null && mapped === null && index >= offset) {
+        mapped = out.length;
+      }
+      const char = text[index];
+      if (char === "'") {
+        if (inQuote && text[index + 1] === "'") {
+          out += "''";
+          index += 1;
+          continue;
+        }
+        inQuote = !inQuote;
+        out += char;
+        continue;
+      }
+      if (!inQuote && char === "&") {
+        let cursor = index + 1;
+        if (text[cursor] === "&") cursor += 1;
+        let end = cursor;
+        while (end < text.length && /[A-Za-z0-9_]/.test(text[end])) end += 1;
+        if (end > cursor) {
+          const name = text.slice(cursor, end);
+          let value = values.get(name);
+          if (value === undefined) {
+            const answer = window.prompt(`${t("variable")} ${name}`);
+            if (answer === null) return null;
+            value = answer;
+            values.set(name, value);
+          }
+          if (
+            offset !== null &&
+            mapped === null &&
+            offset >= index &&
+            offset <= end
+          ) {
+            mapped = out.length;
+          }
+          out += value;
+          index = end - 1;
+          continue;
+        }
+      }
+      out += char;
+    }
+    if (offset !== null && mapped === null) mapped = out.length;
+    return { text: out, offset: mapped };
+  };
+
   const run = async (text = sql, offset: number | null = null) => {
     if (!isConnected) {
       setStatus(t("noConnection"));
@@ -376,6 +447,19 @@ export default function App() {
     setScriptErrors([]);
     setErrorIndex(-1);
     setScrollTop(0);
+    let prepared = text;
+    let runOffset = offset;
+    if (substitution) {
+      const replaced = substituteVariables(text, offset);
+      if (!replaced) {
+        setStatus(t("substitutionCancelled"));
+        return false;
+      }
+      prepared = replaced.text;
+      runOffset = replaced.offset;
+    }
+    // Error offsets only map back to the editor when the text did not change.
+    const offsetsValid = prepared === text;
     // Errors from this run are only valid while the text it ran on is intact.
     const runVersion = bufferVersion.current;
     setRunning(true);
@@ -384,9 +468,9 @@ export default function App() {
     try {
       await api.execute(
         selected,
-        text,
+        prepared,
         5000,
-        offset,
+        runOffset,
         haltOnError,
         (event: QueryEvent) => {
           if (event.type === "columns") {
@@ -399,7 +483,7 @@ export default function App() {
             setOutput((current) => [...current, ...event.data]);
             setPanel("output");
           } else if (event.type === "statementerror") {
-            if (bufferVersion.current === runVersion) {
+            if (offsetsValid && bufferVersion.current === runVersion) {
               setScriptErrors((current) => [...current, event.data]);
             }
             setOutput((current) => [
@@ -1538,6 +1622,12 @@ export default function App() {
         setStatus(`${t("haltOnError")}: ${next ? t("on") : t("off")}`);
         break;
       }
+      case "Script.SubstitutionVariables": {
+        const next = !substitution;
+        setSubstitution(next);
+        setStatus(`${t("substitution")}: ${next ? t("on") : t("off")}`);
+        break;
+      }
       case "File.Exit":
         if (!confirmDiscard()) break;
         void api.exitApp();
@@ -2554,14 +2644,24 @@ export default function App() {
               </label>
             )}
             {settingsSection === "app" && (
-              <label className="check-inline">
-                <input
-                  type="checkbox"
-                  checked={haltOnError}
-                  onChange={(event) => setHaltOnError(event.target.checked)}
-                />
-                {t("haltOnError")}
-              </label>
+              <>
+                <label className="check-inline">
+                  <input
+                    type="checkbox"
+                    checked={haltOnError}
+                    onChange={(event) => setHaltOnError(event.target.checked)}
+                  />
+                  {t("haltOnError")}
+                </label>
+                <label className="check-inline">
+                  <input
+                    type="checkbox"
+                    checked={substitution}
+                    onChange={(event) => setSubstitution(event.target.checked)}
+                  />
+                  {t("substitution")}
+                </label>
+              </>
             )}
             <fieldset className="settings-eol">
               <legend>{t("lineEnding")}</legend>
