@@ -363,12 +363,12 @@ export default function App() {
   const run = async (text = sql, offset: number | null = null) => {
     if (!isConnected) {
       setStatus(t("noConnection"));
-      return;
+      return false;
     }
     // The session runs one script at a time; ignore repeats while busy.
     if (running) {
       setStatus(t("alreadyRunning"));
-      return;
+      return false;
     }
     setRows([]);
     setColumns([]);
@@ -422,9 +422,11 @@ export default function App() {
           }
         },
       );
+      return true;
     } catch (error) {
       setRunning(false);
       setStatus(String(error));
+      return false;
     }
   };
 
@@ -1045,7 +1047,9 @@ export default function App() {
           : (ranges.filter((range) => range.start <= cursor).pop() ??
             ranges[0]);
       const next = ranges[ranges.indexOf(current) + 1];
-      void run(sql, current.start);
+      // Only advance when the execution was accepted (connected and idle).
+      const started = await run(sql, current.start);
+      if (!started) return;
       if (next) editorRef.current?.goToOffset(next.start);
       setStatus(`${t("step")} ${ranges.indexOf(current) + 1}/${ranges.length}`);
     } catch (error) {
