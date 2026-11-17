@@ -104,10 +104,47 @@ fn run_bench(spec: &ConnectSpec, sql: &str, runs: usize, prefetch: u32) -> Resul
     Ok(())
 }
 
-fn run_ddl(spec: &ConnectSpec, schema: Option<&str>, table: &str) -> Result<(), String> {
+fn run_transform(spec: &ConnectSpec, schema: Option<&str>, table: &str) -> Result<(), String> {
     let session = Session::open(spec).map_err(|e| e.to_string())?;
-    let ddl = sqlt_meta::loader::load_table_ddl(&session, schema, table, QueryOptions::default())
-        .map_err(|e| e.to_string())?;
+    let options = QueryOptions::default();
+    let owner = match schema.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(owner) => owner.to_string(),
+        None => sqlt_meta::loader::current_schema(&session, options)?,
+    };
+    let loaded = sqlt_meta::loader::load_table(&session, &owner, table, options)?;
+    let backup = sqlt_meta::loader::unique_backup_name(&session, &owner, table, options)?;
+    let dependents = sqlt_meta::loader::dependent_foreign_keys(&session, &owner, table, options)?;
+    print!(
+        "{}",
+        sqlt_meta::transform_script(
+            &loaded,
+            &backup,
+            &dependents,
+            &sqlt_meta::WriteSettings::default()
+        )
+    );
+    Ok(())
+}
+
+fn run_ddl(
+    spec: &ConnectSpec,
+    schema: Option<&str>,
+    table: &str,
+    prompts: bool,
+) -> Result<(), String> {
+    let session = Session::open(spec).map_err(|e| e.to_string())?;
+    let settings = sqlt_meta::WriteSettings {
+        generate_prompts: prompts,
+        ..Default::default()
+    };
+    let ddl = sqlt_meta::loader::load_table_ddl_with_settings(
+        &session,
+        schema,
+        table,
+        QueryOptions::default(),
+        &settings,
+    )
+    .map_err(|e| e.to_string())?;
     print!("{ddl}");
     Ok(())
 }
@@ -117,12 +154,23 @@ fn run_compare(
     path: &str,
     schema: Option<&str>,
     table: &str,
+    prompts: bool,
 ) -> Result<(), String> {
-    let expected = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+    let bytes = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
+    let expected = sqlt_meta::compare::decode_legacy(&bytes);
     let session = Session::open(spec).map_err(|e| e.to_string())?;
-    let actual =
-        sqlt_meta::loader::load_table_ddl(&session, schema, table, QueryOptions::default())
-            .map_err(|e| e.to_string())?;
+    let settings = sqlt_meta::WriteSettings {
+        generate_prompts: prompts,
+        ..Default::default()
+    };
+    let actual = sqlt_meta::loader::load_table_ddl_with_settings(
+        &session,
+        schema,
+        table,
+        QueryOptions::default(),
+        &settings,
+    )
+    .map_err(|e| e.to_string())?;
     let comparison = sqlt_meta::compare_ddl(&expected, &actual);
     println!("{}", comparison.report());
     if !comparison.identical {
@@ -176,16 +224,24 @@ fn main() {
         }) => ConnectSpec::from_env()
             .map_err(|e| e.to_string())
             .and_then(|spec| run_bench(&spec, &sql, runs, prefetch)),
-        Ok(Command::Ddl { schema, table }) => ConnectSpec::from_env()
+        Ok(Command::Transform { schema, table }) => ConnectSpec::from_env()
             .map_err(|e| e.to_string())
-            .and_then(|spec| run_ddl(&spec, schema.as_deref(), &table)),
+            .and_then(|spec| run_transform(&spec, schema.as_deref(), &table)),
+        Ok(Command::Ddl {
+            schema,
+            table,
+            prompts,
+        }) => ConnectSpec::from_env()
+            .map_err(|e| e.to_string())
+            .and_then(|spec| run_ddl(&spec, schema.as_deref(), &table, prompts)),
         Ok(Command::CompareDdl {
             path,
             schema,
             table,
+            prompts,
         }) => ConnectSpec::from_env()
             .map_err(|e| e.to_string())
-            .and_then(|spec| run_compare(&spec, &path, schema.as_deref(), &table)),
+            .and_then(|spec| run_compare(&spec, &path, schema.as_deref(), &table, prompts)),
         Err(e) => Err(e),
     };
     if let Err(e) = result {

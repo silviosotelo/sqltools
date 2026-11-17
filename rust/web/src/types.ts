@@ -133,6 +133,10 @@ export type FormatOptions = {
   onNewLine: boolean;
   spaceAfterComma: boolean;
   spaceInParens: boolean;
+  andOrNewLine: boolean;
+  oneItemPerLine: boolean;
+  kwAloneWhenMany: boolean;
+  maxLine: number;
   alignDeclarations: boolean;
   alignAssignments: boolean;
   blankAfterDeclare: boolean;

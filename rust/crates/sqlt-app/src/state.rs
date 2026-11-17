@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
-use sqlt_oracle::{QueryOptions, Session};
+use sqlt_oracle::{ConnectSpec, QueryOptions, Session};
 
 use crate::store::{ConnectionStore, StoreError};
 
@@ -60,6 +60,16 @@ impl AppState {
 
     pub fn disconnect(&self, connection_id: &str) -> Result<(), String> {
         self.close_existing(connection_id)
+    }
+
+    /// Resolved connection (user, password, target, mode) without opening a
+    /// session; "Execute in SQL*Plus" needs it for the external command line.
+    pub fn connect_spec(&self, connection_id: &str) -> Result<ConnectSpec, String> {
+        let store = self
+            .store
+            .lock()
+            .map_err(|_| "Connection store lock poisoned".to_string())?;
+        store.to_spec(connection_id).map_err(|e| e.to_string())
     }
 
     /// Cancels a running script, waits for its cycle to finish and only then

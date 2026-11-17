@@ -33,8 +33,15 @@ fn constraint(name: &str, kind: char, columns: &[&str]) -> Constraint {
         columns: columns.iter().map(|value| value.to_string()).collect(),
         condition: None,
         ref_table: None,
+        ref_owner: None,
         ref_columns: Vec::new(),
         delete_rule: None,
+        no_validate: false,
+        deferrable: false,
+        deferred: false,
+        rely: false,
+        disabled: false,
+        using_index: None,
     }
 }
 
@@ -89,6 +96,8 @@ fn trigger_header_matches_windows() {
         table_name: "CLIENTE".to_string(),
         description: "CLIENTE_DESP_TRIG \nAFTER INSERT OR DELETE OR UPDATE ON CLIENTE \nREFERENCING NEW AS NEW OLD AS OLD \nFOR EACH ROW\n".to_string(),
         trigger_body: "BEGIN\n  NULL;\nEND;".to_string(),
+        when_clause: None,
+        action_type: "PL/SQL".to_string(),
     };
     let output = trigger.write(&settings(false));
     let header = &output[..output.find("FOR EACH ROW").expect("header")];
@@ -109,6 +118,8 @@ fn indexes_constraints_comments_grants() {
         bitmap: false,
         columns: vec!["CI".to_string()],
         tablespace: None,
+        next_extent: None,
+        compress: None,
     });
     table
         .constraints
@@ -117,6 +128,7 @@ fn indexes_constraints_comments_grants() {
         grantee: "REPORTE".to_string(),
         privileges: vec!["SELECT".to_string(), "UPDATE".to_string()],
         grantable: false,
+        column_privileges: Vec::new(),
     });
 
     let output = table.write_full(&settings(false));
@@ -128,7 +140,297 @@ fn indexes_constraints_comments_grants() {
     ));
     assert!(output.contains("COMMENT ON TABLE cliente IS 'Tabla de clientes';\n\n"));
     assert!(output.contains("COMMENT ON COLUMN cliente.ci IS 'Cédula';\n"));
-    assert!(output.contains("GRANT SELECT, UPDATE ON cliente TO reporte;\n"));
+    assert!(output.contains("GRANT SELECT,UPDATE ON cliente TO reporte;\n"));
+}
+
+#[test]
+fn not_validated_constraint_prints_novalidate() {
+    let mut check = constraint("CLI_COMISALBE", 'C', &[]);
+    check.condition = Some("comision > 0".to_string());
+    check.no_validate = true;
+    assert_eq!(
+        check.write(&table(), &settings(false)),
+        "ALTER TABLE cliente\n  ADD CONSTRAINT cli_comisalbe CHECK (\n    comision > 0\n  )\n  NOVALIDATE\n/\n\n"
+    );
+
+    let validated = constraint("PK_CLIENTE", 'P', &["ID_CLIENTE"]);
+    assert!(!validated
+        .write(&table(), &settings(false))
+        .contains("NOVALIDATE"));
+}
+
+#[test]
+fn constraint_state_clauses_match_metobjects_order() {
+    let mut key = constraint("PK_CLIENTE", 'P', &["ID_CLIENTE"]);
+    key.deferrable = true;
+    key.deferred = true;
+    key.rely = true;
+    key.disabled = true;
+    key.no_validate = true;
+    assert!(key
+        .write(&table(), &settings(false))
+        .ends_with("  )\n  INITIALLY DEFERRED DEFERRABLE\n  RELY\n  DISABLE\n  NOVALIDATE\n/\n\n"));
+
+    // DEFERRABLE without DEFERRED prints no INITIALLY clause.
+    let mut plain = constraint("PK_CLIENTE", 'P', &["ID_CLIENTE"]);
+    plain.deferrable = true;
+    let output = plain.write(&table(), &settings(false));
+    assert!(output.ends_with("  )\n  DEFERRABLE\n/\n\n"));
+    assert!(!output.contains("INITIALLY"));
+}
+
+#[test]
+fn generated_constraint_name_is_not_printed() {
+    let mut other = constraint("SYS_C009890", 'C', &["SEXO"]);
+    other.generated = true;
+    other.condition = Some("SEXO IN ('M', 'F')".to_string());
+    assert_eq!(
+        other.write(&table(), &settings(false)),
+        "ALTER TABLE cliente\n  ADD CHECK (\n    SEXO IN ('M', 'F')\n  )\n/\n\n"
+    );
+}
+
+#[test]
+fn not_null_check_constraint_is_skipped() {
+    let mut table = table();
+    let mut not_null = constraint("SYS_C009889", 'C', &["CI"]);
+    not_null.generated = true;
+    not_null.condition = Some("CI IS NOT NULL".to_string());
+    table.constraints.push(not_null);
+    let mut real = constraint("CLI_SEXO_CK", 'C', &["SEXO"]);
+    real.condition = Some("SEXO IN ('M', 'F')".to_string());
+    table.constraints.push(real);
+    let output = table.write_full(&settings(false));
+    assert!(!output.contains("CI IS NOT NULL"), "{output}");
+    assert!(
+        output.contains("CONSTRAINT cli_sexo_ck CHECK ("),
+        "{output}"
+    );
+}
+
+#[test]
+fn trigger_when_and_call_match_the_original() {
+    let trigger = Trigger {
+        owner: "ANAMNESIS".to_string(),
+        name: "CLIENTE_BT".to_string(),
+        table_owner: "ANAMNESIS".to_string(),
+        table_name: "CLIENTE".to_string(),
+        description: "CLIENTE_BT \nBEFORE INSERT ON CLIENTE \nFOR EACH ROW\n".to_string(),
+        trigger_body: "pkg.audit(:NEW.id)".to_string(),
+        when_clause: Some("NEW.id IS NOT NULL".to_string()),
+        action_type: "CALL".to_string(),
+    };
+    assert_eq!(
+        trigger.write(&settings(false)),
+        "CREATE OR REPLACE TRIGGER cliente_bt\nBEFORE INSERT ON cliente\nFOR EACH ROW\nWHEN (NEW.id IS NOT NULL)\nCALL pkg.audit(:NEW.id)\n/\n\n"
+    );
+}
+
+#[test]
+fn cross_schema_foreign_key_qualifies_the_target() {
+    let mut table = Table::new("ANAMNESIS", "CLIENTE");
+    table.columns = vec![column("ID_PAIS", "NUMBER", 22, 4, 0, true, "")];
+
+    let mut fk = constraint("CLIENTE_PAIS_FK", 'R', &["ID_PAIS"]);
+    fk.ref_table = Some("PAIS".to_string());
+    fk.ref_owner = Some("MAESTROS".to_string());
+    fk.ref_columns = vec!["ID_PAIS".to_string()];
+    assert!(
+        fk.write(&table, &settings(false))
+            .contains("REFERENCES maestros.pais ("),
+        "{}",
+        fk.write(&table, &settings(false))
+    );
+
+    let mut local = constraint("CLIENTE_PAIS_FK", 'R', &["ID_PAIS"]);
+    local.ref_table = Some("PAIS".to_string());
+    local.ref_owner = Some("ANAMNESIS".to_string());
+    local.ref_columns = vec!["ID_PAIS".to_string()];
+    assert!(local
+        .write(&table, &settings(false))
+        .contains("REFERENCES pais ("));
+}
+
+#[test]
+fn trigger_header_replaces_only_the_table_token() {
+    // A table called NEW must not rewrite `REFERENCING NEW AS NEW OLD AS OLD`.
+    let trigger = Trigger {
+        owner: "APP".to_string(),
+        name: "T".to_string(),
+        table_owner: "APP".to_string(),
+        table_name: "NEW".to_string(),
+        description: "T \nBEFORE INSERT ON NEW \nREFERENCING NEW AS NEW OLD AS OLD\nFOR EACH ROW\n"
+            .to_string(),
+        trigger_body: "BEGIN NULL; END;".to_string(),
+        when_clause: None,
+        action_type: "PL/SQL".to_string(),
+    };
+    let output = trigger.write(&settings(false));
+    assert!(output.contains("BEFORE INSERT ON new\n"), "{output}");
+    assert!(
+        output.contains("REFERENCING NEW AS NEW OLD AS OLD\n"),
+        "{output}"
+    );
+}
+
+#[test]
+fn primary_key_prints_using_index_storage() {
+    let mut key = constraint("PK_CLIENTE", 'P', &["ID_CLIENTE"]);
+    key.using_index = Some(sqlt_meta::IndexStorage {
+        tablespace: Some("CONTABILIDAD_DATA".to_string()),
+        next_extent: Some(1024 * 1024),
+    });
+    assert_eq!(
+        key.write(&table(), &settings(true)),
+        "ALTER TABLE cliente\n  ADD CONSTRAINT pk_cliente PRIMARY KEY (\n    id_cliente\n  )\n  USING INDEX\n    TABLESPACE contabilidad_data\n    STORAGE (\n      NEXT       1024 K\n    )\n/\n\n"
+    );
+    // `NoStorageForConstraint` drops the whole block.
+    let without_storage = WriteSettings {
+        no_storage_for_constraint: true,
+        ..settings(true)
+    };
+    assert_eq!(
+        key.write(&table(), &without_storage),
+        "ALTER TABLE cliente\n  ADD CONSTRAINT pk_cliente PRIMARY KEY (\n    id_cliente\n  )\n/\n\n"
+    );
+    // Foreign keys never carry index storage.
+    let mut fk = constraint("CLIENTE_PAIS_FK", 'R', &["ID_PAIS"]);
+    fk.ref_table = Some("PAIS".to_string());
+    fk.ref_columns = vec!["ID_PAIS".to_string()];
+    fk.using_index = key.using_index.clone();
+    assert!(!fk.write(&table(), &settings(true)).contains("USING INDEX"));
+}
+
+#[test]
+fn index_prints_its_storage() {
+    let mut table = Table::new("ANAMNESIS", "CLIENTE");
+    table.columns = vec![column("CI", "VARCHAR2", 50, 0, 0, true, "")];
+    let index = Index {
+        name: "IDX_CLIENTE_CI".to_string(),
+        unique: true,
+        bitmap: false,
+        columns: vec!["CI".to_string()],
+        tablespace: Some("CONTABILIDAD_DATA".to_string()),
+        next_extent: Some(1024 * 1024),
+        compress: None,
+    };
+    assert_eq!(
+        index.write(&table, &settings(true)),
+        "CREATE UNIQUE INDEX idx_cliente_ci\n  ON cliente (\n    ci\n  )\n  TABLESPACE contabilidad_data\n  STORAGE (\n    NEXT       1024 K\n  )\n/\n\n"
+    );
+}
+
+#[test]
+fn prompts_match_the_windows_output() {
+    let mut table = table();
+    table.indexes.push(Index {
+        name: "IDX_CLIENTE_CI".to_string(),
+        unique: true,
+        bitmap: false,
+        columns: vec!["CI".to_string()],
+        tablespace: None,
+        next_extent: None,
+        compress: None,
+    });
+    table
+        .constraints
+        .push(constraint("PK_CLIENTE", 'P', &["ID_CLIENTE"]));
+    table.triggers.push(Trigger {
+        owner: "ANAMNESIS".to_string(),
+        name: "CLIENTE_BT".to_string(),
+        table_owner: "ANAMNESIS".to_string(),
+        table_name: "CLIENTE".to_string(),
+        description: "CLIENTE_BT \nBEFORE INSERT ON CLIENTE \nFOR EACH ROW\n".to_string(),
+        trigger_body: "BEGIN\n  NULL;\nEND;".to_string(),
+        when_clause: None,
+        action_type: "PL/SQL".to_string(),
+    });
+    let mut options = settings(false);
+    options.generate_prompts = true;
+    let output = table.write_full(&options);
+    assert!(
+        output.starts_with("PROMPT CREATE TABLE cliente\nCREATE TABLE cliente ("),
+        "{output}"
+    );
+    assert!(
+        output.contains("PROMPT CREATE INDEX idx_cliente_ci\nCREATE UNIQUE INDEX idx_cliente_ci"),
+        "{output}"
+    );
+    assert!(
+        output.contains(
+            "PROMPT ALTER TABLE cliente ADD CONSTRAINT pk_cliente PRIMARY KEY\nALTER TABLE cliente"
+        ),
+        "{output}"
+    );
+    assert!(
+        output.contains(
+            "PROMPT CREATE OR REPLACE TRIGGER cliente_bt\nCREATE OR REPLACE TRIGGER cliente_bt"
+        ),
+        "{output}"
+    );
+}
+
+#[test]
+fn transform_script_matches_the_helper_layout() {
+    let mut table = table();
+    table.comments = Some("Tabla de clientes".to_string());
+    table.columns[1].comments = Some("Cédula".to_string());
+    table.indexes.push(Index {
+        name: "IDX_CLIENTE_CI".to_string(),
+        unique: true,
+        bitmap: false,
+        columns: vec!["CI".to_string()],
+        tablespace: None,
+        next_extent: None,
+        compress: None,
+    });
+    table
+        .constraints
+        .push(constraint("PK_CLIENTE", 'P', &["ID_CLIENTE"]));
+    table.triggers.push(Trigger {
+        owner: "ANAMNESIS".to_string(),
+        name: "CLIENTE_BT".to_string(),
+        table_owner: "ANAMNESIS".to_string(),
+        table_name: "CLIENTE".to_string(),
+        description: "CLIENTE_BT \nBEFORE INSERT ON CLIENTE \nFOR EACH ROW\n".to_string(),
+        trigger_body: "BEGIN\n  NULL;\nEND;".to_string(),
+        when_clause: None,
+        action_type: "PL/SQL".to_string(),
+    });
+    table.grants.push(Grant {
+        grantee: "REPORTE".to_string(),
+        privileges: vec!["SELECT".to_string()],
+        grantable: false,
+        column_privileges: Vec::new(),
+    });
+    let mut options = settings(true);
+    options.generate_prompts = true;
+    let script = sqlt_meta::transform_script(&table, "CLIENTE_$00", &[], &options);
+
+    assert!(
+        script.contains("LOCK TABLE cliente IN EXCLUSIVE MODE NOWAIT\n/\n\n"),
+        "{script}"
+    );
+    assert!(script.contains("RENAME cliente TO cliente_$00\n/\n\n\n"));
+    assert!(script.contains("DROP TRIGGER cliente_bt\n/\n\n"));
+    assert!(script.contains("ALTER TABLE cliente_$00\n  DROP CONSTRAINT pk_cliente CASCADE\n/\n\n"));
+    assert!(script.contains("DROP INDEX idx_cliente_ci\n/\n\n"));
+    assert!(script
+        .contains("PROMPT CREATE cliente\nPROMPT CREATE TABLE cliente\nCREATE TABLE cliente ("));
+    assert!(script.contains("INSERT /*+append*/ INTO cliente (\n  id_cliente,\n"));
+    assert!(script.contains("  FROM cliente_$00\n)\n/\n\n\n"));
+    assert!(script.contains(
+        "PROMPT CREATE indexes\nPROMPT CREATE INDEX idx_cliente_ci\nCREATE UNIQUE INDEX idx_cliente_ci"
+    ));
+    assert!(script.contains(
+        "PROMPT CREATE constraints\nPROMPT ALTER TABLE cliente ADD CONSTRAINT pk_cliente PRIMARY KEY\n"
+    ));
+    assert!(
+        script.contains("PROMPT CREATE triggers\nPROMPT CREATE OR REPLACE TRIGGER cliente_bt\n")
+    );
+    assert!(script
+        .contains("PROMPT CREATE comments\nCOMMENT ON TABLE cliente IS 'Tabla de clientes';\n"));
+    assert!(script.contains("PROMPT GRANT privileges\nGRANT SELECT ON cliente TO reporte;\n"));
 }
 
 #[test]

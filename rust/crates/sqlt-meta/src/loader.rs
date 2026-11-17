@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashMap};
 use sqlt_core::Value;
 use sqlt_oracle::{QueryOptions, Session};
 
-use crate::{Constraint, Grant, Index, TabColumn, Table, Trigger, WriteSettings};
+use crate::{Constraint, Grant, Index, IndexStorage, TabColumn, Table, Trigger, WriteSettings};
 
 fn cell(row: &[Value], index: usize) -> String {
     row.get(index)
@@ -47,6 +47,169 @@ fn fetch_rows(
         rows.extend(batch.rows);
     }
     Ok(rows)
+}
+
+struct StorageDefaults {
+    default_tablespace: Option<String>,
+    next_extents: HashMap<String, i64>,
+}
+
+/// `Loader::Init` + `TableStorage::BuildDefault`: the connected user's default
+/// tablespace and each tablespace's default `NEXT`, used to suppress values the
+/// original considers defaults (`MetaObjects.cpp:487-519`).
+fn load_storage_defaults(
+    session: &Session,
+    options: QueryOptions,
+) -> Result<StorageDefaults, String> {
+    let mut defaults = StorageDefaults {
+        default_tablespace: None,
+        next_extents: HashMap::new(),
+    };
+    if let Some(row) = fetch_rows(
+        session,
+        "select default_tablespace from user_users",
+        &[],
+        options,
+    )?
+    .first()
+    {
+        defaults.default_tablespace = option_cell(row, 0);
+    }
+    for row in fetch_rows(
+        session,
+        "select tablespace_name, next_extent from user_tablespaces",
+        &[],
+        options,
+    )? {
+        let next = number(&row, 1);
+        if next > 0 {
+            defaults.next_extents.insert(cell(&row, 0), next);
+        }
+    }
+    Ok(defaults)
+}
+
+impl StorageDefaults {
+    fn is_default_tablespace(&self, tablespace: &str) -> bool {
+        self.default_tablespace
+            .as_deref()
+            .map(|default| default.eq_ignore_ascii_case(tablespace))
+            .unwrap_or(false)
+    }
+
+    fn default_next_extent(&self, tablespace: Option<&str>) -> Option<i64> {
+        tablespace.and_then(|name| self.next_extents.get(name).copied())
+    }
+
+    /// Drops the tablespace when it is the user's default and the `NEXT` when it
+    /// equals the tablespace default; `None` `tablespace` keeps the value.
+    fn storage(
+        &self,
+        tablespace: Option<String>,
+        next_extent: Option<i64>,
+    ) -> (Option<String>, Option<i64>) {
+        let tablespace = tablespace.filter(|name| !self.is_default_tablespace(name));
+        let next_extent = match (next_extent, tablespace.as_deref()) {
+            (Some(next), Some(name)) if self.default_next_extent(Some(name)) == Some(next) => None,
+            (next, _) => next,
+        };
+        (tablespace, next_extent)
+    }
+}
+
+/// `generate_unique_name` (`TableTransformer.cpp:179-211`): `<table[..26]>_$NN`
+/// for the first name that `ALL_OBJECTS` does not have.
+pub fn unique_backup_name(
+    session: &Session,
+    owner: &str,
+    table: &str,
+    options: QueryOptions,
+) -> Result<String, String> {
+    let base: String = table.chars().take(26).collect();
+    for index in 0..100 {
+        let candidate = format!("{base}_${index:02}");
+        let rows = fetch_rows(
+            session,
+            "select 1 from all_objects where owner = :1 and object_name = :2",
+            &[&owner, &candidate],
+            options,
+        )?;
+        if rows.is_empty() {
+            return Ok(candidate);
+        }
+    }
+    Err(format!(
+        "Cannot generate a unique name for {owner}.{table} (100 candidates are taken)"
+    ))
+}
+
+/// `(referencing owner, table, constraint)` → `(delete rule, columns, ref columns)`.
+type DependentKey = (String, String, String);
+type DependentColumns = (String, Vec<String>, Vec<String>);
+
+/// Foreign keys from other tables that point at `owner.table`
+/// (`TableTransformer.cpp:431-451`).
+pub fn dependent_foreign_keys(
+    session: &Session,
+    owner: &str,
+    table: &str,
+    options: QueryOptions,
+) -> Result<Vec<(Table, Constraint)>, String> {
+    let rows = fetch_rows(
+        session,
+        "select c.owner, c.table_name, c.constraint_name, cc.column_name, \
+         p.table_name, rc.column_name, c.delete_rule \
+         from all_constraints c \
+         join all_constraints p on p.owner = c.r_owner and p.constraint_name = c.r_constraint_name \
+         join all_cons_columns cc on cc.owner = c.owner and cc.constraint_name = c.constraint_name \
+         join all_cons_columns rc on rc.owner = p.owner and rc.constraint_name = p.constraint_name \
+           and rc.position = cc.position \
+         where c.constraint_type = 'R' and p.owner = :1 and p.table_name = :2 \
+           and p.constraint_type in ('P', 'U') \
+         order by c.owner, c.table_name, c.constraint_name, cc.position",
+        &[&owner, &table],
+        options,
+    )?;
+    let mut by_key: BTreeMap<DependentKey, DependentColumns> = BTreeMap::new();
+    for row in rows {
+        let key = (cell(&row, 0), cell(&row, 1), cell(&row, 2));
+        let entry = by_key
+            .entry(key)
+            .or_insert_with(|| (cell(&row, 6), Vec::new(), Vec::new()));
+        entry.1.push(cell(&row, 3));
+        entry.2.push(cell(&row, 5));
+    }
+    Ok(by_key
+        .into_iter()
+        .map(
+            |((ref_owner, ref_table, name), (delete_rule, columns, ref_columns))| {
+                (
+                    Table::new(&ref_owner, &ref_table),
+                    Constraint {
+                        name,
+                        kind: 'R',
+                        generated: false,
+                        columns,
+                        condition: None,
+                        ref_table: Some(table.to_string()),
+                        ref_owner: Some(owner.to_string()),
+                        ref_columns,
+                        delete_rule: if delete_rule.is_empty() {
+                            None
+                        } else {
+                            Some(delete_rule)
+                        },
+                        no_validate: false,
+                        deferrable: false,
+                        deferred: false,
+                        rely: false,
+                        disabled: false,
+                        using_index: None,
+                    },
+                )
+            },
+        )
+        .collect())
 }
 
 pub fn current_schema(session: &Session, options: QueryOptions) -> Result<String, String> {
@@ -92,6 +255,7 @@ fn load_indexes(
     schema: &str,
     name: &str,
     options: QueryOptions,
+    defaults: &StorageDefaults,
     table: &mut Table,
 ) -> Result<(), String> {
     let constraint_rows = fetch_rows(
@@ -106,7 +270,7 @@ fn load_indexes(
     let rows = fetch_rows(
         session,
         "select i.index_name, i.uniqueness, i.index_type, i.tablespace_name, \
-         c.column_name from all_indexes i \
+         c.column_name, i.next_extent, i.compression, i.prefix_length from all_indexes i \
          left join all_ind_columns c on c.index_owner = i.owner and c.index_name = i.index_name \
          where i.owner = :1 and i.table_name = :2 \
          order by i.index_name, c.column_position",
@@ -119,16 +283,49 @@ fn load_indexes(
         if constraint_indexes.contains(&index_name) {
             continue;
         }
+        let (tablespace, next_extent) = defaults.storage(
+            option_cell(&row, 3),
+            match number(&row, 5) {
+                0 => None,
+                value => Some(value),
+            },
+        );
         let entry = by_name.entry(index_name.clone()).or_insert_with(|| Index {
             name: index_name,
             unique: cell(&row, 1) == "UNIQUE",
             bitmap: cell(&row, 2).contains("BITMAP"),
             columns: Vec::new(),
-            tablespace: option_cell(&row, 3),
+            tablespace,
+            next_extent,
+            compress: (cell(&row, 6) == "ENABLED").then(|| number(&row, 7) as usize),
         });
         let column = cell(&row, 4);
         if !column.is_empty() {
             entry.columns.push(column);
+        }
+    }
+    // `ALL_IND_EXPRESSIONS`: a function-based column appears as a hidden
+    // `SYS_NC…` name in `ALL_IND_COLUMNS`, so the expression replaces it.
+    let expression_rows = fetch_rows(
+        session,
+        "select e.index_name, e.column_position, e.column_expression \
+         from all_ind_expressions e \
+         join all_indexes i on i.owner = e.index_owner and i.index_name = e.index_name \
+         where i.owner = :1 and i.table_name = :2",
+        &[&schema, &name],
+        options,
+    )?;
+    for row in expression_rows {
+        let index_name = cell(&row, 0);
+        let position = number(&row, 1);
+        let expression = cell(&row, 2);
+        if expression.is_empty() || position < 1 {
+            continue;
+        }
+        if let Some(index) = by_name.get_mut(&index_name) {
+            if let Some(column) = index.columns.get_mut(position as usize - 1) {
+                *column = expression;
+            }
         }
     }
     table.indexes = by_name.into_values().collect();
@@ -140,32 +337,38 @@ fn load_constraints(
     schema: &str,
     name: &str,
     options: QueryOptions,
+    defaults: &StorageDefaults,
     table: &mut Table,
 ) -> Result<(), String> {
     let referenced_rows = fetch_rows(
         session,
-        "select c.constraint_name, c.table_name, cc.column_name \
+        "select r.owner, r.constraint_name, r.table_name, rc.column_name \
          from all_constraints c \
-         join all_cons_columns cc on cc.owner = c.owner and cc.constraint_name = c.constraint_name \
-         where c.owner = :1 and c.constraint_type in ('P', 'U') \
-         order by c.constraint_name, cc.position",
-        &[&schema],
+         join all_constraints r on r.owner = nvl(c.r_owner, c.owner) \
+           and r.constraint_name = c.r_constraint_name \
+         join all_cons_columns rc on rc.owner = r.owner and rc.constraint_name = r.constraint_name \
+         where c.owner = :1 and c.table_name = :2 and c.constraint_type = 'R' \
+         order by r.owner, r.constraint_name, rc.position",
+        &[&schema, &name],
         options,
     )?;
-    let mut referenced: HashMap<String, (String, Vec<String>)> = HashMap::new();
+    let mut referenced: HashMap<(String, String), (String, Vec<String>)> = HashMap::new();
     for row in referenced_rows {
         let entry = referenced
-            .entry(cell(&row, 0))
-            .or_insert_with(|| (cell(&row, 1), Vec::new()));
-        entry.1.push(cell(&row, 2));
+            .entry((cell(&row, 0), cell(&row, 1)))
+            .or_insert_with(|| (cell(&row, 2), Vec::new()));
+        entry.1.push(cell(&row, 3));
     }
 
     let rows = fetch_rows(
         session,
         "select c.constraint_name, c.constraint_type, c.search_condition, \
-         c.r_constraint_name, c.delete_rule, cc.column_name, c.generated \
+         c.r_constraint_name, c.delete_rule, cc.column_name, c.generated, c.validated, \
+         c.deferrable, c.deferred, c.rely, c.status, c.r_owner, \
+         i.tablespace_name, i.next_extent \
          from all_constraints c \
          left join all_cons_columns cc on cc.owner = c.owner and cc.constraint_name = c.constraint_name \
+         left join all_indexes i on i.owner = c.owner and i.index_name = c.index_name \
          where c.owner = :1 and c.table_name = :2 \
          and c.constraint_type in ('P', 'U', 'R', 'C') \
          order by c.constraint_type, c.constraint_name, cc.position",
@@ -179,6 +382,21 @@ fn load_constraints(
         let entry = by_name.entry(constraint_name.clone()).or_insert_with(|| {
             // ALL_CONSTRAINTS.GENERATED: 'GENERATED NAME' or 'USER NAME'.
             let generated = cell(&row, 6) == "GENERATED NAME";
+            let (tablespace, next_extent) = defaults.storage(
+                option_cell(&row, 13),
+                match number(&row, 14) {
+                    0 => None,
+                    value => Some(value),
+                },
+            );
+            let using_index = if tablespace.is_some() || next_extent.is_some() {
+                Some(IndexStorage {
+                    tablespace,
+                    next_extent,
+                })
+            } else {
+                None
+            };
             let mut constraint = Constraint {
                 name: constraint_name,
                 kind,
@@ -186,13 +404,23 @@ fn load_constraints(
                 columns: Vec::new(),
                 condition: option_cell(&row, 2),
                 ref_table: None,
+                ref_owner: None,
                 ref_columns: Vec::new(),
                 delete_rule: option_cell(&row, 4),
+                no_validate: cell(&row, 7) == "NOT VALIDATED",
+                deferrable: cell(&row, 8) == "DEFERRABLE",
+                deferred: cell(&row, 9) == "DEFERRED",
+                rely: cell(&row, 10) == "RELY",
+                disabled: cell(&row, 11) == "DISABLED",
+                using_index,
             };
             if kind == 'R' {
-                if let Some((ref_table, ref_columns)) = referenced.get(&cell(&row, 3)) {
+                let ref_owner = option_cell(&row, 12);
+                let owner = ref_owner.clone().unwrap_or_else(|| schema.to_string());
+                if let Some((ref_table, ref_columns)) = referenced.get(&(owner, cell(&row, 3))) {
                     constraint.ref_table = Some(ref_table.clone());
                     constraint.ref_columns = ref_columns.clone();
+                    constraint.ref_owner = ref_owner;
                 }
             }
             constraint
@@ -200,6 +428,14 @@ fn load_constraints(
         let column = cell(&row, 5);
         if !column.is_empty() {
             entry.columns.push(column);
+        }
+    }
+    for constraint in by_name.values() {
+        if constraint.kind == 'R' && constraint.ref_table.is_none() {
+            return Err(format!(
+                "{schema}.{name}: foreign key {} references a constraint that ALL_CONSTRAINTS does not expose",
+                constraint.name
+            ));
         }
     }
     table.constraints = by_name.into_values().collect();
@@ -213,10 +449,15 @@ fn load_triggers(
     options: QueryOptions,
     table: &mut Table,
 ) -> Result<(), String> {
+    // `Loader_Trigger.cpp` selects every trigger of the table (it reads
+    // `status` but never filters on it and `Trigger::Write` ignores it).
+    // `Loader_Trigger.cpp` looks triggers up by `table_owner`, so a trigger
+    // living in another schema still shows up on this table.
     let rows = fetch_rows(
         session,
-        "select trigger_name, description, trigger_body from all_triggers \
-         where owner = :1 and table_name = :2 and status = 'ENABLED' \
+        "select owner, trigger_name, description, trigger_body, when_clause, action_type \
+         from all_triggers \
+         where table_owner = :1 and table_name = :2 \
          order by trigger_name",
         &[&schema, &name],
         options,
@@ -224,12 +465,14 @@ fn load_triggers(
     table.triggers = rows
         .iter()
         .map(|row| Trigger {
-            owner: schema.to_string(),
-            name: cell(row, 0),
+            owner: cell(row, 0),
+            name: cell(row, 1),
             table_owner: schema.to_string(),
             table_name: name.to_string(),
-            description: cell(row, 1),
-            trigger_body: cell(row, 2),
+            description: cell(row, 2),
+            trigger_body: cell(row, 3),
+            when_clause: option_cell(row, 4),
+            action_type: cell(row, 5),
         })
         .collect();
     Ok(())
@@ -245,25 +488,56 @@ fn load_grants(
     let rows = fetch_rows(
         session,
         "select grantee, privilege, grantable from all_tab_privs \
-         where table_schema = :1 and table_name = :2 order by grantee, privilege",
+         where table_schema = :1 and table_name = :2",
         &[&schema, &name],
         options,
     )?;
-    let mut by_grantee: BTreeMap<(String, bool), Vec<String>> = BTreeMap::new();
+    // Column-level grants live in `ALL_COL_PRIVS` (`Loader_Grant.cpp`), not in
+    // `ALL_TAB_PRIVS`, and the original writes them as separate statements.
+    let column_rows = fetch_rows(
+        session,
+        "select grantee, privilege, column_name, grantable from all_col_privs \
+         where table_schema = :1 and table_name = :2",
+        &[&schema, &name],
+        options,
+    )?;
+    let mut by_grantee: BTreeMap<(String, bool), Grant> = BTreeMap::new();
+    let entry = |grantee: String, grantable: bool| Grant {
+        grantee,
+        privileges: Vec::new(),
+        grantable,
+        column_privileges: Vec::new(),
+    };
     for row in rows {
         by_grantee
             .entry((cell(&row, 0), cell(&row, 2) == "YES"))
-            .or_default()
+            .or_insert_with_key(|(grantee, grantable)| entry(grantee.clone(), *grantable))
+            .privileges
             .push(cell(&row, 1));
     }
-    table.grants = by_grantee
-        .into_iter()
-        .map(|((grantee, grantable), privileges)| Grant {
-            grantee,
-            privileges,
-            grantable,
-        })
-        .collect();
+    for row in column_rows {
+        let grant = by_grantee
+            .entry((cell(&row, 0), cell(&row, 3) == "YES"))
+            .or_insert_with_key(|(grantee, grantable)| entry(grantee.clone(), *grantable));
+        let privilege = cell(&row, 1);
+        let column = cell(&row, 2);
+        match grant
+            .column_privileges
+            .iter_mut()
+            .find(|(name, _)| name == &privilege)
+        {
+            Some((_, columns)) => columns.push(column),
+            None => grant.column_privileges.push((privilege, vec![column])),
+        }
+    }
+    for grant in by_grantee.values_mut() {
+        grant.privileges.sort();
+        grant.column_privileges.sort_by(|a, b| a.0.cmp(&b.0));
+        for (_, columns) in &mut grant.column_privileges {
+            columns.sort();
+        }
+    }
+    table.grants = by_grantee.into_values().collect();
     Ok(())
 }
 
@@ -593,20 +867,22 @@ pub fn load_table(
         &[&schema, &name],
         options,
     )?;
+    let defaults = load_storage_defaults(session, options)?;
     let mut row_movement = false;
     let base = storage
         .iter()
         .find(|row| cell(row, 5) != "IOT_OVERFLOW")
         .or_else(|| storage.first());
     if let Some(row) = base {
-        let tablespace = cell(row, 0);
-        if !tablespace.is_empty() {
-            table.tablespace = Some(tablespace);
-        }
-        let next = number(row, 1);
-        if next > 0 {
-            table.next_extent = Some(next);
-        }
+        let (tablespace, next) = defaults.storage(
+            option_cell(row, 0),
+            match number(row, 1) {
+                0 => None,
+                value => Some(value),
+            },
+        );
+        table.tablespace = tablespace;
+        table.next_extent = next;
         if cell(row, 2) == "Y" {
             table.temporary = Some(match cell(row, 3).as_str() {
                 "SYS$TRANSACTION" => crate::TemporaryDuration::Delete,
@@ -623,8 +899,8 @@ pub fn load_table(
         load_partitioning(session, schema, name, options, row_movement, &mut table)?;
     }
     load_comments(session, schema, name, options, &mut table)?;
-    load_indexes(session, schema, name, options, &mut table)?;
-    load_constraints(session, schema, name, options, &mut table)?;
+    load_indexes(session, schema, name, options, &defaults, &mut table)?;
+    load_constraints(session, schema, name, options, &defaults, &mut table)?;
     load_triggers(session, schema, name, options, &mut table)?;
     load_grants(session, schema, name, options, &mut table)?;
     Ok(table)
@@ -636,6 +912,16 @@ pub fn load_table_ddl(
     name: &str,
     options: QueryOptions,
 ) -> Result<String, String> {
+    load_table_ddl_with_settings(session, schema, name, options, &WriteSettings::default())
+}
+
+pub fn load_table_ddl_with_settings(
+    session: &Session,
+    schema: Option<&str>,
+    name: &str,
+    options: QueryOptions,
+    settings: &WriteSettings,
+) -> Result<String, String> {
     let owner = match schema.map(str::trim).filter(|value| !value.is_empty()) {
         Some(owner) => owner.to_string(),
         None => current_schema(session, options)?,
@@ -646,5 +932,5 @@ pub fn load_table_ddl(
             "Table {owner}.{name} has no columns or does not exist"
         ));
     }
-    Ok(table.write_full(&WriteSettings::default()))
+    Ok(table.write_full(settings))
 }

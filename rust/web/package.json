@@ -1,7 +1,7 @@
 {
   "name": "sqlt-web",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
     "dev": "vite --port 1420 --strictPort",
@@ -16,6 +16,7 @@
     "@codemirror/search": "^6",
     "@codemirror/state": "^6",
     "@codemirror/view": "^6",
+    "@lezer/highlight": "^1",
     "@tauri-apps/api": "^2",
     "react": "^19",
     "react-dom": "^19"

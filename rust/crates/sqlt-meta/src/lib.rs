@@ -7,8 +7,10 @@
 
 pub mod compare;
 pub mod loader;
+pub mod transform;
 
 pub use compare::{compare_ddl, DdlComparison};
+pub use transform::transform_script;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WriteSettings {
@@ -20,6 +22,9 @@ pub struct WriteSettings {
     pub indexes: bool,
     pub constraints: bool,
     pub triggers: bool,
+    /// `WriteSettings::NoStorageForConstraint` (default `false`): when set, a
+    /// primary/unique constraint omits its `USING INDEX` storage block.
+    pub no_storage_for_constraint: bool,
 }
 
 impl Default for WriteSettings {
@@ -33,6 +38,7 @@ impl Default for WriteSettings {
             indexes: true,
             constraints: true,
             triggers: true,
+            no_storage_for_constraint: false,
         }
     }
 }
@@ -146,6 +152,15 @@ pub struct Index {
     pub bitmap: bool,
     pub columns: Vec<String>,
     pub tablespace: Option<String>,
+    pub next_extent: Option<i64>,
+    /// `ALL_INDEXES.PREFIX_LENGTH` when `COMPRESSION = 'ENABLED'`.
+    pub compress: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexStorage {
+    pub tablespace: Option<String>,
+    pub next_extent: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -158,8 +173,26 @@ pub struct Constraint {
     pub columns: Vec<String>,
     pub condition: Option<String>,
     pub ref_table: Option<String>,
+    /// Owner of the referenced table when it differs from the table's schema
+    /// (`ALL_CONSTRAINTS.R_OWNER`); printed as `owner.table`.
+    pub ref_owner: Option<String>,
     pub ref_columns: Vec<String>,
     pub delete_rule: Option<String>,
+    /// `ALL_CONSTRAINTS.VALIDATED = 'NOT VALIDATED'`; `MetaObjects.cpp` prints
+    /// `  NOVALIDATE` before the primary/unique index storage clause.
+    pub no_validate: bool,
+    /// `ALL_CONSTRAINTS.DEFERRABLE = 'DEFERRABLE'`.
+    pub deferrable: bool,
+    /// `ALL_CONSTRAINTS.DEFERRED = 'DEFERRED'`.
+    pub deferred: bool,
+    /// `ALL_CONSTRAINTS.RELY = 'RELY'`.
+    pub rely: bool,
+    /// `ALL_CONSTRAINTS.STATUS = 'DISABLED'`.
+    pub disabled: bool,
+    /// Backing index storage of a P/U constraint (`Index::WriteIndexParams`
+    /// with `skip_parallel`), printed as `USING INDEX` plus the printable
+    /// storage parameters unless `no_storage_for_constraint` is set.
+    pub using_index: Option<IndexStorage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -167,6 +200,9 @@ pub struct Grant {
     pub grantee: String,
     pub privileges: Vec<String>,
     pub grantable: bool,
+    /// `ALL_COL_PRIVS`: privilege and its columns, written as
+    /// `GRANT UPDATE(col) ON t TO u;` after the table-level statement.
+    pub column_privileges: Vec<(String, Vec<String>)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -466,13 +502,18 @@ impl Table {
     pub fn write_definition(&self, settings: &WriteSettings) -> String {
         let lower = settings.lower_db_name;
         let table_name = Table::display_name(&self.name, lower);
+        let prompt = if settings.generate_prompts {
+            format!("PROMPT CREATE TABLE {table_name}\n")
+        } else {
+            String::new()
+        };
         let temporary = if self.temporary.is_some() {
             "GLOBAL TEMPORARY "
         } else {
             ""
         };
         if self.columns.is_empty() {
-            return format!("CREATE {temporary}TABLE {table_name} (\n)\n/\n\n");
+            return format!("{prompt}CREATE {temporary}TABLE {table_name} (\n)\n/\n\n");
         }
         let max_name = self
             .columns
@@ -482,7 +523,7 @@ impl Table {
             .unwrap_or(0);
         let types: Vec<String> = self.columns.iter().map(Table::column_type).collect();
         let max_type = types.iter().map(String::len).max().unwrap_or(0);
-        let mut out = format!("CREATE {temporary}TABLE {table_name} (\n");
+        let mut out = format!("{prompt}CREATE {temporary}TABLE {table_name} (\n");
         for (index, column) in self.columns.iter().enumerate() {
             let display = Table::display_name(&column.name, lower);
             let raw_len = Table::raw_name_len(&column.name);
@@ -756,7 +797,7 @@ impl Table {
         }
     }
 
-    fn write_comments(&self, settings: &WriteSettings) -> String {
+    pub(crate) fn write_comments(&self, settings: &WriteSettings) -> String {
         let table = Table::display_name(&self.name, settings.lower_db_name);
         let lower = settings.lower_db_name;
         let mut out = String::new();
@@ -781,22 +822,10 @@ impl Table {
         out
     }
 
-    fn write_grants(&self, settings: &WriteSettings) -> String {
-        let table = Table::display_name(&self.name, settings.lower_db_name);
+    pub(crate) fn write_grants(&self, settings: &WriteSettings) -> String {
         let mut out = String::new();
         for grant in &self.grants {
-            let mut privileges = grant.privileges.clone();
-            privileges.sort();
-            out.push_str(&format!(
-                "GRANT {} ON {table} TO {}{};\n",
-                privileges.join(", "),
-                Table::display_name(&grant.grantee, settings.lower_db_name),
-                if grant.grantable {
-                    " WITH GRANT OPTION"
-                } else {
-                    ""
-                }
-            ));
+            out.push_str(&grant.write(self, settings));
         }
         out
     }
@@ -811,7 +840,11 @@ impl Table {
         }
         if settings.constraints {
             for kind in ['C', 'P', 'U', 'R'] {
-                for constraint in self.constraints.iter().filter(|c| c.kind == kind) {
+                for constraint in self
+                    .constraints
+                    .iter()
+                    .filter(|c| c.kind == kind && !c.is_not_null_check())
+                {
                     out.push_str(&constraint.write(self, settings));
                 }
             }
@@ -835,6 +868,17 @@ fn quote_sql(text: &str) -> String {
     format!("'{}'", text.replace('\'', "''"))
 }
 
+/// A bare `[A-Za-z_][A-Za-z0-9_$#]*` name; anything else is a function-based
+/// expression that must be printed as Oracle stored it.
+fn is_plain_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(first) if first.is_ascii_alphabetic() || first == '_' => {}
+        _ => return false,
+    }
+    chars.all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '$' | '#'))
+}
+
 impl Index {
     pub fn write(&self, table: &Table, settings: &WriteSettings) -> String {
         let lower = settings.lower_db_name;
@@ -845,15 +889,29 @@ impl Index {
         } else {
             ""
         };
-        let mut out = format!(
+        let mut out = String::new();
+        if settings.generate_prompts {
+            out.push_str(&format!(
+                "PROMPT CREATE INDEX {}\n",
+                Table::display_name(&self.name, lower)
+            ));
+        }
+        out.push_str(&format!(
             "CREATE {kind}INDEX {}\n  ON {} (\n",
             Table::display_name(&self.name, lower),
             Table::display_name(&table.name, lower)
-        );
+        ));
         for (index, column) in self.columns.iter().enumerate() {
+            // A function-based column arrives as its expression, which the
+            // original prints verbatim (`NVL("COL",7)`).
+            let text = if is_plain_identifier(column) {
+                Table::display_name(column, lower)
+            } else {
+                column.clone()
+            };
             out.push_str(&format!(
                 "    {}{}\n",
-                Table::display_name(column, lower),
+                text,
                 if index + 1 < self.columns.len() {
                     ","
                 } else {
@@ -862,11 +920,26 @@ impl Index {
             ));
         }
         out.push_str("  )\n");
-        if let Some(tablespace) = &self.tablespace {
-            out.push_str(&format!(
-                "  TABLESPACE {}\n",
-                Table::display_name(tablespace, lower)
-            ));
+        write_storage_clause(
+            &mut out,
+            "  ",
+            self.tablespace.as_deref(),
+            self.next_extent,
+            lower,
+        );
+        // `Index::WriteCompress`: the prefix is omitted when it covers the whole
+        // key (`MetaObjects.cpp:708-729`).
+        if let Some(prefix) = self.compress {
+            let omit = if self.unique {
+                prefix + 1 == self.columns.len()
+            } else {
+                prefix == self.columns.len()
+            };
+            out.push_str("  COMPRESS");
+            if !omit {
+                out.push_str(&format!(" {prefix}"));
+            }
+            out.push('\n');
         }
         out.push_str("/\n\n");
         out
@@ -874,6 +947,21 @@ impl Index {
 }
 
 impl Constraint {
+    /// `Constraint::IsNotNullCheck` (`MetaObjects.cpp:998-1018`): a one-column
+    /// CHECK that only repeats the column's NOT NULL, which the column already
+    /// prints, so the table writer skips it.
+    pub(crate) fn is_not_null_check(&self) -> bool {
+        if self.kind != 'C' || self.columns.len() != 1 {
+            return false;
+        }
+        let Some(condition) = &self.condition else {
+            return false;
+        };
+        let column = &self.columns[0];
+        *condition == format!("{column} IS NOT NULL")
+            || *condition == format!("\"{column}\" IS NOT NULL")
+    }
+
     fn kind_text(&self) -> &'static str {
         match self.kind {
             'P' => "PRIMARY KEY",
@@ -885,12 +973,33 @@ impl Constraint {
 
     pub fn write(&self, table: &Table, settings: &WriteSettings) -> String {
         let lower = settings.lower_db_name;
-        let mut out = format!(
-            "ALTER TABLE {}\n  ADD CONSTRAINT {} {} (\n",
-            Table::display_name(&table.name, lower),
-            Table::display_name(&self.name, lower),
-            self.kind_text()
-        );
+        let name = Table::display_name(&self.name, lower);
+        let mut out = String::new();
+        if settings.generate_prompts {
+            out.push_str(&format!(
+                "PROMPT ALTER TABLE {} ADD ",
+                Table::display_name(&table.name, lower)
+            ));
+            if !self.generated {
+                out.push_str(&format!("CONSTRAINT {name} "));
+            }
+            out.push_str(&format!("{}\n", self.kind_text()));
+        }
+        out.push_str(&if self.generated {
+            format!(
+                "ALTER TABLE {}\n  ADD {}",
+                Table::display_name(&table.name, lower),
+                self.kind_text()
+            )
+        } else {
+            format!(
+                "ALTER TABLE {}\n  ADD CONSTRAINT {} {}",
+                Table::display_name(&table.name, lower),
+                name,
+                self.kind_text()
+            )
+        });
+        out.push_str(" (\n");
         if self.kind == 'C' {
             if let Some(condition) = &self.condition {
                 out.push_str(&format!("    {condition}\n"));
@@ -910,10 +1019,23 @@ impl Constraint {
         }
         if self.kind == 'R' {
             if let Some(ref_table) = &self.ref_table {
-                out.push_str(&format!(
-                    "  ) REFERENCES {} (\n",
-                    Table::display_name(ref_table, lower)
-                ));
+                // The original qualifies the referenced table only when its
+                // owner differs from the table's (`PutOwnerAndName(..., settings.m_ShemaName
+                // || m_strOwner != refKey.m_strOwner)`).
+                let qualified = self
+                    .ref_owner
+                    .as_deref()
+                    .map(|owner| !owner.eq_ignore_ascii_case(&table.owner))
+                    .unwrap_or(false);
+                let target = match (&self.ref_owner, qualified) {
+                    (Some(owner), true) => format!(
+                        "{}.{}",
+                        Table::display_name(owner, lower),
+                        Table::display_name(ref_table, lower)
+                    ),
+                    _ => Table::display_name(ref_table, lower),
+                };
+                out.push_str(&format!("  ) REFERENCES {target} (\n"));
                 for (index, column) in self.ref_columns.iter().enumerate() {
                     out.push_str(&format!(
                         "    {}{}\n",
@@ -936,6 +1058,38 @@ impl Constraint {
         } else {
             out.push_str("  )\n");
         }
+        if self.deferrable {
+            out.push_str("  ");
+            if self.deferred {
+                out.push_str("INITIALLY DEFERRED ");
+            }
+            out.push_str("DEFERRABLE\n");
+        }
+        if self.rely {
+            out.push_str("  RELY\n");
+        }
+        if self.disabled {
+            out.push_str("  DISABLE\n");
+        }
+        if self.no_validate {
+            out.push_str("  NOVALIDATE\n");
+        }
+        // `Constraint::Write` (`MetaObjects.cpp:1123-1147`): P/U constraints print
+        // the backing index storage unless `NoStorageForConstraint` is set.
+        if !settings.no_storage_for_constraint && matches!(self.kind, 'P' | 'U') {
+            if let Some(storage) = &self.using_index {
+                if storage.tablespace.is_some() || storage.next_extent.is_some() {
+                    out.push_str("  USING INDEX\n");
+                    write_storage_clause(
+                        &mut out,
+                        "    ",
+                        storage.tablespace.as_deref(),
+                        storage.next_extent,
+                        lower,
+                    );
+                }
+            }
+        }
         out.push_str("/\n\n");
         out
     }
@@ -944,19 +1098,41 @@ impl Constraint {
 impl Grant {
     pub fn write(&self, table: &Table, settings: &WriteSettings) -> String {
         let lower = settings.lower_db_name;
-        let mut privileges = self.privileges.clone();
-        privileges.sort();
-        format!(
-            "GRANT {} ON {} TO {}{};\n",
-            privileges.join(", "),
-            Table::display_name(&table.name, lower),
-            Table::display_name(&self.grantee, lower),
-            if self.grantable {
-                " WITH GRANT OPTION"
-            } else {
-                ""
+        let table_name = Table::display_name(&table.name, lower);
+        let grantee = Table::display_name(&self.grantee, lower);
+        let option = if self.grantable {
+            " WITH GRANT OPTION"
+        } else {
+            ""
+        };
+        let mut out = String::new();
+        if !self.privileges.is_empty() {
+            let mut privileges = self.privileges.clone();
+            privileges.sort();
+            // The original joins with "," (no space): `Grant::Write`.
+            out.push_str(&format!(
+                "GRANT {} ON {table_name} TO {grantee}{option};\n",
+                privileges.join(",")
+            ));
+        }
+        if !self.column_privileges.is_empty() {
+            let mut items = Vec::new();
+            for (privilege, columns) in &self.column_privileges {
+                let mut columns = columns.clone();
+                columns.sort();
+                let list = columns
+                    .iter()
+                    .map(|column| Table::display_name(column, lower))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                items.push(format!("{privilege}({list})"));
             }
-        )
+            out.push_str(&format!(
+                "GRANT {} ON {table_name} TO {grantee}{option};\n",
+                items.join(", ")
+            ));
+        }
+        out
     }
 }
 
@@ -968,41 +1144,185 @@ pub struct Trigger {
     pub table_name: String,
     pub description: String,
     pub trigger_body: String,
+    /// `ALL_TRIGGERS.WHEN_CLAUSE`; printed as `WHEN (...)` when present.
+    pub when_clause: Option<String>,
+    /// `ALL_TRIGGERS.ACTION_TYPE`; `CALL` prefixes the body.
+    pub action_type: String,
+}
+/// Tokens of a trigger description with byte offsets, enough for
+/// `Trigger::name_spans`: identifiers, quoted identifiers and dots; comments are
+/// skipped like the original analyzer does with `etCOMMENT`.
+fn scan_description(text: &str) -> Vec<(usize, usize, String)> {
+    let mut tokens = Vec::new();
+    let mut iter = text.char_indices().peekable();
+    while let Some((i, ch)) = iter.next() {
+        match ch {
+            ch if ch.is_whitespace() => {}
+            '-' if text[i..].starts_with("--") => {
+                for (_, next) in iter.by_ref() {
+                    if next == '\n' {
+                        break;
+                    }
+                }
+            }
+            '/' if text[i..].starts_with("/*") => {
+                while let Some((j, next)) = iter.next() {
+                    if next == '*' && text[j + 1..].starts_with('/') {
+                        iter.next();
+                        break;
+                    }
+                }
+            }
+            '"' => {
+                let mut end = i + 1;
+                for (j, next) in iter.by_ref() {
+                    end = j + next.len_utf8();
+                    if next == '"' {
+                        break;
+                    }
+                }
+                tokens.push((i, end, text[i..end].to_lowercase()));
+            }
+            ch if is_description_word(ch) => {
+                let mut end = i + ch.len_utf8();
+                while let Some(&(j, next)) = iter.peek() {
+                    if is_description_word(next) {
+                        end = j + next.len_utf8();
+                        iter.next();
+                    } else {
+                        break;
+                    }
+                }
+                tokens.push((i, end, text[i..end].to_lowercase()));
+            }
+            '.' => tokens.push((i, i + 1, ".".to_string())),
+            _ => tokens.push((i, i + ch.len_utf8(), ch.to_string())),
+        }
+    }
+    tokens
+}
+
+fn is_description_word(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '_' | '$' | '#')
 }
 
 impl Trigger {
-    fn replace_ci(text: &str, from: &str, to: &str) -> String {
-        if from.is_empty() {
-            return text.to_string();
+    /// `TriggerDescriptionAnalyzer` (`MetaObjects.cpp:1880-2028`): the trigger
+    /// name is the tokens before BEFORE/AFTER/INSTEAD/FOR and the table name is
+    /// the first token after ON (plus up to two `.name` parts). Only those two
+    /// spans are rewritten; the rest of the description is left untouched.
+    fn name_spans(description: &str) -> Option<((usize, usize), (usize, usize))> {
+        let tokens = scan_description(description);
+        let (start, mut end, _) = *tokens.first()?;
+        let mut index = 1;
+        while index < tokens.len() {
+            let (_, token_end, lower) = &tokens[index];
+            if matches!(lower.as_str(), "before" | "after" | "instead" | "for") {
+                break;
+            }
+            let previous_is_dot = tokens[index - 1].2 == ".";
+            if *lower == "." || previous_is_dot {
+                end = *token_end;
+                index += 1;
+                continue;
+            }
+            break;
         }
-        let lower = text.to_ascii_lowercase();
-        let needle = from.to_ascii_lowercase();
-        let mut out = String::new();
-        let mut start = 0usize;
-        while let Some(found) = lower[start..].find(&needle) {
-            let abs = start + found;
-            out.push_str(&text[start..abs]);
-            out.push_str(to);
-            start = abs + needle.len();
+        let mut on = index;
+        while on < tokens.len() && tokens[on].2 != "on" {
+            on += 1;
         }
-        out.push_str(&text[start..]);
-        out
+        if on >= tokens.len() {
+            return None;
+        }
+        let (table_start, table_end, _) = *tokens.get(on + 1)?;
+        let mut table_end = table_end;
+        let mut next = on + 2;
+        for _ in 0..2 {
+            if tokens.get(next).map(|token| token.2.as_str()) != Some(".") {
+                break;
+            }
+            match tokens.get(next + 1) {
+                Some((_, part_end, _)) => {
+                    table_end = *part_end;
+                    next += 2;
+                }
+                None => break,
+            }
+        }
+        Some(((start, end), (table_start, table_end)))
+    }
+
+    /// `DROP TRIGGER` line used by the table transformer; the owner is qualified
+    /// when it differs from the table's (`TableTransformer.cpp:309-312`).
+    pub fn drop_statement(&self, settings: &WriteSettings) -> String {
+        let lower = settings.lower_db_name;
+        if !self.owner.eq_ignore_ascii_case(&self.table_owner) {
+            format!(
+                "DROP TRIGGER {}.{}",
+                Table::display_name(&self.owner, lower),
+                Table::display_name(&self.name, lower)
+            )
+        } else {
+            format!("DROP TRIGGER {}", Table::display_name(&self.name, lower))
+        }
     }
 
     pub fn write(&self, settings: &WriteSettings) -> String {
         let lower = settings.lower_db_name;
-        let name = Table::display_name(&self.name, lower);
+        // `PutOwnerAndName(m_strOwner, m_strName, ... || m_strOwner != m_strTableOwner)`.
+        let name = if !self.owner.eq_ignore_ascii_case(&self.table_owner) {
+            format!(
+                "{}.{}",
+                Table::display_name(&self.owner, lower),
+                Table::display_name(&self.name, lower)
+            )
+        } else {
+            Table::display_name(&self.name, lower)
+        };
         let table = Table::display_name(&self.table_name, lower);
-        let mut out = format!("CREATE OR REPLACE TRIGGER {name}\n");
-        for line in self.description.lines().skip(1) {
-            let trimmed = line.trim_end();
-            if trimmed.is_empty() {
-                continue;
-            }
-            out.push_str(&Trigger::replace_ci(trimmed, &self.table_name, &table));
+        // Replace only the parsed trigger-name and table-name spans, like
+        // `sub_str` in the original; a table called `NEW` must not rewrite
+        // `REFERENCING NEW AS NEW`.
+        let description = match Trigger::name_spans(&self.description) {
+            Some(((trigger_start, trigger_end), (table_start, table_end))) => format!(
+                "{}{}{}{}{}",
+                &self.description[..trigger_start],
+                name,
+                &self.description[trigger_end..table_start],
+                table,
+                &self.description[table_end..]
+            ),
+            None => self.description.clone(),
+        };
+        let mut out = String::new();
+        if settings.generate_prompts {
+            out.push_str(&format!("PROMPT CREATE OR REPLACE TRIGGER {name}\n"));
+        }
+        out.push_str(&format!("CREATE OR REPLACE TRIGGER {name}\n"));
+        // `m_SQLPlusCompatibility` trims trailing whitespace and keeps the blank
+        // lines the description carries (`MetaObjects.cpp:2004-2027`).
+        for line in description.lines().skip(1) {
+            out.push_str(line.trim_end());
             out.push('\n');
         }
-        out.push_str(&self.trigger_body);
+        if let Some(when) = self.when_clause.as_deref().map(str::trim) {
+            if !when.is_empty() {
+                out.push_str(&format!("WHEN ({when})\n"));
+            }
+        }
+        if self.action_type == "CALL" {
+            out.push_str("CALL ");
+        }
+        // `write_text_block`: the body keeps its lines but not the trailing
+        // whitespace, and the `/` goes on the next line without a blank one.
+        let body = self
+            .trigger_body
+            .lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n");
+        out.push_str(&body);
         out.push_str("\n/\n\n");
         out
     }

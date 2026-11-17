@@ -3,9 +3,7 @@ name: Rust CI
 on:
   push:
     branches: [rust]
-    paths:
-      - "rust/**"
-      - ".github/workflows/rust-ci.yml"
+    tags: ["v*"]
   pull_request:
     paths:
       - "rust/**"
@@ -138,8 +136,14 @@ jobs:
         shell: bash
         working-directory: rust/desktop
         run: |
+          # Updater artifacts need the private key; without it (fork PRs) disable
+          # them instead of failing the whole bundle job.
+          config_args=()
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            config_args=(--config '{"bundle":{"createUpdaterArtifacts":false}}')
+          fi
           for attempt in 1 2 3; do
-            npx --yes @tauri-apps/cli@^2 build && exit 0
+            npx --yes @tauri-apps/cli@^2 build "${config_args[@]}" && exit 0
             echo "tauri build failed (attempt $attempt); retrying in 15s"
             sleep 15
           done
@@ -149,3 +153,75 @@ jobs:
           name: sqltools-${{ matrix.os }}
           path: rust/target/release/bundle/**/*
           if-no-files-found: error
+
+  # Publishes the tag: bundles, their .sig files and the updater feed
+  # `latest.json` that `tauri.conf.json` points at. Runs only for v* tags.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: bundle
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sqltools-*
+          merge-multiple: true
+          path: dist
+      - name: Build latest.json
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          config=$(python3 -c "import json;print(json.load(open('rust/desktop/tauri.conf.json'))['version'])")
+          if [ "$version" != "$config" ]; then
+            echo "tag $TAG does not match tauri.conf.json version $config" >&2
+            exit 1
+          fi
+          python3 - <<'PY'
+          import datetime, json, os, pathlib
+          version = os.environ["TAG"][1:]
+          tag = os.environ["TAG"]
+          repo = os.environ["REPO"]
+          platforms = {}
+          for sig in pathlib.Path("dist").rglob("*.sig"):
+              name = sig.with_suffix("").name
+              if name.endswith("-setup.exe"):
+                  key = "windows-x86_64"
+              elif name.endswith(".app.tar.gz"):
+                  key = "darwin-x86_64"
+              elif name.endswith(".AppImage"):
+                  key = "linux-x86_64"
+              else:
+                  continue
+              platforms[key] = {
+                  "signature": sig.read_text().strip(),
+                  "url": f"https://github.com/{repo}/releases/download/{tag}/{name}",
+              }
+          if not platforms:
+              raise SystemExit("no signed bundles found in dist/")
+          payload = {
+              "version": version,
+              "notes": f"SQLTools {version}",
+              "pub_date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "platforms": platforms,
+          }
+          pathlib.Path("latest.json").write_text(json.dumps(payload, indent=2))
+          print(json.dumps(payload, indent=2))
+          PY
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          files=$(find dist -type f \( -name '*.msi' -o -name '*-setup.exe' -o -name '*.dmg' \
+            -o -name '*.app.tar.gz' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \
+            -o -name '*.sig' \))
+          gh release create "$GITHUB_REF_NAME" $files latest.json \
+            --title "SQLTools $GITHUB_REF_NAME" --generate-notes ||
+          gh release upload "$GITHUB_REF_NAME" $files latest.json --clobber

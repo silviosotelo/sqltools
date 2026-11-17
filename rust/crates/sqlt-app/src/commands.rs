@@ -87,6 +87,13 @@ const IMPLEMENTED: &[&str] = &[
     "Edit.CollapseCurrentRegion",
     "Edit.ExpandCurrentRegion",
     "Edit.ToggleCurrentRegion",
+    "Edit.ExpandCurrentSubtree",
+    "Script.ExecuteInSQLPlus",
+    "File.Print",
+    "File.PrintPreview",
+    "File.PrintSetup",
+    "File.PageSetup",
+    "Tools.TableTransformationHelper",
     "Edit.SelectWord",
     "Edit.CopyAppend",
     "Edit.CutAppend",
@@ -253,6 +260,13 @@ mod tests {
             "Edit.SelectLine",
             "Edit.TrimTrailingSpaces",
             "Edit.CollapseAllFolds",
+            "Edit.ExpandCurrentSubtree",
+            "Script.ExecuteInSQLPlus",
+            "File.Print",
+            "File.PrintPreview",
+            "File.PrintSetup",
+            "File.PageSetup",
+            "Tools.TableTransformationHelper",
         ] {
             assert!(
                 commands
@@ -266,7 +280,7 @@ mod tests {
                 .iter()
                 .filter(|command| command.implemented)
                 .count(),
-            171
+            178
         );
     }
 }

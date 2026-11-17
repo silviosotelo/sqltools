@@ -48,6 +48,15 @@ pub struct FormatOptions {
     pub space_after_comma: bool,
     /// Space just inside `(` and `)`.
     pub space_in_parens: bool,
+    /// Break AND/OR onto their own line (`condLines(..., breaks)`).
+    pub and_or_new_line: bool,
+    /// One item per line for the SELECT/GROUP BY/ORDER BY/SET lists.
+    pub one_item_per_line: bool,
+    /// Standard style: keep the keyword alone when a list has several items.
+    pub kw_alone_when_many: bool,
+    /// Width at which a comma-separated parenthesised group breaks one item per
+    /// line (`Fmt::inlineText`).
+    pub max_line: usize,
     pub align_declarations: bool,
     pub align_assignments: bool,
     pub blank_after_declare: bool,
@@ -70,6 +79,10 @@ impl Default for FormatOptions {
             on_new_line: false,
             space_after_comma: true,
             space_in_parens: false,
+            and_or_new_line: true,
+            one_item_per_line: true,
+            kw_alone_when_many: true,
+            max_line: 100,
             align_declarations: false,
             align_assignments: false,
             blank_after_declare: false,
@@ -78,73 +91,215 @@ impl Default for FormatOptions {
     }
 }
 
-/// Infers a profile from a sample. Ported from `FormatOptions::inferFromExample`:
-/// right-aligned clauses mean River style, column-0 AND/OR means `andOrIndent 0`,
-/// the first keyword fixes the case, the smallest continuation fixes the indent.
+/// Infers a profile from a sample. Mirrors `FormatOptions::inferFromExample`
+/// (`ui/SqlFormatter.cpp:630-675`): the clause columns give the continuation,
+/// AND/OR, JOIN and ON layout; reserved-word casing decides the keyword case;
+/// the most frequent indent step fixes the indent; comma/parenthesis spacing and
+/// aligned declarations come from text patterns.
 pub fn infer_from_example(sql: &str) -> FormatOptions {
     let mut options = FormatOptions::default();
-    let mut keyword: Option<KeywordCase> = None;
-    let mut river = false;
-    let mut and_at_zero = false;
-    let mut indent: Option<usize> = None;
+    let mut indent_deltas: std::collections::BTreeMap<usize, usize> =
+        std::collections::BTreeMap::new();
+    let mut previous_indent: Option<usize> = None;
+    let mut select_col: Option<usize> = None;
+    let mut select_alone = false;
+    let mut item_col: Option<usize> = None;
+    let mut comma_inline = false;
+    let mut await_item_line = false;
+    let mut from_col: Option<usize> = None;
+    let mut where_col: Option<usize> = None;
+    let mut and_col: Option<usize> = None;
+    let mut join_col: Option<usize> = None;
+    let mut on_own_line = false;
+    let mut leading_comma = false;
+    let mut aligned_declarations = 0usize;
 
     for line in sql.lines() {
         let trimmed = line.trim_start();
         if trimmed.is_empty() {
             continue;
         }
-        let leading = line.len() - trimmed.len();
-        if leading > 0 {
-            options.use_tabs = line.starts_with('\t');
-            let width = if options.use_tabs { 1 } else { leading };
-            indent = Some(indent.map_or(width, |current| current.min(width)));
+        // `indentOf`: spaces count one column, tabs four (`SqlFormatter.cpp:633`).
+        let leading = leading_columns(line);
+        if line.starts_with('\t') {
+            options.use_tabs = true;
+        }
+        // `indentOf` deltas between consecutive levels (`SqlFormatter.cpp:636`).
+        if let Some(previous) = previous_indent {
+            if leading > previous && leading - previous <= 8 {
+                *indent_deltas.entry(leading - previous).or_insert(0) += 1;
+            }
+        }
+        previous_indent = Some(leading);
+        if trimmed.starts_with(',') {
+            leading_comma = true;
+        }
+        if is_aligned_declaration(line) {
+            aligned_declarations += 1;
         }
         let first = trimmed
             .split(|c: char| c.is_whitespace() || c == '(')
             .next()
             .unwrap_or_default()
             .to_ascii_uppercase();
-        if leading > 0
-            && matches!(
-                first.as_str(),
-                "FROM" | "WHERE" | "GROUP" | "ORDER" | "HAVING" | "CONNECT" | "START"
-            )
+        // The SELECT-alone lookahead does not consume the line (the original
+        // walks forward from the SELECT line without skipping it).
+        if await_item_line {
+            if item_col.is_none() {
+                item_col = Some(leading);
+            }
+            await_item_line = false;
+        }
+        if first == "SELECT" && select_col.is_none() {
+            select_col = Some(leading);
+            let rest = trimmed.get(6..).map(str::trim_start).unwrap_or("");
+            select_alone = rest.is_empty();
+            comma_inline = !rest.is_empty() && rest.contains(',') && !rest.ends_with(',');
+            await_item_line = select_alone;
+        } else if first == "FROM" && from_col.is_none() && select_col.is_some() {
+            from_col = Some(leading);
+        } else if first == "WHERE" && where_col.is_none() {
+            where_col = Some(leading);
+        } else if matches!(first.as_str(), "AND" | "OR") && and_col.is_none() && where_col.is_some()
         {
-            river = true;
+            and_col = Some(leading);
+        } else if matches!(first.as_str(), "JOIN" | "LEFT" | "INNER" | "RIGHT" | "FULL")
+            && join_col.is_none()
+            && from_col.is_some()
+        {
+            join_col = Some(leading);
+        } else if first == "ON" && join_col.is_some() {
+            on_own_line = true;
         }
-        if leading == 0 && matches!(first.as_str(), "AND" | "OR") {
-            and_at_zero = true;
-        }
-        if keyword.is_none() {
-            for token in tokenize(trimmed) {
-                if let Token::Word(word) = token {
-                    let upper = word.to_ascii_uppercase();
-                    if KEYWORDS.contains(&upper.as_str()) {
-                        keyword = Some(if word == upper {
-                            KeywordCase::Upper
-                        } else {
-                            KeywordCase::Lower
-                        });
-                        break;
-                    }
+    }
+
+    // `SqlFormatter.cpp:643-645`: count reserved words by casing; ties are Upper.
+    let mut upper_words = 0usize;
+    let mut lower_words = 0usize;
+    for token in tokenize(sql) {
+        if let Token::Word(word) = token {
+            let upper = word.to_ascii_uppercase();
+            if KEYWORDS.contains(&upper.as_str()) {
+                if word == upper {
+                    upper_words += 1;
+                } else if word == word.to_ascii_lowercase() {
+                    lower_words += 1;
                 }
             }
         }
     }
-
-    if let Some(case) = keyword {
-        options.keyword_case = case;
+    if upper_words + lower_words > 0 {
+        options.keyword_case = if upper_words >= lower_words {
+            KeywordCase::Upper
+        } else {
+            KeywordCase::Lower
+        };
     }
-    if river {
-        options.style = FormatStyle::River;
+    // The most frequent step wins; `BTreeMap` iterates ascending and the
+    // comparison is strict, so the smallest step wins a tie like the original.
+    let mut best_indent = 0usize;
+    let mut best_count = 0usize;
+    for (step, count) in &indent_deltas {
+        if *count > best_count {
+            best_count = *count;
+            best_indent = *step;
+        }
     }
-    if and_at_zero {
-        options.and_or_indent = Some(0);
+    if best_indent > 0 {
+        options.indent = best_indent;
     }
-    if let Some(width) = indent {
-        options.indent = width;
+    if let (Some(select_col), Some(from_col)) = (select_col, from_col) {
+        // `SqlFormatter.cpp:656`: FROM further right than SELECT is River.
+        options.style = if from_col > select_col {
+            FormatStyle::River
+        } else {
+            FormatStyle::Standard
+        };
     }
+    if let (Some(where_col), Some(and_col)) = (where_col, and_col) {
+        options.and_or_indent = Some(and_col.saturating_sub(where_col));
+    }
+    if let (Some(from_col), Some(join_col)) = (from_col, join_col) {
+        options.join_indent = Some(join_col.saturating_sub(from_col));
+    }
+    if let Some(col_select) = select_col {
+        match (select_alone, item_col) {
+            (true, Some(col_item)) => {
+                options.cont_indent = Some(col_item.saturating_sub(col_select));
+                options.kw_alone_when_many = true;
+            }
+            (false, _) => options.kw_alone_when_many = false,
+            _ => {}
+        }
+    }
+    if comma_inline {
+        options.one_item_per_line = false;
+    }
+    options.comma_leading = leading_comma;
+    options.on_new_line = on_own_line;
+    options.space_after_comma = !tight_comma(sql);
+    options.space_in_parens = spaced_inside_parens(sql);
+    options.align_declarations = aligned_declarations >= 2;
     options
+}
+
+/// `indentOf` (`SqlFormatter.cpp:633`): leading spaces count one column, tabs four.
+fn leading_columns(line: &str) -> usize {
+    let mut columns = 0;
+    for ch in line.chars() {
+        match ch {
+            ' ' => columns += 1,
+            '\t' => columns += 4,
+            _ => break,
+        }
+    }
+    columns
+}
+
+/// `,[A-Za-z0-9_']`: a comma with no space after it.
+fn tight_comma(sample: &str) -> bool {
+    let chars: Vec<char> = sample.chars().collect();
+    chars.windows(2).any(|pair| {
+        pair[0] == ',' && (pair[1].is_ascii_alphanumeric() || pair[1] == '_' || pair[1] == '\'')
+    })
+}
+
+/// `\(\s[Z]` present while `\([Z]` is not.
+fn spaced_inside_parens(sample: &str) -> bool {
+    let chars: Vec<char> = sample.chars().collect();
+    let opened = |ch: char| ch.is_ascii_alphanumeric() || ch == '_' || ch == '\'';
+    let spaced = chars
+        .windows(3)
+        .any(|window| window[0] == '(' && window[1].is_whitespace() && opened(window[2]));
+    let tight = chars
+        .windows(2)
+        .any(|window| window[0] == '(' && opened(window[1]));
+    spaced && !tight
+}
+
+/// `^\s+[A-Za-z_][\w$#]*\s{2,}[A-Za-z_][^;]*;\s*$`.
+fn is_aligned_declaration(line: &str) -> bool {
+    let Some(body) = line.trim_end().strip_suffix(';') else {
+        return false;
+    };
+    let rest = body.trim_start();
+    if rest.len() == body.len() {
+        return false;
+    }
+    let name_len = rest
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '$' | '#'))
+        .count();
+    if name_len == 0 || !rest.starts_with(|ch: char| ch.is_ascii_alphabetic() || ch == '_') {
+        return false;
+    }
+    let after = &rest[name_len..];
+    let spaces = after.chars().take_while(|ch| *ch == ' ').count();
+    if spaces < 2 {
+        return false;
+    }
+    let tail = &after[spaces..];
+    tail.starts_with(|ch: char| ch.is_ascii_alphabetic() || ch == '_') && !tail.contains(';')
 }
 
 fn indent_unit(options: &FormatOptions) -> String {
@@ -164,95 +319,225 @@ enum Token {
 }
 
 const KEYWORDS: &[&str] = &[
-    "SELECT",
-    "FROM",
-    "WHERE",
-    "GROUP",
-    "ORDER",
-    "BY",
-    "HAVING",
-    "UNION",
+    "ACCESSIBLE",
+    "ADD",
+    "AFTER",
     "ALL",
-    "MINUS",
-    "INTERSECT",
-    "CONNECT",
-    "START",
-    "WITH",
-    "INSERT",
-    "INTO",
-    "UPDATE",
-    "DELETE",
-    "VALUES",
-    "SET",
-    "RETURNING",
-    "MERGE",
-    "JOIN",
-    "LEFT",
-    "RIGHT",
-    "INNER",
-    "OUTER",
-    "CROSS",
-    "ON",
-    "AND",
-    "OR",
-    "NOT",
-    "NULL",
-    "IS",
-    "IN",
-    "EXISTS",
-    "BETWEEN",
-    "LIKE",
-    "AS",
-    "DISTINCT",
-    "CASE",
-    "WHEN",
-    "THEN",
-    "ELSE",
-    "END",
-    "BEGIN",
-    "DECLARE",
-    "IF",
-    "LOOP",
-    "FOR",
-    "WHILE",
-    "CREATE",
-    "REPLACE",
     "ALTER",
-    "DROP",
-    "TABLE",
-    "VIEW",
-    "INDEX",
-    "PACKAGE",
-    "PROCEDURE",
-    "FUNCTION",
-    "TRIGGER",
-    "TYPE",
-    "COMMIT",
-    "ROLLBACK",
-    "EXPLAIN",
-    "PLAN",
-    "DESCRIBE",
-    "INTO",
+    "AND",
+    "ANY",
+    "APPLY",
+    "AS",
     "ASC",
-    "DESC",
-    "EXCEPTION",
-    "ELSIF",
-    "NO_DATA_FOUND",
-    "OTHERS",
-    "NUMBER",
-    "VARCHAR2",
-    "NVARCHAR2",
-    "CHAR",
-    "NCHAR",
-    "DATE",
-    "TIMESTAMP",
-    "BOOLEAN",
-    "INTEGER",
-    "PLS_INTEGER",
+    "AUTHID",
+    "BEFORE",
+    "BEGIN",
+    "BETWEEN",
     "BINARY_INTEGER",
-    "CLOB",
     "BLOB",
-    "RAW",
+    "BODY",
+    "BOOLEAN",
+    "BULK",
+    "BY",
+    "CASE",
+    "CHAR",
+    "CHECK",
+    "CLOB",
+    "CLOSE",
+    "COLLECT",
+    "COLUMN",
+    "COMMIT",
+    "CONNECT",
+    "CONSTANT",
+    "CONSTRAINT",
+    "CONTINUE",
+    "CREATE",
+    "CROSS",
+    "CURRENT",
+    "CURSOR",
+    "CYCLE",
+    "DATE",
+    "DAY",
+    "DECLARE",
+    "DEFAULT",
+    "DEFERRED",
+    "DEFINER",
+    "DELETE",
+    "DELETING",
+    "DENSE_RANK",
+    "DESC",
+    "DETERMINISTIC",
+    "DISABLE",
+    "DISTINCT",
+    "DROP",
+    "DUP_VAL_ON_INDEX",
+    "EACH",
+    "ELSE",
+    "ELSIF",
+    "ENABLE",
+    "END",
+    "EXCEPTION",
+    "EXCLUSIVE",
+    "EXECUTE",
+    "EXISTS",
+    "EXIT",
+    "EXTENDS",
+    "FALSE",
+    "FETCH",
+    "FINAL",
+    "FIRST",
+    "FOLLOWING",
+    "FOR",
+    "FORALL",
+    "FORCE",
+    "FOREIGN",
+    "FROM",
+    "FULL",
+    "FUNCTION",
+    "GLOBAL",
+    "GOTO",
+    "GRANT",
+    "GROUP",
+    "HAVING",
+    "HOUR",
+    "IF",
+    "IMMEDIATE",
+    "IN",
+    "INDEX",
+    "INITIALLY",
+    "INNER",
+    "INSERT",
+    "INSERTING",
+    "INSTANTIABLE",
+    "INTERSECT",
+    "INTERVAL",
+    "INTO",
+    "INVALID_NUMBER",
+    "IS",
+    "ISOLATION",
+    "JOIN",
+    "KEEP",
+    "KEY",
+    "LAG",
+    "LAST",
+    "LATERAL",
+    "LEAD",
+    "LEFT",
+    "LEVEL",
+    "LIKE",
+    "LIMIT",
+    "LOCKED",
+    "LOOP",
+    "MATCHED",
+    "MEMBER",
+    "MERGE",
+    "MINUS",
+    "MINUTE",
+    "MODEL",
+    "MODIFY",
+    "MONTH",
+    "NATURAL",
+    "NESTED",
+    "NEW",
+    "NEXT",
+    "NO_DATA_FOUND",
+    "NOCYCLE",
+    "NOT",
+    "NOVALIDATE",
+    "NOWAIT",
+    "NULL",
+    "NULLS",
+    "NUMBER",
+    "OBJECT",
+    "OF",
+    "OFFSET",
+    "OLD",
+    "ON",
+    "ONLY",
+    "OPEN",
+    "OR",
+    "ORDER",
+    "OTHERS",
+    "OUT",
+    "OUTER",
+    "OVER",
+    "OVERRIDING",
+    "PACKAGE",
+    "PARALLEL_ENABLE",
+    "PARTITION",
+    "PIPELINED",
+    "PIVOT",
+    "PLS_INTEGER",
+    "PRAGMA",
+    "PRECEDING",
+    "PRESERVE",
+    "PRIMARY",
+    "PRIOR",
+    "PROCEDURE",
+    "RAISE",
+    "RANGE",
+    "RANK",
+    "RECORD",
+    "REF",
+    "REFERENCES",
+    "REFERENCING",
+    "REPLACE",
+    "RESULT_CACHE",
+    "RETURN",
+    "RETURNING",
+    "REVOKE",
+    "RIGHT",
+    "ROLLBACK",
+    "ROW",
+    "ROWS",
+    "ROWTYPE",
+    "SAVEPOINT",
+    "SECOND",
+    "SELECT",
+    "SELF",
+    "SEQUENCE",
+    "SET",
+    "SIBLINGS",
+    "SKIP",
+    "SOME",
+    "START",
+    "STATIC",
+    "SUBTYPE",
+    "TABLE",
+    "TEMPORARY",
+    "THEN",
+    "TIMESTAMP",
+    "TO",
+    "TOO_MANY_ROWS",
+    "TRANSACTION",
+    "TRIGGER",
+    "TRUE",
+    "TRUNCATE",
+    "TYPE",
+    "UNBOUNDED",
+    "UNDER",
+    "UNION",
+    "UNIQUE",
+    "UNPIVOT",
+    "UPDATE",
+    "UPDATING",
+    "USING",
+    "VALIDATE",
+    "VALUE_ERROR",
+    "VALUES",
+    "VARCHAR",
+    "VARCHAR2",
+    "VARRAY",
+    "VIEW",
+    "WAIT",
+    "WHEN",
+    "WHERE",
+    "WHILE",
+    "WITH",
+    "WITHIN",
+    "WORK",
+    "YEAR",
+    "ZERO_DIVIDE",
 ];
 
 fn is_word_char(c: char) -> bool {
@@ -398,9 +683,26 @@ fn should_space_before_paren(previous: Option<&Token>) -> bool {
 }
 
 fn render(tokens: &[Token], options: &FormatOptions) -> String {
+    render_at(tokens, options, 0)
+}
+
+/// `render` with the column the expression starts at; `maxLine` wrapping needs it
+/// (`Fmt::inlineText(items, col)` in the original).
+fn render_at(tokens: &[Token], options: &FormatOptions, col: usize) -> String {
     let mut out = String::new();
     let mut tight = false;
-    for (index, token) in tokens.iter().enumerate() {
+    let mut index = 0;
+    while index < tokens.len() {
+        let token = &tokens[index];
+        if let Some((piece, next)) = wrapped_group(tokens, index, options, col, &out) {
+            if should_space_before_paren(tokens.get(index.wrapping_sub(1))) {
+                out.push(' ');
+            }
+            out.push_str(&piece);
+            tight = false;
+            index = next;
+            continue;
+        }
         match token {
             Token::Word(word) => {
                 if !tight {
@@ -437,6 +739,12 @@ fn render(tokens: &[Token], options: &FormatOptions) -> String {
                 }
                 tight = false;
                 out.push_str(text);
+                // A line comment ends the line: the SQL that follows must not be
+                // swallowed by it (`SqlFormatter.cpp:264`).
+                if text.starts_with("--") {
+                    out.push('\n');
+                    tight = true;
+                }
             }
             Token::Symbol('(') => {
                 if should_space_before_paren(tokens.get(index.wrapping_sub(1))) {
@@ -496,8 +804,102 @@ fn render(tokens: &[Token], options: &FormatOptions) -> String {
                 }
             }
         }
+        index += 1;
     }
     out.trim().to_string()
+}
+
+/// `Fmt::inlineText`'s long group rule: a parenthesised, comma-separated group
+/// that would overflow `maxLine` goes one item per line, indented one level from
+/// `col`, with the closing parenthesis back at `col`.
+fn wrapped_group(
+    tokens: &[Token],
+    open: usize,
+    options: &FormatOptions,
+    col: usize,
+    out: &str,
+) -> Option<(String, usize)> {
+    if tokens.get(open) != Some(&Token::Symbol('(')) {
+        return None;
+    }
+    let close = matching_paren(tokens, open)?;
+    let inner = &tokens[open + 1..close];
+    if is_subquery(inner) {
+        // `Fmt::inlineText`: a subquery is always laid out as
+        // `(\n` + query(inner, col + indent) + `\n` + indent(col) + `)`.
+        let formatted = format_statement(inner, options);
+        let pad = format!("{}{}", " ".repeat(col), indent_unit(options));
+        let indented = formatted
+            .lines()
+            .map(|line| format!("{pad}{line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let piece = format!("(\n{indented}\n{})", " ".repeat(col));
+        return Some((piece, close + 1));
+    }
+    let parts = split_commas(inner);
+    if parts.len() < 2 {
+        return None;
+    }
+    let flat: Vec<String> = parts
+        .iter()
+        .map(|part| render_at(part, options, col))
+        .collect();
+    let one_line = format!(
+        "({}{}{})",
+        if options.space_in_parens { " " } else { "" },
+        flat.join(if options.space_after_comma { ", " } else { "," }),
+        if options.space_in_parens { " " } else { "" }
+    );
+    if one_line.contains('\n') {
+        return None;
+    }
+    let last_len = match out.rfind('\n') {
+        Some(position) => out.len() - position - 1,
+        None => col + out.len(),
+    };
+    if last_len + one_line.len() <= options.max_line {
+        return None;
+    }
+    let inner_indent = format!("{}{}", " ".repeat(col), indent_unit(options));
+    let closing_indent = " ".repeat(col);
+    let mut piece = String::from("(\n");
+    for (index, item) in flat.iter().enumerate() {
+        piece.push_str(&inner_indent);
+        piece.push_str(item);
+        if index + 1 < flat.len() {
+            piece.push(',');
+        }
+        piece.push('\n');
+    }
+    piece.push_str(&closing_indent);
+    piece.push(')');
+    Some((piece, close + 1))
+}
+
+fn matching_paren(tokens: &[Token], open: usize) -> Option<usize> {
+    let mut depth = 0i32;
+    for (index, token) in tokens.iter().enumerate().skip(open) {
+        match token {
+            Token::Symbol('(') => depth += 1,
+            Token::Symbol(')') => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(index);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn is_subquery(tokens: &[Token]) -> bool {
+    matches!(
+        tokens.first(),
+        Some(Token::Word(word))
+            if word.eq_ignore_ascii_case("select") || word.eq_ignore_ascii_case("with")
+    )
 }
 
 fn split_commas(tokens: &[Token]) -> Vec<Vec<Token>> {
@@ -539,6 +941,12 @@ fn river_prefix(keyword: &str, options: &FormatOptions) -> String {
     }
 }
 
+/// Column where the clause keyword starts: the padding a River prefix carries
+/// (`selectBase + pad` in the original). Standard prefixes have none, so 0.
+fn clause_col(prefix: &str) -> usize {
+    prefix.len() - prefix.trim_start().len()
+}
+
 fn format_list(keyword: &str, body: &[Token], options: &FormatOptions) -> String {
     let items = split_commas(body);
     let river = options.style == FormatStyle::River;
@@ -550,52 +958,52 @@ fn format_list(keyword: &str, body: &[Token], options: &FormatOptions) -> String
     if items.len() <= 1 {
         return format!("{prefix}{}", render(body, options));
     }
-    if let Some(width) = options.cont_indent {
-        let pad = " ".repeat(width);
-        let mut out = prefix.clone();
-        for (index, item) in items.iter().enumerate() {
-            if index > 0 {
-                out.push('\n');
-                out.push_str(&pad);
-            }
-            out.push_str(&render(item, options));
-            if index + 1 < items.len() {
-                out.push(',');
-            }
-        }
-        return out;
-    }
-    if river {
-        let pad = " ".repeat(prefix.len());
-        let mut out = prefix.clone();
-        for (index, item) in items.iter().enumerate() {
-            if index > 0 {
-                out.push('\n');
-                out.push_str(&pad);
-            }
-            out.push_str(&render(item, options));
-            if index + 1 < items.len() {
-                out.push(',');
-            }
-        }
-        return out;
-    }
     let indent = indent_unit(options);
-    let mut lines = Vec::new();
-    for (index, item) in items.iter().enumerate() {
-        let text = render(item, options);
-        if options.comma_leading {
-            if index == 0 {
-                lines.push(format!("{indent}{text}"));
-            } else {
-                lines.push(format!("{indent}, {text}"));
-            }
+    // `query()` keeps the keyword alone only in Standard style, with several
+    // items, when `oneItemPerLine` and `kwAloneWhenMany` are both on.
+    let alone = !river && options.one_item_per_line && options.kw_alone_when_many;
+    let cont = match options.cont_indent {
+        Some(width) => " ".repeat(width),
+        None if river => " ".repeat(prefix.len()),
+        None => indent,
+    };
+    let comma = |index: usize| -> &'static str {
+        if !options.comma_leading && index + 1 < items.len() {
+            ","
         } else {
-            let comma = if index + 1 < items.len() { "," } else { "" };
-            lines.push(format!("{indent}{text}{comma}"));
+            ""
         }
+    };
+    let mut out = String::new();
+    if alone {
+        out.push_str(&clause_text(keyword, options));
+        for (index, item) in items.iter().enumerate() {
+            out.push('\n');
+            out.push_str(&cont);
+            if options.comma_leading && index > 0 {
+                out.push_str(", ");
+            }
+            out.push_str(&render_at(item, options, cont.len()));
+            out.push_str(comma(index));
+        }
+        return out;
     }
-    format!("{}\n{}", clause_text(keyword, options), lines.join("\n"))
+    out.push_str(&prefix);
+    out.push_str(&render_at(&items[0], options, clause_col(&prefix)));
+    out.push_str(comma(0));
+    for (index, item) in items.iter().enumerate().skip(1) {
+        out.push('\n');
+        if options.comma_leading {
+            // `indentStr(qMax(0, ec - 2))` then `", "`.
+            out.push_str(&" ".repeat(cont.len().saturating_sub(2)));
+            out.push_str(", ");
+        } else {
+            out.push_str(&cont);
+        }
+        out.push_str(&render_at(item, options, cont.len()));
+        out.push_str(comma(index));
+    }
+    out
 }
 
 /// Splits a boolean expression at top-level AND/OR. The AND of `BETWEEN a AND b`
@@ -634,7 +1042,11 @@ fn split_and_or(body: &[Token]) -> Vec<Vec<Token>> {
 
 fn format_where(body: &[Token], options: &FormatOptions) -> String {
     let indent = indent_unit(options);
-    let parts = split_and_or(body);
+    let parts = if options.and_or_new_line {
+        split_and_or(body)
+    } else {
+        vec![body.to_vec()]
+    };
     let river = options.style == FormatStyle::River;
     let prefix = if river {
         format!(" {} ", clause_text("WHERE", options))
@@ -646,9 +1058,10 @@ fn format_where(body: &[Token], options: &FormatOptions) -> String {
         None if river => "   ".to_string(),
         None => indent.clone(),
     };
-    let mut out = format!("{prefix}{}", render(&parts[0], options));
+    let col = clause_col(&prefix);
+    let mut out = format!("{prefix}{}", render_at(&parts[0], options, col));
     for part in parts.iter().skip(1) {
-        out.push_str(&format!("\n{and_indent}{}", render(part, options)));
+        out.push_str(&format!("\n{and_indent}{}", render_at(part, options, col)));
     }
     out
 }
@@ -726,7 +1139,10 @@ fn format_from(body: &[Token], options: &FormatOptions) -> String {
         None if river => "  ".to_string(),
         None => indent.clone(),
     };
-    let mut out = format!("{prefix}{}", render(&joins[0], options));
+    let mut out = format!(
+        "{prefix}{}",
+        render_at(&joins[0], options, clause_col(&prefix))
+    );
     for join in joins.iter().skip(1) {
         let on_position = if options.on_new_line {
             let mut depth = 0i32;
@@ -742,26 +1158,36 @@ fn format_from(body: &[Token], options: &FormatOptions) -> String {
             None
         };
         let Some(position) = on_position else {
-            out.push_str(&format!("\n{join_indent}{}", render(join, options)));
+            out.push_str(&format!(
+                "\n{join_indent}{}",
+                render_at(join, options, join_indent.len())
+            ));
             continue;
         };
         out.push_str(&format!(
             "\n{join_indent}{}",
-            render(&join[..position], options)
+            render_at(&join[..position], options, join_indent.len())
         ));
         let on_indent = format!("{join_indent}{}", indent_unit(options));
-        let parts = split_and_or(&join[position + 1..]);
+        let parts = if options.and_or_new_line {
+            split_and_or(&join[position + 1..])
+        } else {
+            vec![join[position + 1..].to_vec()]
+        };
         out.push_str(&format!(
             "\n{on_indent}{} {}",
             clause_text("ON", options),
-            render(&parts[0], options)
+            render_at(&parts[0], options, on_indent.len())
         ));
         let cond_indent = match options.and_or_indent {
             Some(width) => format!("{on_indent}{}", " ".repeat(width)),
             None => format!("{on_indent}{}", indent_unit(options)),
         };
         for part in parts.iter().skip(1) {
-            out.push_str(&format!("\n{cond_indent}{}", render(part, options)));
+            out.push_str(&format!(
+                "\n{cond_indent}{}",
+                render_at(part, options, cond_indent.len())
+            ));
         }
     }
     out
@@ -1372,6 +1798,7 @@ mod tests {
         let options = FormatOptions {
             cont_indent: Some(7),
             and_or_indent: Some(0),
+            kw_alone_when_many: false,
             ..standard()
         };
         assert_eq!(
@@ -1459,6 +1886,163 @@ mod tests {
         assert_eq!(options.and_or_indent, Some(0));
         assert_eq!(options.indent, 4);
         assert_eq!(options.keyword_case, KeywordCase::Upper);
+        assert!(!options.kw_alone_when_many);
+    }
+
+    #[test]
+    fn reserved_words_cover_the_original_set() {
+        let output = format_sql("select level, prior from t", &standard());
+        assert!(output.contains("LEVEL"), "{output}");
+        assert!(output.contains("PRIOR"), "{output}");
+        let output = format_sql("select * from t for update nowait", &standard());
+        assert!(output.contains("NOWAIT"), "{output}");
+    }
+
+    #[test]
+    fn infers_standard_for_indented_plsql() {
+        // SELECT and FROM sit on the same column: Standard even though both are
+        // indented (the old rule treated any indented clause as River).
+        let options = infer_from_example("BEGIN\n    SELECT a\n    FROM t\n    WHERE x = 1;\nEND;");
+        assert_eq!(options.style, FormatStyle::Standard);
+    }
+
+    #[test]
+    fn infers_indent_with_tabs_as_four_columns() {
+        let options = infer_from_example("BEGIN\n\tIF a THEN\n\t\tb := 1;\n\tEND IF;\nEND;");
+        assert_eq!(options.indent, 4);
+        assert!(options.use_tabs);
+    }
+
+    #[test]
+    fn infers_join_on_and_spacing() {
+        let sample = "SELECT a,\n       b\n  FROM t\n    JOIN u\n      ON t.id=u.id\n WHERE x IN ( 1,2 )\n   AND y = 1;";
+        let options = infer_from_example(sample);
+        assert_eq!(options.join_indent, Some(2));
+        assert!(options.on_new_line);
+        assert_eq!(options.and_or_indent, Some(2));
+        assert!(!options.space_after_comma);
+        assert!(options.space_in_parens);
+        assert_eq!(options.style, FormatStyle::River);
+    }
+
+    #[test]
+    fn infers_leading_comma_and_aligned_declarations() {
+        let sample = "SELECT a\n       , b\n  FROM t;\nDECLARE\n  v_id     NUMBER;\n  v_total  NUMBER;\nBEGIN\n  NULL;\nEND;";
+        let options = infer_from_example(sample);
+        assert!(options.comma_leading);
+        assert!(options.align_declarations);
+        assert!(options.space_after_comma);
+        assert!(!options.space_in_parens);
+        assert!(!options.on_new_line);
+    }
+
+    #[test]
+    fn infers_case_by_counting_reserved_words() {
+        // The first keyword is lowercase, but most reserved words are uppercase.
+        let options = infer_from_example("select a\nFROM t\nWHERE x = 1\nAND y = 2");
+        assert_eq!(options.keyword_case, KeywordCase::Upper);
+        let options = infer_from_example("SELECT a\nfrom t\nwhere x = 1\nand y = 2");
+        assert_eq!(options.keyword_case, KeywordCase::Lower);
+    }
+
+    #[test]
+    fn infers_indent_by_frequent_delta() {
+        // The 1-space comma line must not win over the two 4-space steps.
+        let options =
+            infer_from_example("SELECT a\n , b\nFROM t\n    WHERE x = 1\n        AND y = 2");
+        assert_eq!(options.indent, 4);
+        assert!(options.comma_leading);
+    }
+
+    #[test]
+    fn river_max_line_wrap_uses_clause_column() {
+        let options = FormatOptions {
+            style: FormatStyle::River,
+            max_line: 39,
+            ..standard()
+        };
+        assert_eq!(
+            format_sql(
+                "select 1 from t where a in (1111111111,2222222222,3333333333)",
+                &options
+            ),
+            "SELECT 1\n  FROM t\n WHERE a IN (\n   1111111111,\n   2222222222,\n   3333333333\n )"
+        );
+        let once = format_sql(
+            "select 1 from t where a in (1111111111,2222222222,3333333333)",
+            &options,
+        );
+        assert_eq!(format_sql(&once, &options), once);
+    }
+
+    #[test]
+    fn subquery_in_expression_is_indented() {
+        assert_eq!(
+            format_sql(
+                "select x from t where a in (select id from u where b = 1)",
+                &standard()
+            ),
+            "SELECT x\nFROM t\nWHERE a IN (\n  SELECT id\n  FROM u\n  WHERE b = 1\n)"
+        );
+    }
+
+    #[test]
+    fn line_comment_forces_a_new_line() {
+        let output = format_sql("select f(a -- note\n, b) from t", &standard());
+        assert!(output.contains("-- note\n"), "{output}");
+        assert!(!output.contains("-- note,"), "{output}");
+    }
+
+    #[test]
+    fn max_line_splits_long_paren_groups() {
+        // "WHERE a IN (…)" is 40 columns wide; the rule breaks when it exceeds,
+        // so 39 forces the split and 40 keeps it inline (`> o.maxLine`).
+        let options = FormatOptions {
+            max_line: 39,
+            ..standard()
+        };
+        assert_eq!(
+            format_sql(
+                "select 1 from t where a in (1111111111,2222222222,3333333333)",
+                &options
+            ),
+            "SELECT 1\nFROM t\nWHERE a IN (\n  1111111111,\n  2222222222,\n  3333333333\n)"
+        );
+        // Short groups stay on one line.
+        assert_eq!(
+            format_sql("select 1 from t where a in (1,2)", &options),
+            "SELECT 1\nFROM t\nWHERE a IN (1, 2)"
+        );
+        // Re-formatting the wrapped output is stable.
+        let once = format_sql(
+            "select 1 from t where a in (1111111111,2222222222,3333333333)",
+            &options,
+        );
+        assert_eq!(format_sql(&once, &options), once);
+    }
+
+    #[test]
+    fn and_or_new_line_false_keeps_conditions_inline() {
+        let options = FormatOptions {
+            and_or_new_line: false,
+            ..standard()
+        };
+        assert_eq!(
+            format_sql("select a from t where x=1 and y=2", &options),
+            "SELECT a\nFROM t\nWHERE x = 1 AND y = 2"
+        );
+    }
+
+    #[test]
+    fn one_item_per_line_false_starts_on_the_keyword_line() {
+        let options = FormatOptions {
+            one_item_per_line: false,
+            ..standard()
+        };
+        assert_eq!(
+            format_sql("select a,b from t", &options),
+            "SELECT a,\n  b\nFROM t"
+        );
     }
 
     #[test]

@@ -19,11 +19,17 @@ pub enum Command {
     Ddl {
         schema: Option<String>,
         table: String,
+        prompts: bool,
+    },
+    Transform {
+        schema: Option<String>,
+        table: String,
     },
     CompareDdl {
         path: String,
         schema: Option<String>,
         table: String,
+        prompts: bool,
     },
 }
 
@@ -32,8 +38,9 @@ usage:
   sqlt-cli diag
   sqlt-cli query \"<sql>\" [--max-rows N] [--prefetch N] [--no-header]
   sqlt-cli bench \"<sql>\" [--runs N] [--prefetch N]
-  sqlt-cli ddl --table NAME [--schema S]
-  sqlt-cli compare-ddl \"<file>\" --table NAME [--schema S]
+  sqlt-cli ddl --table NAME [--schema S] [--prompts]
+  sqlt-cli compare-ddl \"<file>\" --table NAME [--schema S] [--prompts]
+  sqlt-cli transform --table NAME [--schema S]
 
 Environment: SQLT_USER, SQLT_PASS, SQLT_ALIAS or SQLT_CONNECT,
              SQLT_OCI_DIR, SQLT_TNS_ADMIN, SQLT_MODE, SQLT_READ_ONLY, SQLT_PREFETCH";
@@ -109,13 +116,18 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
                 })
             }
         }
-        "ddl" | "compare-ddl" => {
+        "ddl" | "compare-ddl" | "transform" => {
             let mut table: Option<String> = None;
             let mut schema: Option<String> = None;
             let mut path: Option<String> = None;
+            let mut prompts = false;
             let mut i = 1usize;
             while i < args.len() {
                 match args[i].as_str() {
+                    "--prompts" => {
+                        prompts = true;
+                        i += 1;
+                    }
                     "--table" => {
                         table = Some(
                             args.get(i + 1)
@@ -146,17 +158,27 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
                 }
             }
             let table = table.ok_or_else(|| "missing --table".to_string())?;
-            if cmd == "ddl" {
+            if cmd == "transform" {
+                if path.is_some() {
+                    return Err("transform does not accept a file path".to_string());
+                }
+                Ok(Command::Transform { schema, table })
+            } else if cmd == "ddl" {
                 if path.is_some() {
                     return Err("ddl does not accept a file path".to_string());
                 }
-                Ok(Command::Ddl { schema, table })
+                Ok(Command::Ddl {
+                    schema,
+                    table,
+                    prompts,
+                })
             } else {
                 let path = path.ok_or_else(|| "compare-ddl expects a file path".to_string())?;
                 Ok(Command::CompareDdl {
                     path,
                     schema,
                     table,
+                    prompts,
                 })
             }
         }
@@ -231,6 +253,7 @@ mod tests {
             Command::Ddl {
                 schema: Some("ANAMNESIS".to_string()),
                 table: "CLIENTE".to_string(),
+                prompts: false,
             }
         );
         assert_eq!(
@@ -245,6 +268,7 @@ mod tests {
                 path: "ddl_CLIENTE_win.sql".to_string(),
                 schema: None,
                 table: "CLIENTE".to_string(),
+                prompts: false,
             }
         );
         assert!(parse(&args(&["ddl"])).is_err());

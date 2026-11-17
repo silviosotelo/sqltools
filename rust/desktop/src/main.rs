@@ -99,6 +99,93 @@ async fn disconnect(state: State<'_, Arc<AppState>>, id: String) -> Result<(), S
         .map_err(|e| e.to_string())?
 }
 
+/// Writes the script to a temporary file and launches SQL*Plus with the
+/// original's default command line (`CPLSWorksheetDoc::OnSqlExecuteInSQLPlus`).
+#[tauri::command]
+async fn execute_in_sqlplus(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+    script: String,
+) -> Result<String, String> {
+    use sqlt_app::sqlplus;
+    use sqlt_oracle::{ConnectMode, ConnectTarget};
+
+    let spec = state.connect_spec(&id)?;
+    let connect_string = match &spec.target {
+        ConnectTarget::Alias(alias) => alias.clone(),
+        ConnectTarget::Direct(connect) => connect.clone(),
+    };
+    let sys_privs = match spec.mode {
+        ConnectMode::SysDba => " AS SYSDBA",
+        ConnectMode::SysOper => " AS SYSOPER",
+        ConnectMode::Normal => "",
+    };
+    let dir = std::env::temp_dir().join(format!(
+        "sqlt-sqlplus-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_millis())
+            .unwrap_or_default()
+    ));
+    let path = sqlplus::write_script(&dir, "script.sql", &script)
+        .map_err(|error| format!("Cannot write the SQL*Plus script: {error}"))?;
+    // The original quotes the file name before substituting it.
+    let filename = format!("\"{}\"", path.display());
+    let fields = sqlplus::Fields {
+        user: &spec.user,
+        password: &spec.password,
+        connect_string: &connect_string,
+        sys_privs,
+        filename: &filename,
+    };
+    let line = sqlplus::expanded_command(
+        sqlplus::DEFAULT_EXECUTABLE,
+        sqlplus::DEFAULT_COMMAND_LINE,
+        &fields,
+    );
+    let command = sqlplus::parse_command_line(&line);
+    sqlplus::spawn(&command, &dir)
+        .map_err(|error| format!("Cannot launch SQL*Plus ({}): {error}", command.program))?;
+    Ok(path.display().to_string())
+}
+
+/// Generates the "Table Transformation Helper" script
+/// (`CTableTransformer`, `TableTransformer.cpp:262-500`).
+#[tauri::command]
+async fn table_transformation_script(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+    schema: Option<String>,
+    table: String,
+) -> Result<String, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let session = state.session(&id)?;
+        let options = sqlt_oracle::QueryOptions::default();
+        let owner = match schema
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            Some(owner) => owner.to_string(),
+            None => sqlt_meta::loader::current_schema(&session, options)?,
+        };
+        let loaded = sqlt_meta::loader::load_table(&session, &owner, &table, options)?;
+        let backup = sqlt_meta::loader::unique_backup_name(&session, &owner, &table, options)?;
+        let dependents =
+            sqlt_meta::loader::dependent_foreign_keys(&session, &owner, &table, options)?;
+        Ok(sqlt_meta::transform_script(
+            &loaded,
+            &backup,
+            &dependents,
+            &sqlt_meta::WriteSettings::default(),
+        ))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 async fn enable_dbms_output(
     state: State<'_, Arc<AppState>>,
@@ -799,6 +886,8 @@ fn main() {
             delete_connection,
             connect,
             disconnect,
+            execute_in_sqlplus,
+            table_transformation_script,
             enable_dbms_output,
             toggle_read_only,
             execute,

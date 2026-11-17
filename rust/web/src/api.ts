@@ -28,6 +28,10 @@ export const api = {
     invoke<void>("delete_connection", { id }),
   connect: (id: string) => invoke<string>("connect", { id }),
   disconnect: (id: string) => invoke<void>("disconnect", { id }),
+  executeInSqlPlus: (id: string, script: string) =>
+    invoke<string>("execute_in_sqlplus", { id, script }),
+  tableTransformation: (id: string, schema: string | null, table: string) =>
+    invoke<string>("table_transformation_script", { id, schema, table }),
   execute: (
     connectionId: string,
     sql: string,

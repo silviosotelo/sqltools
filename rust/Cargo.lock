@@ -3915,7 +3915,7 @@ dependencies = [
 
 [[package]]
 name = "sqlt-app"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "keyring",
  "serde",
@@ -3927,7 +3927,7 @@ dependencies = [
 
 [[package]]
 name = "sqlt-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "sqlt-core",
  "sqlt-meta",
@@ -3936,7 +3936,7 @@ dependencies = [
 
 [[package]]
 name = "sqlt-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -3944,12 +3944,13 @@ dependencies = [
 
 [[package]]
 name = "sqlt-desktop"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
  "sqlt-app",
  "sqlt-core",
+ "sqlt-meta",
  "sqlt-oracle",
  "tauri",
  "tauri-build",
@@ -3959,7 +3960,7 @@ dependencies = [
 
 [[package]]
 name = "sqlt-meta"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "sqlt-core",
  "sqlt-oracle",
@@ -3967,7 +3968,7 @@ dependencies = [
 
 [[package]]
 name = "sqlt-oracle"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "oracle",
  "sqlt-core",

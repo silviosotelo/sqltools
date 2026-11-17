@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 
 import { Editor, type EditorHandle } from "./Editor";
 import { api } from "./api";
@@ -25,8 +26,56 @@ import type {
 
 type ObjectTab = "columns" | "constraints" | "indexes" | "triggers" | "grants";
 
-type Draft = {
-  id: string;
+const KEY_ALIASES: Record<string, string> = {
+  pgdown: "PageDown",
+  pgup: "PageUp",
+  del: "Delete",
+  ins: "Insert",
+  esc: "Escape",
+  space: "Space",
+  num5: "Clear",
+};
+
+const MOD_ORDER = ["Ctrl", "Alt", "Shift"] as const;
+
+const canonicalKey = (key: string) =>
+  key.length === 1
+    ? key.toUpperCase()
+    : (KEY_ALIASES[key.toLowerCase()] ?? key);
+
+/** `Ctrl+Shift+F12` → `Ctrl+Shift+F12`; `A` → `A`. */
+const parseCombo = (text: string) => {
+  const mods = new Set<string>();
+  let key = "";
+  for (const part of text.split("+").map((value) => value.trim()).filter(Boolean)) {
+    const lower = part.toLowerCase();
+    if (["ctrl", "control", "cmd", "meta", "command"].includes(lower)) mods.add("Ctrl");
+    else if (lower === "alt") mods.add("Alt");
+    else if (lower === "shift") mods.add("Shift");
+    else key = part;
+  }
+  return [...MOD_ORDER.filter((mod) => mods.has(mod)), canonicalKey(key)].join("+");
+};
+
+/** `Ctrl+Q,A` is a chord: two combos in sequence. */
+const parseSequence = (text: string) =>
+  text.split(",").map((part) => parseCombo(part)).filter(Boolean);
+
+const comboFromEvent = (event: KeyboardEvent) => {
+  const mods: string[] = [];
+  if (event.ctrlKey || event.metaKey) mods.push("Ctrl");
+  if (event.altKey) mods.push("Alt");
+  if (event.shiftKey) mods.push("Shift");
+  return [...mods, canonicalKey(event.key)].join("+");
+};
+
+/** `["Ctrl+K,A"]` → `Ctrl+K then A`; several alternatives are joined with `/`. */
+const formatKeys = (keys: string[]) =>
+  keys.map((key) => key.split(",").join(" then ")).join(" / ");
+
+type ThemeMode = "light" | "dark" | "system";
+
+type Draft = {  id: string;
   label: string;
   user: string;
   alias: string;
@@ -125,6 +174,10 @@ function csvCell(value: Value): string {
 
 export default function App() {
   const { t, language, setLanguage } = useTranslation();
+  const [themeMode, setThemeMode] = useState<ThemeMode>(
+    () => (localStorage.getItem("sqlt.theme") as ThemeMode) ?? "system",
+  );
+  const [darkTheme, setDarkTheme] = useState(false);
   const [connections, setConnections] = useState<ConnectionConfig[]>([]);
   const [selected, setSelected] = useState("");
   const [connected, setConnected] = useState<Record<string, string>>({});
@@ -263,6 +316,21 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => {
+      const dark =
+        themeMode === "dark" || (themeMode === "system" && media.matches);
+      document.documentElement.dataset.theme = dark ? "dark" : "light";
+      setDarkTheme(dark);
+      localStorage.setItem("sqlt.theme", themeMode);
+    };
+    apply();
+    if (themeMode !== "system") return;
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, [themeMode]);
+
+  useEffect(() => {
     if (connections.length === 0) setShowConnections(true);
   }, [connections.length]);
 
@@ -277,6 +345,106 @@ export default function App() {
   useEffect(() => {
     void api.listCommands().then(setCommands);
     void api.listFormatProfiles().then(setProfiles);
+  }, []);
+
+  // Every accelerator from the original menu spec (`Ctrl+Q,A` chords included)
+  // runs its command; the ones the editor already handled are skipped because
+  // CodeMirror calls `preventDefault`.
+  useEffect(() => {
+    const single = new Map<string, string>();
+    const chord = new Map<string, string>();
+    const prefixes = new Set<string>();
+    for (const command of commands) {
+      if (!command.implemented) continue;
+      for (const keys of command.keys) {
+        const combos = parseSequence(keys);
+        if (combos.length === 1) single.set(combos[0], command.name);
+        else if (combos.length === 2) {
+          chord.set(`${combos[0]}>${combos[1]}`, command.name);
+          prefixes.add(combos[0]);
+        }
+      }
+    }
+    let pending: string | null = null;
+    let timer: number | undefined;
+    const clearPending = () => {
+      if (!pending) return;
+      pending = null;
+      if (timer) window.clearTimeout(timer);
+      setStatus("");
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (event.key === "Escape" && pending) {
+        event.preventDefault();
+        clearPending();
+        return;
+      }
+      const combo = comboFromEvent(event);
+      if (pending) {
+        const name = chord.get(`${pending}>${combo}`);
+        pending = null;
+        if (timer) window.clearTimeout(timer);
+        setStatus("");
+        if (name) {
+          event.preventDefault();
+          commandRunner.current(name);
+          return;
+        }
+      }
+      if (prefixes.has(combo) && !single.has(combo)) {
+        pending = combo;
+        if (timer) window.clearTimeout(timer);
+        setStatus(`${t("chordPending")} ${combo}`);
+        timer = window.setTimeout(() => {
+          pending = null;
+          setStatus("");
+        }, 1500);
+        event.preventDefault();
+        return;
+      }
+      const name = single.get(combo);
+      if (name) {
+        event.preventDefault();
+        commandRunner.current(name);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("blur", clearPending);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("blur", clearPending);
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [commands, t]);
+
+  // Dropping a `.sql` file on the window opens it, like the original.
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void (async () => {
+      const stop = await getCurrentWebview().onDragDropEvent((event) => {
+        const payload = event.payload as { type: string; paths?: string[] };
+        if (payload.type !== "drop") return;
+        const path = (payload.paths ?? []).find((candidate) =>
+          candidate.toLowerCase().endsWith(".sql"),
+        );
+        if (!path) return;
+        void api
+          .readSqlFile(path)
+          .then((file) => {
+            setSql(file.text);
+            setStatus(path);
+          })
+          .catch((error) => setStatus(String(error)));
+      });
+      if (disposed) stop();
+      else unlisten = stop;
+    })();
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -322,6 +490,8 @@ export default function App() {
 
   const columnCache = useRef(new Map<string, string[]>());
   const editorRef = useRef<EditorHandle | null>(null);
+  const printScriptRef = useRef<HTMLPreElement | null>(null);
+  const commandRunner = useRef<(name: string) => void>(() => {});
 
   const loadColumnsFor = async (table: string) => {
     const parts = table.replace(/"/g, "").split(".");
@@ -494,7 +664,7 @@ export default function App() {
     // Errors from this run are only valid while the text it ran on is intact.
     const runVersion = bufferVersion.current;
     setRunning(true);
-    setStatus("");
+    setStatus(t("running"));
     setPanel("results");
     try {
       await api.execute(
@@ -742,6 +912,24 @@ export default function App() {
     const text = `select count(*) from ${qualified(object)}`;
     setSql(text);
     void run(text);
+  };
+
+  const transformTable = async (object: ObjectInfo) => {
+    if (!selected) {
+      setStatus(t("noConnection"));
+      return;
+    }
+    try {
+      const script = await api.tableTransformation(
+        selected,
+        schema.trim() || null,
+        object.name,
+      );
+      setSql(script);
+      setStatus(t("transformationHelper"));
+    } catch (error) {
+      setStatus(String(error));
+    }
   };
 
   const copyName = async (object: ObjectInfo) => {
@@ -1313,6 +1501,23 @@ export default function App() {
 
   const executeCommand = (name: string) => {
     setPaletteOpen(false);
+    // `File.Print`/`PrintPreview`/`PrintSetup`: the print dialog carries the
+    // preview and the printer choice (WebView2 exposes both), so all three print
+    // the script through the print stylesheet. CodeMirror only renders the
+    // viewport, hence the hidden <pre> with the whole document.
+    const printScript = () => {
+      const node = printScriptRef.current;
+      if (!node) return;
+      node.textContent = sql;
+      window.addEventListener(
+        "afterprint",
+        () => {
+          node.textContent = "";
+        },
+        { once: true },
+      );
+      window.print();
+    };
     const slot = /^Edit\.(SetRandomBookmark|GetRandomBookmark)\.(\d)$/.exec(name);
     if (slot) {
       const index = Number(slot[2]);
@@ -1324,6 +1529,21 @@ export default function App() {
       return;
     }
     switch (name) {
+      case "File.PageSetup":
+        // The original maps this to an id with no handler, and a webview has no
+        // separate page-setup API (Codex review, 2026-11-17): inform instead of
+        // adding settings that the print dialog may override.
+        setStatus(t("pageSetupInfo"));
+        break;
+      case "Tools.TableTransformationHelper":
+        if (selectedObject) void transformTable(selectedObject);
+        else setStatus(t("selectObject"));
+        break;
+      case "File.Print":
+      case "File.PrintPreview":
+      case "File.PrintSetup":
+        printScript();
+        break;
       case "File.New":
         newFile();
         break;
@@ -1404,6 +1624,19 @@ export default function App() {
       case "Script.ExplainPlan":
         void explain();
         break;
+      case "Script.ExecuteInSQLPlus": {
+        if (!selected) {
+          setStatus(t("noConnection"));
+          break;
+        }
+        // The original runs the selection when there is one, else the document.
+        const text = editorRef.current?.selectedText() || sql;
+        void api
+          .executeInSqlPlus(selected, text)
+          .then((path) => setStatus(`${t("executingSqlPlus")}: ${path}`))
+          .catch((error) => setStatus(String(error)));
+        break;
+      }
       case "Script.LoadDDL":
         if (selectedObject) void loadDdlFor(selectedObject);
         else setStatus(t("selectObject"));
@@ -1582,6 +1815,9 @@ export default function App() {
         break;
       case "Edit.ToggleCurrentRegion":
         editorRef.current?.toggleRegion();
+        break;
+      case "Edit.ExpandCurrentSubtree":
+        editorRef.current?.expandSubtree();
         break;
       case "Edit.SelectWord":
         editorRef.current?.selectWord();
@@ -1808,6 +2044,11 @@ export default function App() {
     }
   };
 
+  // The shortcut binder reads the latest dispatcher without re-subscribing.
+  useEffect(() => {
+    commandRunner.current = executeCommand;
+  });
+
   const filteredCommands = commands
     .filter((command) => command.name)
     .filter((command) => {
@@ -1887,6 +2128,7 @@ export default function App() {
 
   return (
     <div className="app">
+      <pre className="print-script" ref={printScriptRef} aria-hidden="true" />
       <header className="topbar">
         <div className="toolbar">
           <div className="brand-inline">
@@ -2092,6 +2334,21 @@ export default function App() {
             <option value="es">Español</option>
             <option value="en">English</option>
           </select>
+          <button
+            className="tb"
+            title={t("theme")}
+            onClick={() =>
+              setThemeMode(
+                themeMode === "light"
+                  ? "dark"
+                  : themeMode === "dark"
+                    ? "system"
+                    : "light",
+              )
+            }
+          >
+            {themeMode === "light" ? "☀" : themeMode === "dark" ? "☾" : "◐"}
+          </button>
           <span
             className={isConnected ? "connection-chip on" : "connection-chip"}
             title={isConnected ? connected[selected] : t("noConnection")}
@@ -2346,6 +2603,7 @@ export default function App() {
               loadColumns={loadColumnsFor}
               onChange={setSql}
               onExecute={(text, offset) => void run(text, offset)}
+              theme={darkTheme ? "dark" : "light"}
             />
           </div>
 
@@ -2464,6 +2722,13 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
+                    {!running && rows.length === 0 && (
+                      <tr className="empty">
+                        <td colSpan={Math.max(columns.length + 1, 1)}>
+                          {t("emptyRows")}
+                        </td>
+                      </tr>
+                    )}
                     {start > 0 && (
                       <tr
                         className="spacer"
@@ -2736,7 +3001,7 @@ export default function App() {
                   onClick={() => executeCommand(command.name)}
                 >
                   <span>{command.name}</span>
-                  <span className="keys">{command.keys[0] ?? ""}</span>
+                  <span className="keys">{formatKeys(command.keys)}</span>
                   {!command.implemented && <em>{t("notImplemented")}</em>}
                 </button>
               ))}

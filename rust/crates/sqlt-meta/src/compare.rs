@@ -38,6 +38,28 @@ fn normalize(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// Reads a legacy sample: UTF-8 when it parses, otherwise Windows-1252 (the
+/// Windows app writes ANSI, so a Spanish comment arrives as a lone `0xF1`).
+pub fn decode_legacy(bytes: &[u8]) -> String {
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return text.to_string();
+    }
+    const HIGH: [char; 32] = [
+        '\u{20ac}', '\u{81}', '\u{201a}', '\u{192}', '\u{201e}', '\u{2026}', '\u{2020}',
+        '\u{2021}', '\u{2c6}', '\u{2030}', '\u{160}', '\u{2039}', '\u{152}', '\u{8d}', '\u{17d}',
+        '\u{8f}', '\u{90}', '\u{2018}', '\u{2019}', '\u{201c}', '\u{201d}', '\u{2022}', '\u{2013}',
+        '\u{2014}', '\u{2dc}', '\u{2122}', '\u{161}', '\u{203a}', '\u{153}', '\u{9d}', '\u{17e}',
+        '\u{178}',
+    ];
+    bytes
+        .iter()
+        .map(|byte| match byte {
+            0x80..=0x9f => HIGH[(byte - 0x80) as usize],
+            other => char::from(*other),
+        })
+        .collect()
+}
+
 pub fn compare_ddl(expected: &str, actual: &str) -> DdlComparison {
     let expected_lines = normalize(expected);
     let actual_lines = normalize(actual);
@@ -88,6 +110,13 @@ mod tests {
         assert_eq!(comparison.expected_line.as_deref(), Some("b"));
         assert_eq!(comparison.actual_line.as_deref(), Some("B"));
         assert!(comparison.report().contains("line 2"));
+    }
+
+    #[test]
+    fn decodes_windows1252_fallbacks() {
+        assert_eq!(decode_legacy(b"a\xf1b"), "añb");
+        assert_eq!(decode_legacy("ñ".as_bytes()), "ñ");
+        assert_eq!(decode_legacy(b"a\x93b\x94"), "a\u{201c}b\u{201d}");
     }
 
     #[test]

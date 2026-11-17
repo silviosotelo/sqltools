@@ -8,6 +8,7 @@ pub mod fileio;
 pub mod migrate;
 pub mod profiles;
 pub mod script;
+pub mod sqlplus;
 pub mod state;
 pub mod store;
 pub mod templates;

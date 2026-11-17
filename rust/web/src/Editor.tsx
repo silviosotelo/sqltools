@@ -34,12 +34,15 @@ import {
   foldKeymap,
   foldedRanges,
   getIndentUnit,
+  HighlightStyle,
   indentOnInput,
   syntaxHighlighting,
   toggleFold,
   unfoldAll,
   unfoldCode,
+  unfoldEffect,
 } from "@codemirror/language";
+import { tags } from "@lezer/highlight";
 import {
   findNext,
   findPrevious,
@@ -82,6 +85,8 @@ type Props = {
   loadColumns: (table: string) => Promise<string[]>;
   onChange: (value: string) => void;
   onExecute: (sql: string, offset: number | null) => void;
+  /** Follows the app theme; CodeMirror keeps its own dark palette. */
+  theme?: "light" | "dark";
 };
 
 class BookmarkMarker extends GutterMarker {
@@ -265,6 +270,65 @@ const indentGuides = ViewPlugin.fromClass(
   { decorations: (plugin) => plugin.decorations },
 );
 
+const darkHighlightStyle = HighlightStyle.define([
+  { tag: tags.comment, color: "#6b7280", fontStyle: "italic" },
+  { tag: tags.keyword, color: "#c792ea" },
+  { tag: [tags.string, tags.inserted], color: "#c3e88d" },
+  { tag: [tags.number, tags.bool, tags.atom, tags.null], color: "#f78c6c" },
+  { tag: [tags.function(tags.variableName), tags.labelName], color: "#82aaff" },
+  { tag: [tags.typeName, tags.className, tags.namespace], color: "#ffcb6b" },
+  {
+    tag: [tags.operator, tags.operatorKeyword, tags.punctuation, tags.separator],
+    color: "#89ddff",
+  },
+  {
+    tag: [tags.variableName, tags.propertyName, tags.attributeName],
+    color: "#dfe1e5",
+  },
+  { tag: tags.invalid, color: "#ff5370" },
+]);
+
+const darkEditorTheme = EditorView.theme(
+  {
+    "&": { color: "#dfe1e5", backgroundColor: "#2b2d30" },
+    ".cm-content": { caretColor: "#dfe1e5" },
+    ".cm-cursor, .cm-dropCursor": { borderLeftColor: "#dfe1e5" },
+    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
+      backgroundColor: "#2e4b73",
+    },
+    ".cm-activeLine": { backgroundColor: "#2f3236" },
+    ".cm-activeLineGutter": { backgroundColor: "#2f3236" },
+    ".cm-gutters": {
+      backgroundColor: "#26282b",
+      color: "#9aa0a6",
+      borderRight: "1px solid #3a3d41",
+    },
+    ".cm-foldPlaceholder": {
+      backgroundColor: "#3a3d41",
+      color: "#dfe1e5",
+      border: "none",
+    },
+    ".cm-lineNumbers .cm-gutterElement": { color: "#6b7280" },
+    ".cm-tooltip": {
+      backgroundColor: "#2b2d30",
+      border: "1px solid #4a4e54",
+      color: "#dfe1e5",
+    },
+    ".cm-tooltip-autocomplete > ul > li[aria-selected]": {
+      backgroundColor: "#2e4b73",
+      color: "#fff",
+    },
+    ".cm-searchMatch": { backgroundColor: "#4a4e54" },
+  },
+  { dark: true },
+);
+
+/** Dark adds its own palette; light keeps `defaultHighlightStyle`. */
+const themeExtensions = (theme: "light" | "dark") =>
+  theme === "dark"
+    ? [darkEditorTheme, syntaxHighlighting(darkHighlightStyle)]
+    : [];
+
 const editorSetup = [
   lineNumbers(),
   highlightActiveLineGutter(),
@@ -351,6 +415,7 @@ export type EditorHandle = {
   collapseRegion: () => void;
   expandRegion: () => void;
   toggleRegion: () => void;
+  expandSubtree: () => void;
   selectWord: () => void;
   copyAppend: () => Promise<void>;
   cutAppend: () => Promise<void>;
@@ -480,6 +545,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
   loadColumns,
   onChange,
   onExecute,
+  theme: themeMode = "light",
 }: Props, ref) {
   const host = useRef<HTMLDivElement | null>(null);
   const view = useRef<EditorView | null>(null);
@@ -491,8 +557,19 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
     rectangular: false,
     compartment: new Compartment(),
   });
+  const theme = useRef({
+    mode: themeMode,
+    compartment: new Compartment(),
+  });
   const callbacks = useRef({ onChange, onExecute, tables, loadColumns });
   callbacks.current = { onChange, onExecute, tables, loadColumns };
+  theme.current.mode = themeMode;
+
+  useEffect(() => {
+    view.current?.dispatch({
+      effects: theme.current.compartment.reconfigure(themeExtensions(themeMode)),
+    });
+  }, [themeMode]);
 
   const transformSelection = (transform: (text: string) => string) => {
     const editor = view.current;
@@ -844,6 +921,43 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
     toggleRegion: () => {
       if (view.current) toggleFold(view.current);
     },
+    // `FoldModel::ExpandSubtree`: unfold the foldable region that contains the
+    // cursor and every fold nested inside it, by line span.
+    expandSubtree: () => {
+      const editor = view.current;
+      if (!editor) return;
+      const head = editor.state.selection.main.head;
+      const headLine = editor.state.doc.lineAt(head).number;
+      // `FoldModel::FindEnclosingAvailable` works on line numbers, so the anchor
+      // line of a region counts as inside it (fold offsets start after the token).
+      const containsLine = (range: { from: number; to: number }) => {
+        const start = editor.state.doc.lineAt(range.from).number;
+        const end = editor.state.doc.lineAt(range.to).number;
+        return headLine >= start && headLine <= end;
+      };
+      const ranges: Array<{ from: number; to: number }> = [];
+      foldedRanges(editor.state).between(
+        0,
+        editor.state.doc.length,
+        (from, to) => {
+          ranges.push({ from, to });
+        },
+      );
+      let enclosing = ranges
+        .filter(containsLine)
+        .sort((a, b) => a.to - a.from - (b.to - b.from))[0];
+      if (!enclosing) {
+        unfoldCode(editor);
+        return;
+      }
+      const effects = ranges
+        .filter(
+          (range) =>
+            range.from >= enclosing.from && range.to <= enclosing.to,
+        )
+        .map((range) => unfoldEffect.of(range));
+      if (effects.length) editor.dispatch({ effects });
+    },
     selectWord: () => {
       const editor = view.current;
       if (!editor) return;
@@ -1146,6 +1260,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
           selection.current.compartment.of(
             selection.current.rectangular ? rectangularSelection() : [],
           ),
+          theme.current.compartment.of(themeExtensions(theme.current.mode)),
           sql({ dialect: StandardSQL, upperCaseKeywords: true }),
           autocompletion({
             override: [
