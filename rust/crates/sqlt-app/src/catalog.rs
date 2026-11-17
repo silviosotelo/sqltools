@@ -176,6 +176,12 @@ pub fn extract_schema_ddl(
     limit: usize,
     options: QueryOptions,
 ) -> Result<(String, usize), String> {
+    // Same OCI session as the script runner: serialize the whole extraction so
+    // it cannot interleave with a running script.
+    let _execution = session.lock_execution();
+    if session.is_closed() {
+        return Err("The connection was closed".to_string());
+    }
     let objects = list_objects(session, schema, object_type, options)?;
     let mut out = String::new();
     let mut done = 0usize;
