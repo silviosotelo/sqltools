@@ -335,7 +335,6 @@ const editorSetup = [
   highlightActiveLineGutter(),
   highlightSpecialChars(),
   history(),
-  foldGutter(),
   drawSelection(),
   dropCursor(),
   EditorState.allowMultipleSelections.of(true),
@@ -418,6 +417,7 @@ export type EditorHandle = {
   toggleRegion: () => void;
   expandSubtree: () => void;
   autocomplete: () => void;
+  toggleFolding: () => boolean;
   selectWord: () => void;
   copyAppend: () => Promise<void>;
   cutAppend: () => Promise<void>;
@@ -561,6 +561,10 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
   });
   const theme = useRef({
     mode: themeMode,
+    compartment: new Compartment(),
+  });
+  const folding = useRef({
+    enabled: true,
     compartment: new Compartment(),
   });
   const callbacks = useRef({ onChange, onExecute, tables, loadColumns });
@@ -963,6 +967,17 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
     autocomplete: () => {
       if (view.current) startCompletion(view.current);
     },
+    toggleFolding: () => {
+      const editor = view.current;
+      if (!editor) return folding.current.enabled;
+      folding.current.enabled = !folding.current.enabled;
+      editor.dispatch({
+        effects: folding.current.compartment.reconfigure(
+          folding.current.enabled ? foldGutter() : [],
+        ),
+      });
+      return folding.current.enabled;
+    },
     selectWord: () => {
       const editor = view.current;
       if (!editor) return;
@@ -1266,6 +1281,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
             selection.current.rectangular ? rectangularSelection() : [],
           ),
           theme.current.compartment.of(themeExtensions(theme.current.mode)),
+          folding.current.compartment.of(foldGutter()),
           sql({ dialect: StandardSQL, upperCaseKeywords: true }),
           autocompletion({
             override: [

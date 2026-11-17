@@ -95,6 +95,10 @@ const IMPLEMENTED: &[&str] = &[
     "File.PageSetup",
     "Tools.TableTransformationHelper",
     "Edit.Autocomplete",
+    "Edit.ToggleFoldingEnabled",
+    "Grid.ShowPopupViewer",
+    "Help.Help",
+    "Help.ContextHelp",
     "Edit.SelectWord",
     "Edit.CopyAppend",
     "Edit.CutAppend",
@@ -330,7 +334,7 @@ mod tests {
                 .iter()
                 .filter(|command| command.implemented)
                 .count(),
-            179
+            183
         );
     }
 }

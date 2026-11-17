@@ -213,6 +213,15 @@ export default function App() {
     x: number;
     y: number;
   } | null>(null);
+  const [activeCell, setActiveCell] = useState<{
+    column: string;
+    value: string;
+  } | null>(null);
+  const [cellView, setCellView] = useState<{
+    column: string;
+    value: string;
+  } | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [stats, setStats] = useState<StatEntry[]>([]);
   const [output, setOutput] = useState<string[]>([]);
   const [scriptErrors, setScriptErrors] = useState<
@@ -1822,6 +1831,19 @@ export default function App() {
       case "Edit.Autocomplete":
         editorRef.current?.autocomplete();
         break;
+      case "Edit.ToggleFoldingEnabled": {
+        const enabled = editorRef.current?.toggleFolding();
+        setStatus(enabled ? t("foldingOn") : t("foldingOff"));
+        break;
+      }
+      case "Grid.ShowPopupViewer":
+        if (activeCell) setCellView(activeCell);
+        else setStatus(t("selectCell"));
+        break;
+      case "Help.Help":
+      case "Help.ContextHelp":
+        setHelpOpen(true);
+        break;
       case "Edit.SelectWord":
         editorRef.current?.selectWord();
         break;
@@ -2747,6 +2769,18 @@ export default function App() {
                           <td
                             key={columnIndex}
                             className={value.kind === "null" ? "null" : ""}
+                            onClick={() =>
+                              setActiveCell({
+                                column: columns[columnIndex]?.name ?? "",
+                                value: cellText(value),
+                              })
+                            }
+                            onDoubleClick={() =>
+                              setCellView({
+                                column: columns[columnIndex]?.name ?? "",
+                                value: cellText(value),
+                              })
+                            }
                           >
                             {cellText(value)}
                           </td>
@@ -3008,6 +3042,49 @@ export default function App() {
                   {!command.implemented && <em>{t("notImplemented")}</em>}
                 </button>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+      {cellView && (
+        <div className="palette-backdrop" onClick={() => setCellView(null)}>
+          <div className="palette" onClick={(event) => event.stopPropagation()}>
+            <div className="panel-title">
+              {cellView.column || t("cellViewer")}
+            </div>
+            <pre className="cell-value">{cellView.value}</pre>
+            <div className="row">
+              <button onClick={() => void navigator.clipboard.writeText(cellView.value)}>
+                {t("copyValue")}
+              </button>
+              <button onClick={() => setCellView(null)}>{t("close")}</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {helpOpen && (
+        <div className="palette-backdrop" onClick={() => setHelpOpen(false)}>
+          <div className="palette" onClick={(event) => event.stopPropagation()}>
+            <div className="panel-title">{t("shortcuts")}</div>
+            <div className="palette-list">
+              {commands
+                .filter((command) => command.name && command.keys.length > 0)
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map((command) => (
+                  <button
+                    key={command.id}
+                    onClick={() => {
+                      setHelpOpen(false);
+                      executeCommand(command.name);
+                    }}
+                  >
+                    <span>{command.name}</span>
+                    <span className="keys">{formatKeys(command.keys)}</span>
+                  </button>
+                ))}
+            </div>
+            <div className="row">
+              <button onClick={() => setHelpOpen(false)}>{t("close")}</button>
             </div>
           </div>
         </div>
