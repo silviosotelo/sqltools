@@ -1,4 +1,32 @@
-# SQLTools Mac
+# SQLTools
+
+SQLTools is a cross-platform Oracle database client for PL/SQL and APEX developers.
+This repository contains the current Rust/Tauri port under [`rust/`](rust/) and the
+earlier Qt 6 macOS port.
+
+- **Downloads:** [GitHub Releases](https://github.com/silviosotelo/sqltools/releases)
+- **License:** GNU GPL v3 (see [`LICENSE`](LICENSE))
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by
+[SignPath Foundation](https://signpath.org).
+
+- Committers/authors and reviewers: [@silviosotelo](https://github.com/silviosotelo)
+- Approvers: [@silviosotelo](https://github.com/silviosotelo)
+- Process and artifact scope: [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md)
+- Privacy policy: [PRIVACY.md](PRIVACY.md)
+
+## Current application (Rust + Tauri)
+
+The Rust workspace under [`rust/`](rust/) builds the cross-platform desktop application
+(Windows, macOS, Linux): Oracle connections with keyring storage, SQL editor, streaming
+results, object explorer, DDL, SQL formatter, command palette, workspaces and i18n
+(es/en). Build and test instructions are in [`rust/README.md`](rust/README.md).
+
+---
+
+## Legacy macOS Qt port (Spanish)
 
 Port nativo para macOS de **[SQLTools](https://sqltools.net)**, el cliente Oracle para desarrolladores de PL/SQL y APEX (originalmente para Windows/MFC). Interfaz en Qt 6, conexión mediante Oracle Instant Client (OCI).
 

@@ -96,12 +96,11 @@ jobs:
       - run: npm --prefix rust/web run build
       # The Linux AppImage step downloads AppRun from GitHub; a reset there
       # failed the job even though deb/rpm were already built.
-      - name: Build bundles
+      # Missing secrets resolve to empty strings; exporting them makes Tauri try
+      # to import an empty certificate (macOS bundle failed that way). Export
+      # only the secrets that are actually configured.
+      - name: Configure optional signing
         shell: bash
-        working-directory: rust/desktop
-        # Signing/notarization and updater signatures activate automatically
-        # when these repository secrets exist; without them the build stays
-        # unsigned (the current state).
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -111,6 +110,33 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          write_env() {
+            local name="$1" value="$2" delimiter
+            [ -n "$value" ] || return 0
+            if [[ "$value" == *$'\n'* ]]; then
+              delimiter="EOF_${RANDOM}${RANDOM}${RANDOM}"
+              {
+                printf '%s<<%s\n' "$name" "$delimiter"
+                printf '%s\n' "$value"
+                printf '%s\n' "$delimiter"
+              } >> "$GITHUB_ENV"
+            else
+              printf '%s=%s\n' "$name" "$value" >> "$GITHUB_ENV"
+            fi
+          }
+          write_env TAURI_SIGNING_PRIVATE_KEY "${TAURI_SIGNING_PRIVATE_KEY:-}"
+          write_env TAURI_SIGNING_PRIVATE_KEY_PASSWORD "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
+          write_env APPLE_CERTIFICATE "${APPLE_CERTIFICATE:-}"
+          write_env APPLE_CERTIFICATE_PASSWORD "${APPLE_CERTIFICATE_PASSWORD:-}"
+          write_env APPLE_SIGNING_IDENTITY "${APPLE_SIGNING_IDENTITY:-}"
+          write_env APPLE_ID "${APPLE_ID:-}"
+          write_env APPLE_PASSWORD "${APPLE_PASSWORD:-}"
+          write_env APPLE_TEAM_ID "${APPLE_TEAM_ID:-}"
+      - name: Build bundles
+        shell: bash
+        working-directory: rust/desktop
         run: |
           for attempt in 1 2 3; do
             npx --yes @tauri-apps/cli@^2 build && exit 0
