@@ -24,6 +24,8 @@ The Rust workspace under [`rust/`](rust/) builds the cross-platform desktop appl
 results, object explorer, DDL, SQL formatter, command palette, workspaces and i18n
 (es/en). Build and test instructions are in [`rust/README.md`](rust/README.md).
 
+![SQLTools main window](docs/screenshots/ui-main.png)
+
 ---
 
 ## Legacy macOS Qt port (Spanish)
