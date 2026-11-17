@@ -218,6 +218,12 @@ export default function App() {
     if (connections.length === 0) setShowConnections(true);
   }, [connections.length]);
 
+  // Changing the buffer invalidates the offsets of the last run's errors.
+  useEffect(() => {
+    setScriptErrors([]);
+    setErrorIndex(-1);
+  }, [sql]);
+
   useEffect(() => {
     void api.listCommands().then(setCommands);
     void api.listFormatProfiles().then(setProfiles);
