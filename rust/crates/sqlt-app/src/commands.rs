@@ -60,6 +60,7 @@ const IMPLEMENTED: &[&str] = &[
     "Edit.CollapseToLevel3",
     "Edit.SyntaxGutter",
     "Edit.Ruler",
+    "Edit.ColumnMarkers",
     "Edit.FindInFile",
     "Edit.OpenFileUnderCursor",
     "Edit.VisibleSpaces",
@@ -169,6 +170,7 @@ const IMPLEMENTED: &[&str] = &[
     "File.NewExtended",
     "Session.Reconnect",
     "Session.RefreshObjectCache",
+    "Tools.ExtractSchemaDDL",
     "Session.Connect",
     "Session.Disconnect",
     "Session.Commit",
@@ -261,7 +263,7 @@ mod tests {
                 .iter()
                 .filter(|command| command.implemented)
                 .count(),
-            166
+            168
         );
     }
 }

@@ -367,6 +367,7 @@ export type EditorHandle = {
   foldToLevel: (level: number) => void;
   toggleSyntaxGutter: () => void;
   toggleRuler: () => void;
+  toggleColumnMarkers: () => void;
   toggleVisibleSpaces: () => void;
   toggleIndentGuides: () => void;
   goToOffset: (offset: number) => void;
@@ -976,6 +977,11 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
       const editor = view.current;
       if (!editor) return;
       editor.dom.classList.toggle("show-ruler");
+    },
+    toggleColumnMarkers: () => {
+      const editor = view.current;
+      if (!editor) return;
+      editor.dom.classList.toggle("show-column-markers");
     },
     toggleVisibleSpaces: () => {
       const editor = view.current;

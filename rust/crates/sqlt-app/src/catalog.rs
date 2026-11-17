@@ -166,6 +166,42 @@ pub fn load_table_ddl_meta(
 ) -> Result<String, String> {
     sqlt_meta::loader::load_table_ddl(session, schema, name, options)
 }
+/// DDL for the objects matching the explorer filter, up to `limit`.
+/// Tables use the ported MetaDictionary path; other objects use
+/// `DBMS_METADATA`. Objects that fail are listed as comments in the output.
+pub fn extract_schema_ddl(
+    session: &Session,
+    schema: Option<&str>,
+    object_type: Option<&str>,
+    limit: usize,
+    options: QueryOptions,
+) -> Result<(String, usize), String> {
+    let objects = list_objects(session, schema, object_type, options)?;
+    let mut out = String::new();
+    let mut done = 0usize;
+    for object in objects.iter().take(limit) {
+        let ddl = if object.object_type == "TABLE" {
+            load_table_ddl_meta(session, schema, &object.name, options)
+        } else {
+            load_ddl(session, schema, &object.name, &object.object_type, options)
+        };
+        match ddl {
+            Ok(text) => {
+                out.push_str(&text);
+                if !text.ends_with("\n\n") {
+                    out.push('\n');
+                }
+                done += 1;
+            }
+            Err(error) => out.push_str(&format!(
+                "-- {} ({}): {}\n\n",
+                object.name, object.object_type, error
+            )),
+        }
+    }
+    Ok((out, done))
+}
+
 pub fn session_stats(
     session: &Session,
     options: QueryOptions,

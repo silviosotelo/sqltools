@@ -407,6 +407,29 @@ fn list_commands() -> Vec<sqlt_app::CommandSpec> {
     sqlt_app::registry()
 }
 
+#[tauri::command]
+fn extract_schema_ddl(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    schema: Option<String>,
+    object_type: Option<String>,
+    limit: usize,
+    path: String,
+) -> Result<usize, String> {
+    let session = state.session(&connection_id)?;
+    let options = state.query_options(&connection_id);
+    let (text, done) = sqlt_app::catalog::extract_schema_ddl(
+        &session,
+        schema.as_deref(),
+        object_type.as_deref(),
+        limit.max(1),
+        options,
+    )?;
+    let header = format!("-- SQLTools DDL extraction ({done} objects)\n\n");
+    std::fs::write(&path, format!("{header}{text}")).map_err(|e| e.to_string())?;
+    Ok(done)
+}
+
 #[derive(Clone, serde::Serialize)]
 struct StatementRange {
     start: usize,
@@ -790,6 +813,7 @@ fn main() {
             list_grants,
             list_commands,
             statement_ranges,
+            extract_schema_ddl,
             list_templates,
             load_template,
             save_template,

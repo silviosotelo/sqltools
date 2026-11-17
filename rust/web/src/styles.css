@@ -830,3 +830,17 @@ tr.spacer td {
   gap: 4px;
   font-size: 12px;
 }
+
+.show-column-markers .cm-scroller {
+  position: relative;
+}
+
+.show-column-markers .cm-scroller::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(90deg, transparent 39ch, #d8d8d8 39ch, #d8d8d8 40ch, transparent 40ch),
+    linear-gradient(90deg, transparent 119ch, #d8d8d8 119ch, #d8d8d8 120ch, transparent 120ch);
+}

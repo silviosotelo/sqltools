@@ -97,6 +97,20 @@ export const api = {
     invoke<string | null>("pick_sql_save_path", { suggested }),
   statementRanges: (sql: string) =>
     invoke<StatementRange[]>("statement_ranges", { sql }),
+  extractSchemaDdl: (
+    connectionId: string,
+    schema: string | null,
+    objectType: string | null,
+    limit: number,
+    path: string,
+  ) =>
+    invoke<number>("extract_schema_ddl", {
+      connectionId,
+      schema,
+      objectType,
+      limit,
+      path,
+    }),
   listTemplates: () => invoke<string[]>("list_templates"),
   loadTemplate: (name: string) =>
     invoke<Template | null>("load_template", { name }),

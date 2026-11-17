@@ -1079,6 +1079,31 @@ export default function App() {
     setStatus(`${t("error")} ${index + 1}/${sorted.length}`);
   };
 
+  const extractSchemaDdl = async () => {
+    if (!selected) return;
+    const answer = window.prompt(t("maxObjects"), "50");
+    if (answer === null) return;
+    const limit = Number(answer);
+    if (!Number.isFinite(limit) || limit <= 0) {
+      setStatus(t("invalidNumber"));
+      return;
+    }
+    try {
+      const path = await api.pickSqlSavePath("schema_ddl.sql");
+      if (!path) return;
+      const count = await api.extractSchemaDdl(
+        selected,
+        schema.trim() || null,
+        objectType.trim() || null,
+        Math.floor(limit),
+        path,
+      );
+      setStatus(`${t("extracted")}: ${count} → ${path}`);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
   const openNewExtended = async () => {
     try {
       setSnippetNames(await api.listTemplates());
@@ -1587,6 +1612,9 @@ export default function App() {
       case "Edit.Ruler":
         editorRef.current?.toggleRuler();
         break;
+      case "Edit.ColumnMarkers":
+        editorRef.current?.toggleColumnMarkers();
+        break;
       case "Edit.VisibleSpaces":
         editorRef.current?.toggleVisibleSpaces();
         break;
@@ -1658,6 +1686,9 @@ export default function App() {
         break;
       case "View.FilePanel":
         setFilePanelOpen(true);
+        break;
+      case "Tools.ExtractSchemaDDL":
+        void extractSchemaDdl();
         break;
       case "View.FindInFiles":
         setFindQuery("");
