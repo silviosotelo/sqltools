@@ -1819,6 +1819,9 @@ export default function App() {
       case "Edit.ExpandCurrentSubtree":
         editorRef.current?.expandSubtree();
         break;
+      case "Edit.Autocomplete":
+        editorRef.current?.autocomplete();
+        break;
       case "Edit.SelectWord":
         editorRef.current?.selectWord();
         break;

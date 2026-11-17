@@ -94,6 +94,7 @@ const IMPLEMENTED: &[&str] = &[
     "File.PrintSetup",
     "File.PageSetup",
     "Tools.TableTransformationHelper",
+    "Edit.Autocomplete",
     "Edit.SelectWord",
     "Edit.CopyAppend",
     "Edit.CutAppend",
@@ -198,6 +199,39 @@ const IMPLEMENTED: &[&str] = &[
     "Workspace.Open",
 ];
 
+/// Commands the original `GUICommandDictionary` registers but
+/// `menu_spec.json` does not list (toolbar entries and window commands).
+const EXTRA: &[&str] = &[
+    "Edit.Autocomplete",
+    "Edit.FormatSQLwithSettings",
+    "Edit.JumpNext",
+    "Edit.JumpPrevious",
+    "Edit.ToggleFoldingEnabled",
+    "Grid.ShowPopupViewer",
+    "Help.ContextHelp",
+    "Help.Help",
+    "Test",
+    "Tools.SessionDdlGridSettings",
+    "View.ExplainPlan",
+    "View.NextPane",
+    "View.ObjectTreeSetFocus",
+    "View.PrevPane",
+    "View.Toolbar",
+    "Window.ArrangeIcons",
+    "Window.Cascade",
+    "Window.LastWindow",
+    "Window.NewWindow",
+    "Window.NextPane",
+    "Window.NextTab",
+    "Window.NextWindow",
+    "Window.PrevWindow",
+    "Window.PreviousPane",
+    "Window.PreviousTab",
+    "Window.TileHorizontally",
+    "Window.TileVertically",
+    "Workspace.OpenQuick",
+];
+
 pub fn registry() -> Vec<CommandSpec> {
     let root: Value = serde_json::from_str(include_str!("../../../../ui/spec/menu_spec.json"))
         .expect("menu_spec.json is valid");
@@ -236,6 +270,22 @@ pub fn registry() -> Vec<CommandSpec> {
         }
     }
     out.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
+    // The Windows dictionary has commands without a menu entry; expose them too
+    // so the registry matches the original's command set.
+    let known: std::collections::BTreeSet<String> =
+        out.iter().map(|command| command.name.clone()).collect();
+    for name in EXTRA {
+        if known.contains(*name) {
+            continue;
+        }
+        out.push(CommandSpec {
+            id: format!("extra.{name}"),
+            name: (*name).to_string(),
+            keys: Vec::new(),
+            help: String::new(),
+            implemented: IMPLEMENTED.contains(name),
+        });
+    }
     out
 }
 
@@ -246,7 +296,7 @@ mod tests {
     #[test]
     fn loads_all_original_commands() {
         let commands = registry();
-        assert_eq!(commands.len(), 235);
+        assert_eq!(commands.len(), 235 + EXTRA.len());
         assert!(commands
             .iter()
             .any(|command| command.name == "Script.Execute"));
@@ -280,7 +330,7 @@ mod tests {
                 .iter()
                 .filter(|command| command.implemented)
                 .count(),
-            178
+            179
         );
     }
 }

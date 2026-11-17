@@ -22,6 +22,7 @@ import {
   closeBrackets,
   closeBracketsKeymap,
   completionKeymap,
+  startCompletion,
 } from "@codemirror/autocomplete";
 import {
   bracketMatching,
@@ -416,6 +417,7 @@ export type EditorHandle = {
   expandRegion: () => void;
   toggleRegion: () => void;
   expandSubtree: () => void;
+  autocomplete: () => void;
   selectWord: () => void;
   copyAppend: () => Promise<void>;
   cutAppend: () => Promise<void>;
@@ -957,6 +959,9 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
         )
         .map((range) => unfoldEffect.of(range));
       if (effects.length) editor.dispatch({ effects });
+    },
+    autocomplete: () => {
+      if (view.current) startCompletion(view.current);
     },
     selectWord: () => {
       const editor = view.current;
