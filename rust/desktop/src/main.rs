@@ -14,7 +14,10 @@ enum QueryEvent {
     Columns(Vec<ColumnMeta>),
     Batch(Batch),
     Output(Vec<String>),
-    StatementError(String),
+    StatementError {
+        message: String,
+        offset: usize,
+    },
     Done {
         #[serde(rename = "rows")]
         rows: usize,
@@ -31,7 +34,9 @@ fn query_event(event: sqlt_app::script::ScriptEvent) -> QueryEvent {
         ScriptEvent::Columns(columns) => QueryEvent::Columns(columns),
         ScriptEvent::Batch(batch) => QueryEvent::Batch(batch),
         ScriptEvent::Output(lines) => QueryEvent::Output(lines),
-        ScriptEvent::StatementError(message) => QueryEvent::StatementError(message),
+        ScriptEvent::StatementError { message, offset } => {
+            QueryEvent::StatementError { message, offset }
+        }
     }
 }
 
@@ -136,7 +141,7 @@ fn execute(
         // with failed statements as a clean success.
         let mut first_error: Option<String> = None;
         let emit = |event| {
-            if let ScriptEvent::StatementError(message) = &event {
+            if let ScriptEvent::StatementError { message, .. } = &event {
                 if first_error.is_none() {
                     first_error = Some(message.clone());
                 }

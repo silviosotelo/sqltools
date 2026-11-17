@@ -369,6 +369,8 @@ export type EditorHandle = {
   toggleRuler: () => void;
   toggleVisibleSpaces: () => void;
   toggleIndentGuides: () => void;
+  goToOffset: (offset: number) => void;
+  goToLineNumber: (line: number) => void;
   setSelectionMode: (mode: "column" | "stream" | "toggle") => boolean;
   justifyColumn: (mode: "left" | "right" | "center") => void;
   insertColumn: () => void;
@@ -996,6 +998,27 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
           displayExtensions(current.flags),
         ),
       });
+    },
+    goToOffset: (offset) => {
+      const editor = view.current;
+      if (!editor) return;
+      const position = Math.max(0, Math.min(offset, editor.state.doc.length));
+      editor.dispatch({
+        selection: { anchor: position },
+        effects: EditorView.scrollIntoView(position, { y: "center" }),
+      });
+      editor.focus();
+    },
+    goToLineNumber: (line) => {
+      const editor = view.current;
+      if (!editor) return;
+      const number = Math.max(1, Math.min(line, editor.state.doc.lines));
+      const position = editor.state.doc.line(number).from;
+      editor.dispatch({
+        selection: { anchor: position },
+        effects: EditorView.scrollIntoView(position, { y: "center" }),
+      });
+      editor.focus();
     },
     setSelectionMode: (mode) => {
       const editor = view.current;

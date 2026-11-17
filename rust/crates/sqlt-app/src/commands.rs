@@ -133,12 +133,16 @@ const IMPLEMENTED: &[&str] = &[
     "Edit.DatetimeStamp",
     "Script.ExecuteFromCursor",
     "Script.HaltOnError",
+    "Script.NextError",
+    "Script.PreviousError",
     "Script.ExecuteCurrentAlt",
     "Script.QuickQuery",
     "Script.LoadDDLWithDbmsMetadata",
     "Script.FindObject",
     "View.StatusBar",
     "View.Snippets",
+    "View.CodeOutline",
+    "View.OpenFiles",
     "Help.AboutOpenEditor",
     "Help.SqlHelp",
     "View.History",
@@ -250,7 +254,7 @@ mod tests {
                 .iter()
                 .filter(|command| command.implemented)
                 .count(),
-            155
+            159
         );
     }
 }

@@ -200,7 +200,7 @@ fn runs_multi_statement_scripts() {
             ScriptEvent::Columns(_) => result_sets += 1,
             ScriptEvent::Batch(batch) => rows += batch.rows.len(),
             ScriptEvent::Output(_) => {}
-            ScriptEvent::StatementError(_) => {}
+            ScriptEvent::StatementError { .. } => {}
         },
     )
     .expect("script");
@@ -576,7 +576,7 @@ fn continue_after_error_runs_the_remaining_statements() {
     let mut statement_errors = 0usize;
     let mut rows = 0usize;
     let outcome = run_script_continue(&session, sql, options, 0, None, |event| match event {
-        ScriptEvent::StatementError(_) => statement_errors += 1,
+        ScriptEvent::StatementError { .. } => statement_errors += 1,
         ScriptEvent::Batch(batch) => rows += batch.rows.len(),
         _ => {}
     })

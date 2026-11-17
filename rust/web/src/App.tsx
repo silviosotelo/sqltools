@@ -162,6 +162,15 @@ export default function App() {
   } | null>(null);
   const [stats, setStats] = useState<StatEntry[]>([]);
   const [output, setOutput] = useState<string[]>([]);
+  const [scriptErrors, setScriptErrors] = useState<
+    { message: string; offset: number }[]
+  >([]);
+  const [errorIndex, setErrorIndex] = useState(-1);
+  const [outlineOpen, setOutlineOpen] = useState(false);
+  const [outline, setOutline] = useState<{ line: number; label: string }[]>(
+    [],
+  );
+  const [openFilesOpen, setOpenFilesOpen] = useState(false);
   const [profiles, setProfiles] = useState<string[]>([]);
   const [profile, setProfile] = useState("");
   const [profileOptions, setProfileOptions] = useState<FormatOptions | null>(
@@ -354,6 +363,8 @@ export default function App() {
     setRows([]);
     setColumns([]);
     setOutput([]);
+    setScriptErrors([]);
+    setErrorIndex(-1);
     setScrollTop(0);
     setRunning(true);
     setStatus("");
@@ -376,7 +387,11 @@ export default function App() {
             setOutput((current) => [...current, ...event.data]);
             setPanel("output");
           } else if (event.type === "statementerror") {
-            setOutput((current) => [...current, `${t("error")}: ${event.data}`]);
+            setScriptErrors((current) => [...current, event.data]);
+            setOutput((current) => [
+              ...current,
+              `${t("error")}: ${event.data.message}`,
+            ]);
             setPanel("output");
           } else if (event.type === "done") {
             setRunning(false);
@@ -946,6 +961,57 @@ export default function App() {
     }
   };
 
+  const navigateError = (direction: 1 | -1) => {
+    if (scriptErrors.length === 0) {
+      setStatus(t("noErrors"));
+      return;
+    }
+    const sorted = [...scriptErrors].sort((a, b) => a.offset - b.offset);
+    const index =
+      direction === 1
+        ? (errorIndex + 1) % sorted.length
+        : (errorIndex - 1 + sorted.length) % sorted.length;
+    setErrorIndex(index);
+    editorRef.current?.goToOffset(sorted[index].offset);
+    setStatus(`${t("error")} ${index + 1}/${sorted.length}`);
+  };
+
+  const buildOutline = () => {
+    const entries: { line: number; label: string }[] = [];
+    sql.split("\n").forEach((line, index) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      const create =
+        /^create\s+(?:or\s+replace\s+)?(?:editionable\s+)?(table|view|materialized\s+view|procedure|function|package|trigger|type|sequence)\s+([\w$#."]+)/i.exec(
+          trimmed,
+        );
+      if (create) {
+        entries.push({
+          line: index + 1,
+          label: `${create[1].toUpperCase()} ${create[2]}`,
+        });
+        return;
+      }
+      const first = /^([a-z]+)/i.exec(trimmed)?.[1]?.toUpperCase() ?? "";
+      if (
+        [
+          "SELECT",
+          "INSERT",
+          "UPDATE",
+          "DELETE",
+          "MERGE",
+          "WITH",
+          "BEGIN",
+          "DECLARE",
+        ].includes(first)
+      ) {
+        entries.push({ line: index + 1, label: first });
+      }
+    });
+    setOutline(entries);
+    setOutlineOpen(true);
+  };
+
   const expandTemplate = async () => {
     const name = window.prompt(t("templateName"));
     if (!name) return;
@@ -1390,6 +1456,18 @@ export default function App() {
         break;
       case "View.Snippets":
         void openSnippets();
+        break;
+      case "View.CodeOutline":
+        buildOutline();
+        break;
+      case "View.OpenFiles":
+        setOpenFilesOpen(true);
+        break;
+      case "Script.NextError":
+        navigateError(1);
+        break;
+      case "Script.PreviousError":
+        navigateError(-1);
         break;
       case "Edit.ColumnSelection":
       case "Edit.StreamSelection":
@@ -2395,6 +2473,72 @@ export default function App() {
             </fieldset>
             <div className="row">
               <button className="plain" onClick={() => setSettingsOpen(false)}>
+                {t("close")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {outlineOpen && (
+        <div className="palette-backdrop" onClick={() => setOutlineOpen(false)}>
+          <div
+            className="settings-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2>{t("outline")}</h2>
+            {outline.length === 0 ? (
+              <p className="no-results">{t("noOutline")}</p>
+            ) : (
+              <div className="palette-list">
+                {outline.map((entry) => (
+                  <button
+                    key={`${entry.line}-${entry.label}`}
+                    onClick={() => {
+                      editorRef.current?.goToLineNumber(entry.line);
+                      setOutlineOpen(false);
+                    }}
+                  >
+                    <span>{entry.label}</span>
+                    <span className="keys">{entry.line}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="row">
+              <button className="plain" onClick={() => setOutlineOpen(false)}>
+                {t("close")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {openFilesOpen && (
+        <div
+          className="palette-backdrop"
+          onClick={() => setOpenFilesOpen(false)}
+        >
+          <div
+            className="settings-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2>{t("openFiles")}</h2>
+            <div className="palette-list">
+              <button
+                onClick={() => {
+                  setOpenFilesOpen(false);
+                  if (confirmDiscard()) newFile();
+                }}
+              >
+                <span>
+                  {filePath
+                    ? filePath.split(/[\\/]/).pop()
+                    : t("untitled")}
+                </span>
+                <span className="keys">{t("close")}</span>
+              </button>
+            </div>
+            <div className="row">
+              <button className="plain" onClick={() => setOpenFilesOpen(false)}>
                 {t("close")}
               </button>
             </div>

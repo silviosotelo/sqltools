@@ -13,7 +13,11 @@ pub enum ScriptEvent {
     /// `DBMS_OUTPUT` lines drained after a statement.
     Output(Vec<String>),
     /// A statement failed while `halt_on_error` is off; the script continues.
-    StatementError(String),
+    /// `offset` is the UTF-16 position of the statement start.
+    StatementError {
+        message: String,
+        offset: usize,
+    },
 }
 
 /// Statements that produce a result set. Everything else (DML, DDL, PL/SQL)
@@ -122,7 +126,10 @@ where
                 if halt_on_error {
                     return Err(error);
                 }
-                emit(ScriptEvent::StatementError(error));
+                emit(ScriptEvent::StatementError {
+                    message: error,
+                    offset: statement.start,
+                });
                 errors += 1;
                 continue;
             }
