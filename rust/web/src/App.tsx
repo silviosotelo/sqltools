@@ -166,6 +166,7 @@ export default function App() {
     { message: string; offset: number }[]
   >([]);
   const [errorIndex, setErrorIndex] = useState(-1);
+  const bufferVersion = useRef(0);
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [outline, setOutline] = useState<{ line: number; label: string }[]>(
     [],
@@ -218,8 +219,10 @@ export default function App() {
     if (connections.length === 0) setShowConnections(true);
   }, [connections.length]);
 
-  // Changing the buffer invalidates the offsets of the last run's errors.
+  // Changing the buffer invalidates the offsets of the last run's errors and
+  // makes late events from that run unusable.
   useEffect(() => {
+    bufferVersion.current += 1;
     setScriptErrors([]);
     setErrorIndex(-1);
   }, [sql]);
@@ -372,6 +375,8 @@ export default function App() {
     setScriptErrors([]);
     setErrorIndex(-1);
     setScrollTop(0);
+    // Errors from this run are only valid while the text it ran on is intact.
+    const runVersion = bufferVersion.current;
     setRunning(true);
     setStatus("");
     setPanel("results");
@@ -393,7 +398,9 @@ export default function App() {
             setOutput((current) => [...current, ...event.data]);
             setPanel("output");
           } else if (event.type === "statementerror") {
-            setScriptErrors((current) => [...current, event.data]);
+            if (bufferVersion.current === runVersion) {
+              setScriptErrors((current) => [...current, event.data]);
+            }
             setOutput((current) => [
               ...current,
               `${t("error")}: ${event.data.message}`,
