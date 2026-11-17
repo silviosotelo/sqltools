@@ -231,6 +231,8 @@ const EXTRA: &[&str] = &[
     "View.ObjectTreeSetFocus",
     "View.PrevPane",
     "View.Toolbar",
+    // MDI window management. The original disables it (`OnWindowNew` is a
+    // documented no-op that crashes if called), and this app has one window.
     "Window.ArrangeIcons",
     "Window.Cascade",
     "Window.LastWindow",
