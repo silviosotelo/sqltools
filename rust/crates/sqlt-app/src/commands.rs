@@ -99,6 +99,10 @@ const IMPLEMENTED: &[&str] = &[
     "Grid.ShowPopupViewer",
     "Help.Help",
     "Help.ContextHelp",
+    "View.Toolbar",
+    "View.NextPane",
+    "View.PrevPane",
+    "Workspace.OpenQuick",
     "Edit.SelectWord",
     "Edit.CopyAppend",
     "Edit.CutAppend",
@@ -334,7 +338,7 @@ mod tests {
                 .iter()
                 .filter(|command| command.implemented)
                 .count(),
-            183
+            187
         );
     }
 }

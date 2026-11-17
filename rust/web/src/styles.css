@@ -942,3 +942,15 @@ tr.spacer td {
   word-break: break-word;
   font-family: "Consolas", "Courier New", monospace;
 }
+
+/* `View.Toolbar` hides the top bar and leaves this handle to bring it back. */
+.topbar.hidden {
+  display: none;
+}
+
+.toolbar-restore {
+  position: absolute;
+  right: 8px;
+  top: 4px;
+  z-index: 20;
+}

@@ -222,6 +222,24 @@ export default function App() {
     value: string;
   } | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [showToolbar, setShowToolbar] = useState(true);
+  const objectsFilterRef = useRef<HTMLInputElement | null>(null);
+  const resultsRef = useRef<HTMLDivElement | null>(null);
+
+  /** 0 = objects filter, 1 = editor, 2 = results. */
+  const activePane = () => {
+    const active = document.activeElement;
+    if (objectsFilterRef.current && (objectsFilterRef.current === active || objectsFilterRef.current.contains(active))) return 0;
+    if (resultsRef.current && active && resultsRef.current.contains(active)) return 2;
+    return 1;
+  };
+
+  const focusPane = (index: number) => {
+    const next = ((index % 3) + 3) % 3;
+    if (next === 0) objectsFilterRef.current?.focus();
+    else if (next === 1) editorRef.current?.focus();
+    else resultsRef.current?.focus();
+  };
   const [stats, setStats] = useState<StatEntry[]>([]);
   const [output, setOutput] = useState<string[]>([]);
   const [scriptErrors, setScriptErrors] = useState<
@@ -1844,6 +1862,18 @@ export default function App() {
       case "Help.ContextHelp":
         setHelpOpen(true);
         break;
+      case "View.Toolbar":
+        setShowToolbar(!showToolbar);
+        break;
+      case "View.NextPane":
+        focusPane(activePane() + 1);
+        break;
+      case "View.PrevPane":
+        focusPane(activePane() - 1);
+        break;
+      case "Workspace.OpenQuick":
+        void loadWorkspace();
+        break;
       case "Edit.SelectWord":
         editorRef.current?.selectWord();
         break;
@@ -2154,7 +2184,7 @@ export default function App() {
   return (
     <div className="app">
       <pre className="print-script" ref={printScriptRef} aria-hidden="true" />
-      <header className="topbar">
+      <header className={showToolbar ? "topbar" : "topbar hidden"}>
         <div className="toolbar">
           <div className="brand-inline">
             <Icon name="database" size={18} />
@@ -2386,6 +2416,15 @@ export default function App() {
           </span>
         </div>
       </header>
+      {!showToolbar && (
+        <button
+          className="tb toolbar-restore"
+          title={t("toolbar")}
+          onClick={() => setShowToolbar(true)}
+        >
+          ▾
+        </button>
+      )}
 
       <div className="body">
         <aside className="objects-panel">
@@ -2398,6 +2437,7 @@ export default function App() {
               onChange={(event) => setSchema(event.target.value)}
             />
             <input
+              ref={objectsFilterRef}
               value={objectFilter}
               placeholder={t("filter")}
               title={t("filter")}
@@ -2730,6 +2770,8 @@ export default function App() {
             {panel === "results" && (
               <div
                 className="results"
+                ref={resultsRef}
+                tabIndex={-1}
                 onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
               >
                 {columns.length === 0 ? (

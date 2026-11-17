@@ -418,6 +418,7 @@ export type EditorHandle = {
   expandSubtree: () => void;
   autocomplete: () => void;
   toggleFolding: () => boolean;
+  focus: () => void;
   selectWord: () => void;
   copyAppend: () => Promise<void>;
   cutAppend: () => Promise<void>;
@@ -977,6 +978,9 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
         ),
       });
       return folding.current.enabled;
+    },
+    focus: () => {
+      view.current?.focus();
     },
     selectWord: () => {
       const editor = view.current;
