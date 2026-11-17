@@ -173,6 +173,9 @@ export default function App() {
   );
   const [openFilesOpen, setOpenFilesOpen] = useState(false);
   const [newExtendedOpen, setNewExtendedOpen] = useState(false);
+  const [filePanelOpen, setFilePanelOpen] = useState(false);
+  const [findInFilesOpen, setFindInFilesOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
   const [profiles, setProfiles] = useState<string[]>([]);
   const [profile, setProfile] = useState("");
   const [profileOptions, setProfileOptions] = useState<FormatOptions | null>(
@@ -1653,6 +1656,13 @@ export default function App() {
       case "View.OpenFiles":
         setOpenFilesOpen(true);
         break;
+      case "View.FilePanel":
+        setFilePanelOpen(true);
+        break;
+      case "View.FindInFiles":
+        setFindQuery("");
+        setFindInFilesOpen(true);
+        break;
       case "File.NewExtended":
         void openNewExtended();
         break;
@@ -1783,6 +1793,19 @@ export default function App() {
 
   const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
   const end = Math.min(rows.length, start + VISIBLE_ROWS + OVERSCAN * 2);
+
+  const findMatches = findQuery
+    ? sql
+        .split("\n")
+        .map((line, index) => ({ line: index + 1, text: line }))
+        .filter((entry) =>
+          entry.text.toLowerCase().includes(findQuery.toLowerCase()),
+        )
+        .map((entry) => ({
+          line: entry.line,
+          text: entry.text.trim().slice(0, 120),
+        }))
+    : [];
 
   const shownObjects = objects.filter(
     (object) =>
@@ -2718,6 +2741,99 @@ export default function App() {
             )}
             <div className="row">
               <button className="plain" onClick={() => setOutlineOpen(false)}>
+                {t("close")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {filePanelOpen && (
+        <div
+          className="palette-backdrop"
+          onClick={() => setFilePanelOpen(false)}
+        >
+          <div
+            className="settings-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2>{t("filePanel")}</h2>
+            <table className="grid">
+              <tbody>
+                <tr>
+                  <td>{t("name")}</td>
+                  <td>{filePath || t("untitled")}</td>
+                </tr>
+                <tr>
+                  <td>{t("lineEnding")}</td>
+                  <td>
+                    {fileEol === "\r\n"
+                      ? "CRLF"
+                      : fileEol === "\r"
+                        ? "CR"
+                        : "LF"}
+                  </td>
+                </tr>
+                <tr>
+                  <td>{t("lines")}</td>
+                  <td>{sql.split("\n").length}</td>
+                </tr>
+                <tr>
+                  <td>{t("characters")}</td>
+                  <td>{sql.length}</td>
+                </tr>
+                <tr>
+                  <td>{t("save")}</td>
+                  <td>{dirty ? t("on") : t("off")}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div className="row">
+              <button className="plain" onClick={() => setFilePanelOpen(false)}>
+                {t("close")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {findInFilesOpen && (
+        <div
+          className="palette-backdrop"
+          onClick={() => setFindInFilesOpen(false)}
+        >
+          <div
+            className="settings-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2>{t("findInFiles")}</h2>
+            <input
+              autoFocus
+              value={findQuery}
+              placeholder={t("search")}
+              onChange={(event) => setFindQuery(event.target.value)}
+            />
+            {findQuery && findMatches.length === 0 ? (
+              <p className="no-results">{t("noResultsSearch")}</p>
+            ) : (
+              <div className="palette-list">
+                {findMatches.map((match) => (
+                  <button
+                    key={match.line}
+                    onClick={() => {
+                      editorRef.current?.goToLineNumber(match.line);
+                      setFindInFilesOpen(false);
+                    }}
+                  >
+                    <span>{match.text || "(blank)"}</span>
+                    <span className="keys">{match.line}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="row">
+              <button
+                className="plain"
+                onClick={() => setFindInFilesOpen(false)}
+              >
                 {t("close")}
               </button>
             </div>

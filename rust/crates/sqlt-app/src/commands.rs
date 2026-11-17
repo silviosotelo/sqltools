@@ -147,6 +147,8 @@ const IMPLEMENTED: &[&str] = &[
     "View.Snippets",
     "View.CodeOutline",
     "View.OpenFiles",
+    "View.FilePanel",
+    "View.FindInFiles",
     "Help.AboutOpenEditor",
     "Help.SqlHelp",
     "View.History",
@@ -259,7 +261,7 @@ mod tests {
                 .iter()
                 .filter(|command| command.implemented)
                 .count(),
-            164
+            166
         );
     }
 }
