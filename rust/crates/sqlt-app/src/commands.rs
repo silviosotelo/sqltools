@@ -171,6 +171,9 @@ const IMPLEMENTED: &[&str] = &[
     "Session.Reconnect",
     "Session.RefreshObjectCache",
     "Tools.ExtractSchemaDDL",
+    "Window.ActivateSplitter",
+    "Window.SplitterDown",
+    "Window.SplitterUp",
     "Session.Connect",
     "Session.Disconnect",
     "Session.Commit",
@@ -263,7 +266,7 @@ mod tests {
                 .iter()
                 .filter(|command| command.implemented)
                 .count(),
-            168
+            171
         );
     }
 }

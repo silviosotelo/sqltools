@@ -192,6 +192,34 @@ export default function App() {
       return true;
     }
   });
+  const [splitPercent, setSplitPercentState] = useState(() => {
+    try {
+      const stored = Number(localStorage.getItem("sqlt.splitPercent"));
+      return Number.isFinite(stored) && stored >= 20 && stored <= 85
+        ? stored
+        : 60;
+    } catch {
+      return 60;
+    }
+  });
+  const [splitterActive, setSplitterActive] = useState(false);
+  const workspaceRef = useRef<HTMLDivElement | null>(null);
+  const splitterRef = useRef<HTMLDivElement | null>(null);
+  const clampSplit = (value: number) => Math.max(20, Math.min(85, value));
+  const setSplitPercentValue = (value: number) => {
+    const next = clampSplit(value);
+    setSplitPercentState(next);
+    try {
+      localStorage.setItem("sqlt.splitPercent", String(next));
+    } catch {
+      // Storage may be unavailable; the splitter still works this session.
+    }
+  };
+  const nudgeSplit = (delta: number) => {
+    const next = clampSplit(splitPercent + delta);
+    setSplitPercentValue(next);
+    setStatus(`${t("splitter")}: ${Math.round(next)}%`);
+  };
   const [substitution, setSubstitutionState] = useState(() => {
     try {
       return localStorage.getItem("sqlt.substitution") === "true";
@@ -1690,6 +1718,19 @@ export default function App() {
       case "Tools.ExtractSchemaDDL":
         void extractSchemaDdl();
         break;
+      case "Window.ActivateSplitter": {
+        const next = !splitterActive;
+        setSplitterActive(next);
+        if (next) splitterRef.current?.focus();
+        setStatus(`${t("splitter")}: ${next ? t("on") : t("off")}`);
+        break;
+      }
+      case "Window.SplitterDown":
+        nudgeSplit(5);
+        break;
+      case "Window.SplitterUp":
+        nudgeSplit(-5);
+        break;
       case "View.FindInFiles":
         setFindQuery("");
         setFindInFilesOpen(true);
@@ -2280,8 +2321,11 @@ export default function App() {
           </details>
         </aside>
 
-        <main className="workspace">
-          <div className="editor-shell">
+        <main className="workspace" ref={workspaceRef}>
+          <div
+            className="editor-shell"
+            style={{ flex: `0 0 ${splitPercent}%` }}
+          >
             <div className="editor-tabbar">
               <div className="editor-tab">
                 <span>
@@ -2304,6 +2348,37 @@ export default function App() {
               onExecute={(text, offset) => void run(text, offset)}
             />
           </div>
+
+          <div
+            className={splitterActive ? "splitter active" : "splitter"}
+            role="separator"
+            aria-orientation="horizontal"
+            tabIndex={0}
+            title={t("splitter")}
+            ref={splitterRef}
+            onPointerDown={(event) =>
+              event.currentTarget.setPointerCapture(event.pointerId)
+            }
+            onPointerMove={(event) => {
+              if (!event.currentTarget.hasPointerCapture(event.pointerId)) {
+                return;
+              }
+              const rect = workspaceRef.current?.getBoundingClientRect();
+              if (!rect || rect.height === 0) return;
+              setSplitPercentValue(
+                ((event.clientY - rect.top) / rect.height) * 100,
+              );
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowUp") {
+                event.preventDefault();
+                nudgeSplit(-5);
+              } else if (event.key === "ArrowDown") {
+                event.preventDefault();
+                nudgeSplit(5);
+              }
+            }}
+          />
 
           <div className="panel-bar">
             <nav className="tabs">

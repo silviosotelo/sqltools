@@ -844,3 +844,20 @@ tr.spacer td {
     linear-gradient(90deg, transparent 39ch, #d8d8d8 39ch, #d8d8d8 40ch, transparent 40ch),
     linear-gradient(90deg, transparent 119ch, #d8d8d8 119ch, #d8d8d8 120ch, transparent 120ch);
 }
+
+.splitter {
+  flex: none;
+  height: 6px;
+  cursor: ns-resize;
+  background: #e4e4e4;
+  border-top: 1px solid #c4c4c4;
+  border-bottom: 1px solid #a0a0a0;
+  outline: none;
+}
+
+.splitter:hover,
+.splitter.active,
+.splitter:focus {
+  background: #cfe3fb;
+  border-color: #7aa7d8;
+}
