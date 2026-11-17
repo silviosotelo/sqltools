@@ -113,6 +113,12 @@ export type Template = {
   body: string;
 };
 
+export type StatementRange = {
+  start: number;
+  end: number;
+  line: number;
+};
+
 export type FormatOptions = {
   indent: number;
   useTabs: boolean;

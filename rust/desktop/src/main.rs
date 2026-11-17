@@ -407,6 +407,26 @@ fn list_commands() -> Vec<sqlt_app::CommandSpec> {
     sqlt_app::registry()
 }
 
+#[derive(Clone, serde::Serialize)]
+struct StatementRange {
+    start: usize,
+    end: usize,
+    line: usize,
+}
+
+/// Statement offsets used by the script stepping commands.
+#[tauri::command]
+fn statement_ranges(sql: String) -> Vec<StatementRange> {
+    sqlt_core::split(&sql)
+        .into_iter()
+        .map(|statement| StatementRange {
+            start: statement.start,
+            end: statement.end,
+            line: statement.start_line,
+        })
+        .collect()
+}
+
 #[tauri::command]
 fn list_templates() -> Result<Vec<String>, String> {
     sqlt_app::templates::list_templates().map_err(|e| e.to_string())
@@ -769,6 +789,7 @@ fn main() {
             list_triggers,
             list_grants,
             list_commands,
+            statement_ranges,
             list_templates,
             load_template,
             save_template,

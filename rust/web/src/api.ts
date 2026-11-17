@@ -12,6 +12,7 @@ import type {
   ObjectInfo,
   QueryEvent,
   StatEntry,
+  StatementRange,
   Template,
   TriggerInfo,
   UpdateInfo,
@@ -94,6 +95,8 @@ export const api = {
   pickSqlFile: () => invoke<string | null>("pick_sql_file"),
   pickSqlSavePath: (suggested: string | null) =>
     invoke<string | null>("pick_sql_save_path", { suggested }),
+  statementRanges: (sql: string) =>
+    invoke<StatementRange[]>("statement_ranges", { sql }),
   listTemplates: () => invoke<string[]>("list_templates"),
   loadTemplate: (name: string) =>
     invoke<Template | null>("load_template", { name }),

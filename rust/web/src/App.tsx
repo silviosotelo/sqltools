@@ -172,6 +172,7 @@ export default function App() {
     [],
   );
   const [openFilesOpen, setOpenFilesOpen] = useState(false);
+  const [newExtendedOpen, setNewExtendedOpen] = useState(false);
   const [profiles, setProfiles] = useState<string[]>([]);
   const [profile, setProfile] = useState("");
   const [profileOptions, setProfileOptions] = useState<FormatOptions | null>(
@@ -989,6 +990,88 @@ export default function App() {
     setStatus(`${t("error")} ${index + 1}/${sorted.length}`);
   };
 
+  const openNewExtended = async () => {
+    try {
+      setSnippetNames(await api.listTemplates());
+      setNewExtendedOpen(true);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const createFromTemplate = async (name: string | null) => {
+    if (!confirmDiscard()) return;
+    setNewExtendedOpen(false);
+    setSql("");
+    setCleanSql("");
+    setFilePath("");
+    setFileEol("\n");
+    setCleanEol("\n");
+    setColumns([]);
+    setRows([]);
+    setOutput([]);
+    setScriptErrors([]);
+    setErrorIndex(-1);
+    setPanel("results");
+    setStatus("");
+    if (!name) return;
+    try {
+      const template = await api.loadTemplate(name);
+      if (!template) {
+        setStatus(`${t("templateMissing")}: ${name}`);
+        return;
+      }
+      editorRef.current?.insertText(template.body);
+      setStatus(`${t("templateExpanded")}: ${name}`);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const executeCurrentAndStep = async () => {
+    try {
+      const ranges = await api.statementRanges(sql);
+      if (ranges.length === 0) {
+        setStatus(t("noStatement"));
+        return;
+      }
+      const cursor = editorRef.current?.cursorOffset() ?? 0;
+      const index = ranges.findIndex(
+        (range) => cursor >= range.start && cursor <= range.end,
+      );
+      const current =
+        index >= 0
+          ? ranges[index]
+          : (ranges.filter((range) => range.start <= cursor).pop() ??
+            ranges[0]);
+      const next = ranges[ranges.indexOf(current) + 1];
+      void run(sql, current.start);
+      if (next) editorRef.current?.goToOffset(next.start);
+      setStatus(`${t("step")} ${ranges.indexOf(current) + 1}/${ranges.length}`);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const stepStatement = async (direction: 1 | -1) => {
+    try {
+      const ranges = await api.statementRanges(sql);
+      const cursor = editorRef.current?.cursorOffset() ?? 0;
+      const target =
+        direction === 1
+          ? ranges.find((range) => range.start > cursor)
+          : [...ranges].reverse().find((range) => range.start < cursor);
+      if (!target) {
+        setStatus(t("noStatement"));
+        return;
+      }
+      editorRef.current?.goToOffset(target.start);
+      await showHistory();
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
   const buildOutline = () => {
     const entries: { line: number; label: string }[] = [];
     sql.split("\n").forEach((line, index) => {
@@ -1475,6 +1558,18 @@ export default function App() {
         break;
       case "View.OpenFiles":
         setOpenFilesOpen(true);
+        break;
+      case "File.NewExtended":
+        void openNewExtended();
+        break;
+      case "Script.ExecuteCurrentAndStep":
+        void executeCurrentAndStep();
+        break;
+      case "Script.StepForwardAndGetHistory":
+        void stepStatement(1);
+        break;
+      case "Script.GetHistoryAndStepBack":
+        void stepStatement(-1);
         break;
       case "Script.NextError":
         navigateError(1);
@@ -2519,6 +2614,39 @@ export default function App() {
             )}
             <div className="row">
               <button className="plain" onClick={() => setOutlineOpen(false)}>
+                {t("close")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {newExtendedOpen && (
+        <div
+          className="palette-backdrop"
+          onClick={() => setNewExtendedOpen(false)}
+        >
+          <div
+            className="settings-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2>{t("newFromTemplate")}</h2>
+            <div className="palette-list">
+              <button onClick={() => void createFromTemplate(null)}>
+                <span>{t("blank")}</span>
+                <span className="keys">{t("newFile")}</span>
+              </button>
+              {snippetNames.map((name) => (
+                <button key={name} onClick={() => void createFromTemplate(name)}>
+                  <span>{name}</span>
+                  <span className="keys">{t("insert")}</span>
+                </button>
+              ))}
+            </div>
+            <div className="row">
+              <button
+                className="plain"
+                onClick={() => setNewExtendedOpen(false)}
+              >
                 {t("close")}
               </button>
             </div>

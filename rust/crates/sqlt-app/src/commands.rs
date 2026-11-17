@@ -135,6 +135,9 @@ const IMPLEMENTED: &[&str] = &[
     "Script.HaltOnError",
     "Script.NextError",
     "Script.PreviousError",
+    "Script.ExecuteCurrentAndStep",
+    "Script.StepForwardAndGetHistory",
+    "Script.GetHistoryAndStepBack",
     "Script.ExecuteCurrentAlt",
     "Script.QuickQuery",
     "Script.LoadDDLWithDbmsMetadata",
@@ -160,6 +163,7 @@ const IMPLEMENTED: &[&str] = &[
     "File.Close",
     "File.CloseAll",
     "File.New",
+    "File.NewExtended",
     "Session.Reconnect",
     "Session.RefreshObjectCache",
     "Session.Connect",
@@ -254,7 +258,7 @@ mod tests {
                 .iter()
                 .filter(|command| command.implemented)
                 .count(),
-            159
+            163
         );
     }
 }
