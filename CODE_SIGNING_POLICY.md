@@ -44,34 +44,39 @@ artifact configuration.
 
 ## Current status (verified 2026-11-18)
 
-- **Windows: unsigned.** `Get-AuthenticodeSignature` on the freshly built
-  `SQLTools_0.1.1_x64-setup.exe` and on the installed
-  `%LOCALAPPDATA%\SQLTools\sqlt-desktop.exe` returns `Status: NotSigned`.
-  The SignPath application is still under review and the workflow has no
-  SignPath step yet. The updater signatures in `latest.json` are a different
-  mechanism and do work (a 0.1.0 build updated itself to 0.1.1).
-- **macOS: signed, not notarized.** The bundle carries a Developer ID
-  signature (`codesign --verify` passes, TeamIdentifier `7XF526FBNY`) but
-  `spctl --assess` reports `rejected: Unnotarized Developer ID`. The workflow
-  already forwards `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
-  `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD` and `APPLE_TEAM_ID`
-  to the bundle job, so the notarization step starts as soon as the Apple
-  credentials exist as repository secrets; that run has not happened yet.
+- **Windows: self-signed.** The installer, the MSI and the app binary are
+  signed with a locally generated code-signing certificate
+  (`CN=SQLTools Self-Signed`, thumbprint `3B9C9F1B…F7`, valid until 2029). The
+  app binary is signed **before** bundling (`tauri build --no-bundle` →
+  `signtool sign` → `tauri bundle`), so the installed
+  `%LOCALAPPDATA%\SQLTools\sqlt-desktop.exe` carries the signature too.
+  `Get-AuthenticodeSignature` reports `Status: UnknownError` because the root is
+  not trusted outside this machine — that is what self-signing means: the
+  binaries are signed, but SmartScreen will still warn until a CA-issued or
+  SignPath certificate is used.
+- **macOS: self-signed (CI).** The workflow generates a self-signed
+  code-signing identity on the runner when no Apple identity secret exists,
+  imports it into a temporary keychain, trusts it for the build and lets Tauri
+  sign the bundle; a verification step runs `codesign --verify --deep --strict`
+  and prints `codesign -dv` plus `spctl --assess` (Gatekeeper still rejects it:
+  no notarization).
+- The updater signatures in `latest.json` are a different mechanism; they work
+  and are unaffected.
 - Linux packages are not distro-signed; the `.sig` files in the release are
   Tauri updater signatures.
 
-### What is still needed
+### What a trusted signature would still need
 
-1. **SignPath**: an approved organization/project plus the signing policy and
-   artifact configuration, stored as `SIGNPATH_API_TOKEN`,
+1. **SignPath** (or another CA): an approved organization/project plus the
+   signing policy and artifact configuration, stored as `SIGNPATH_API_TOKEN`,
    `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG`,
    `SIGNPATH_SIGNING_POLICY_SLUG` and `SIGNPATH_ARTIFACT_CONFIGURATION_SLUG`
-   repository secrets. The workflow step that submits the signing request is
-   not written yet because its inputs cannot be verified without the account.
+   repository secrets. A real `WINDOWS_CERTIFICATE` secret is also honoured by
+   the workflow (it skips the self-signed certificate when present).
 2. **Apple**: `APPLE_ID`, `APPLE_PASSWORD` (app-specific password) and
    `APPLE_TEAM_ID` as repository secrets; the Developer ID certificate is
-   already configured. The next tagged build should then notarize and
-   `spctl --assess` should accept it (not verified yet).
+   already configured. With those, the workflow stops generating the
+   self-signed identity and Tauri notarizes the bundle.
 
 ## Privacy policy
 

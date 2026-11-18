@@ -132,6 +132,68 @@ jobs:
           write_env APPLE_ID "${APPLE_ID:-}"
           write_env APPLE_PASSWORD "${APPLE_PASSWORD:-}"
           write_env APPLE_TEAM_ID "${APPLE_TEAM_ID:-}"
+      - name: Create a self-signed identity (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+            echo "Apple identity configured; skipping the self-signed identity"
+            exit 0
+          fi
+          CN="SQLTools Self-Signed"
+          cat > "$RUNNER_TEMP/codesign.cnf" <<'EOF'
+          [req]
+          distinguished_name = dn
+          x509_extensions = ext
+          prompt = no
+          [dn]
+          CN = SQLTools Self-Signed
+          [ext]
+          basicConstraints = critical,CA:FALSE
+          keyUsage = critical,digitalSignature
+          extendedKeyUsage = codeSigning
+          EOF
+          openssl req -x509 -newkey rsa:2048 -days 365 -nodes \
+            -keyout "$RUNNER_TEMP/key.pem" -out "$RUNNER_TEMP/cert.pem" \
+            -config "$RUNNER_TEMP/codesign.cnf"
+          openssl pkcs12 -export -out "$RUNNER_TEMP/cert.p12" \
+            -inkey "$RUNNER_TEMP/key.pem" -in "$RUNNER_TEMP/cert.pem" -passout pass:
+          security create-keychain -p "" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+          security import "$RUNNER_TEMP/cert.p12" -k build.keychain -P "" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain > /dev/null
+          # Tauri selects the identity with `security find-identity -v`, which
+          # only lists trusted, valid identities.
+          security add-trusted-cert -r trustRoot -k "$HOME/Library/Keychains/login.keychain-db" "$RUNNER_TEMP/cert.pem" || true
+          security find-identity -v -p codesigning build.keychain
+          security find-identity -v -p codesigning | head -n 5
+          echo "APPLE_SIGNING_IDENTITY=$CN" >> "$GITHUB_ENV"
+      - name: Create a self-signed certificate (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+        run: |
+          if ($env:WINDOWS_CERTIFICATE) {
+            "Windows certificate configured; skipping the self-signed certificate"
+            exit 0
+          }
+          $cert = New-SelfSignedCertificate -Type CodeSigningCert `
+            -Subject "CN=SQLTools Self-Signed" -CertStoreLocation Cert:\CurrentUser\My `
+            -KeyUsage DigitalSignature -KeyExportPolicy Exportable `
+            -NotAfter (Get-Date).AddYears(3) -FriendlyName "SQLTools Self-Signed"
+          $config = @{
+            bundle = @{ windows = @{ certificateThumbprint = $cert.Thumbprint } }
+          } | ConvertTo-Json -Depth 5
+          $config | Set-Content "$env:RUNNER_TEMP\sqlt-sign.json" -Encoding ascii
+          "SQLT_SIGN_CONFIG=$env:RUNNER_TEMP\sqlt-sign.json" >> $env:GITHUB_ENV
+          "SQLT_THUMBPRINT=$($cert.Thumbprint)" >> $env:GITHUB_ENV
+          "SQLT_SELF_SIGN=1" >> $env:GITHUB_ENV
+          Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert | Select-Object Subject, Thumbprint
       - name: Build bundles
         shell: bash
         working-directory: rust/desktop
@@ -142,12 +204,70 @@ jobs:
           if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
             config_args=(--config '{"bundle":{"createUpdaterArtifacts":false}}')
           fi
+          if [ -n "${SQLT_SIGN_CONFIG:-}" ]; then
+            config_args+=(--config "$SQLT_SIGN_CONFIG")
+          fi
+          build_args=(build)
+          if [ -n "${SQLT_SELF_SIGN:-}" ]; then
+            # The installer embeds the app binary, so sign it before bundling.
+            build_args+=(--no-bundle)
+          fi
           for attempt in 1 2 3; do
-            npx --yes @tauri-apps/cli@^2 build "${config_args[@]}" && exit 0
+            npx --yes @tauri-apps/cli@^2 "${build_args[@]}" "${config_args[@]}" && exit 0
             echo "tauri build failed (attempt $attempt); retrying in 15s"
             sleep 15
           done
           exit 1
+      - name: Sign the Windows app binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not $env:SQLT_SELF_SIGN) { "No self-signed certificate; skipping"; exit 0 }
+          $signtool = (Get-Command signtool.exe -ErrorAction SilentlyContinue).Source
+          if (-not $signtool) {
+            $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+              Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1 -ExpandProperty FullName
+          }
+          & $signtool sign /sha1 "$env:SQLT_THUMBPRINT" /fd SHA256 /d SQLTools `
+            /du https://github.com/silviosotelo/sqltools rust/target/release/sqlt-desktop.exe
+          Get-AuthenticodeSignature rust/target/release/sqlt-desktop.exe |
+            Select-Object Status, @{ n = "Signer"; e = { $_.SignerCertificate.Subject } }
+      - name: Bundle with the self-signed certificate (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        working-directory: rust/desktop
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "${SQLT_SELF_SIGN:-}" ]; then
+            echo "No self-signed certificate; the build already produced the bundles"
+            exit 0
+          fi
+          config_args=(--config "$SQLT_SIGN_CONFIG")
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            config_args+=(--config '{"bundle":{"createUpdaterArtifacts":false}}')
+          fi
+          npx --yes @tauri-apps/cli@^2 bundle "${config_args[@]}"
+      - name: Verify the Windows signatures
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $missing = 0
+          Get-ChildItem rust/target/release/bundle -Recurse -Include *.exe,*.msi | ForEach-Object {
+            $sig = Get-AuthenticodeSignature $_.FullName
+            "{0}: {1} ({2})" -f $_.Name, $sig.Status, $sig.SignerCertificate.Subject
+            if (-not $sig.SignerCertificate) { $missing++ }
+          }
+          if ($missing -gt 0) { throw "$missing Windows artifacts are unsigned" }
+      - name: Verify the macOS signature
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          APP=$(find rust/target/release/bundle/macos -maxdepth 1 -name '*.app' | head -n 1)
+          test -n "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv --verbose=2 "$APP" 2>&1 | grep -E 'Identifier|Authority|TeamIdentifier' || true
+          spctl --assess --type execute "$APP" 2>&1 || true
       - uses: actions/upload-artifact@v4
         with:
           name: sqltools-${{ matrix.os }}

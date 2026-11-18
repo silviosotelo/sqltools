@@ -323,12 +323,57 @@ pub fn registry() -> Vec<CommandSpec> {
             implemented: IMPLEMENTED.contains(name),
         });
     }
+    // The ten bookmark slots are not in the Windows dictionary either: its
+    // keymap registers `Edit.SetRandomBookmark.N` (Ctrl+Shift+N) and
+    // `Edit.GetRandomBookmark.N` (Ctrl+N) for N = 0..9. The frontend already
+    // handles these names, so they complete the original's 226 commands.
+    for slot in 0..10 {
+        out.push(CommandSpec {
+            id: format!("slot.SetRandomBookmark.{slot}"),
+            name: format!("Edit.SetRandomBookmark.{slot}"),
+            keys: vec![format!("Ctrl+Shift+{slot}")],
+            help: String::new(),
+            implemented: true,
+        });
+        out.push(CommandSpec {
+            id: format!("slot.GetRandomBookmark.{slot}"),
+            name: format!("Edit.GetRandomBookmark.{slot}"),
+            keys: vec![format!("Ctrl+{slot}")],
+            help: String::new(),
+            implemented: true,
+        });
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
     out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bookmark_slots_complete_the_command_set() {
+        let commands = registry();
+        let named = commands
+            .iter()
+            .filter(|command| !command.name.is_empty())
+            .count();
+        // 206 in the Windows dictionary + the 20 bookmark slots of its keymap.
+        assert_eq!(named, 226);
+        for slot in 0..10 {
+            let set = commands
+                .iter()
+                .find(|command| command.name == format!("Edit.SetRandomBookmark.{slot}"))
+                .expect("set slot");
+            let get = commands
+                .iter()
+                .find(|command| command.name == format!("Edit.GetRandomBookmark.{slot}"))
+                .expect("get slot");
+            assert_eq!(set.keys, vec![format!("Ctrl+Shift+{slot}")]);
+            assert_eq!(get.keys, vec![format!("Ctrl+{slot}")]);
+            assert!(set.implemented && get.implemented);
+        }
+    }
 
     #[test]
     fn legacy_keymap_shortcuts_are_bound() {
@@ -358,7 +403,7 @@ mod tests {
     #[test]
     fn loads_all_original_commands() {
         let commands = registry();
-        assert_eq!(commands.len(), 235 + EXTRA.len());
+        assert_eq!(commands.len(), 235 + EXTRA.len() + 20);
         assert!(commands
             .iter()
             .any(|command| command.name == "Script.Execute"));
@@ -392,7 +437,7 @@ mod tests {
                 .iter()
                 .filter(|command| command.implemented)
                 .count(),
-            193
+            213
         );
     }
 }
