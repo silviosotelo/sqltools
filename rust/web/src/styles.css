@@ -450,10 +450,40 @@ select {
   border: 1px solid var(--line-strong);
   border-bottom: none;
   font-size: 11px;
+  cursor: pointer;
+  max-width: 260px;
 }
 
-.editor-tab .tab-conn {
+.tabbar-conn {
+  margin-left: auto;
+  padding: 0 8px 2px;
   color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.editor-tab:not(.active) {
+  background: var(--surface-sunken);
+}
+
+.editor-tab .tab-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.editor-tab .tab-close {
+  border: none;
+  background: none;
+  color: var(--muted);
+  padding: 0 2px;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.editor-tab .tab-close:hover {
+  color: var(--text-strong);
 }
 
 .editor {

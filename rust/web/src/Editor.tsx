@@ -60,6 +60,7 @@ import {
   RangeSet,
   StateEffect,
   StateField,
+  Transaction,
 } from "@codemirror/state";
 import {
   Decoration,
@@ -334,7 +335,6 @@ const editorSetup = [
   lineNumbers(),
   highlightActiveLineGutter(),
   highlightSpecialChars(),
-  history(),
   drawSelection(),
   dropCursor(),
   EditorState.allowMultipleSelections.of(true),
@@ -573,6 +573,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
     mode: themeMode,
     compartment: new Compartment(),
   });
+  const historyConf = useRef(new Compartment());
   const folding = useRef({
     enabled: true,
     compartment: new Compartment(),
@@ -1294,6 +1295,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
             selection.current.rectangular ? rectangularSelection() : [],
           ),
           theme.current.compartment.of(themeExtensions(theme.current.mode)),
+          historyConf.current.of(history()),
           folding.current.compartment.of(foldGutter()),
           sql({ dialect: StandardSQL, upperCaseKeywords: true }),
           autocompletion({
@@ -1339,12 +1341,17 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
     const editor = view.current;
     if (!editor) return;
     if (editor.state.doc.toString() === initialValue) return;
+    // Switching documents replaces the buffer; it must not land in the undo
+    // history and the stack is reset so Ctrl+Z cannot walk into another tab's
+    // text (each tab gets its own history from here on).
     editor.dispatch({
       changes: {
         from: 0,
         to: editor.state.doc.length,
         insert: initialValue,
       },
+      annotations: Transaction.addToHistory.of(false),
+      effects: historyConf.current.reconfigure(history()),
     });
   }, [initialValue]);
 

@@ -26,6 +26,34 @@ import type {
 
 type ObjectTab = "columns" | "constraints" | "indexes" | "triggers" | "grants";
 
+/** One editor tab: a scratch buffer, a file, or a piece of generated DDL. */
+type EditorDoc = {
+  id: string;
+  title: string;
+  /** Stable identity for de-duplicating opened documents. */
+  key: string;
+  sql: string;
+  cleanSql: string;
+  eol: string;
+  cleanEol: string;
+  path: string;
+};
+
+let docSeq = 0;
+
+const makeDoc = (title: string, sql: string, path = ""): EditorDoc => ({
+  id: `doc-${++docSeq}`,
+  title,
+  key: path || title,
+  sql,
+  cleanSql: sql,
+  eol: "\n",
+  cleanEol: "\n",
+  path,
+});
+
+const baseName = (path: string) => path.split(/[\\/]/).pop() || path;
+
 const KEY_ALIASES: Record<string, string> = {
   pgdown: "PageDown",
   pgup: "PageUp",
@@ -189,11 +217,73 @@ export default function App() {
   const [connected, setConnected] = useState<Record<string, string>>({});
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [password, setPassword] = useState("");
-  const [sql, setSql] = useState("select * from dual");
-  const [cleanSql, setCleanSql] = useState("select * from dual");
-  const [filePath, setFilePath] = useState("");
-  const [fileEol, setFileEol] = useState("\n");
-  const [cleanEol, setCleanEol] = useState("\n");
+  const [docs, setDocs] = useState<EditorDoc[]>(() => [
+    makeDoc("SQL", "select * from dual"),
+  ]);
+  const [activeDocId, setActiveDocId] = useState("");
+  const activeDoc = docs.find((doc) => doc.id === activeDocId) ?? docs[0];
+  const sql = activeDoc.sql;
+  const cleanSql = activeDoc.cleanSql;
+  const filePath = activeDoc.path;
+  const fileEol = activeDoc.eol;
+  const cleanEol = activeDoc.cleanEol;
+
+  const patchDoc = (id: string, patch: Partial<EditorDoc>) =>
+    setDocs((current) =>
+      current.map((doc) => (doc.id === id ? { ...doc, ...patch } : doc)),
+    );
+  const setSql = (next: string) => patchDoc(activeDoc.id, { sql: next });
+  const setFileEol = (next: string) => patchDoc(activeDoc.id, { eol: next });
+
+  /** Opens `text` in a tab keyed by `key` (replacing its content) and activates it. */
+  const openDoc = (
+    title: string,
+    text: string,
+    options: { key?: string; path?: string; eol?: string } = {},
+  ) => {
+    const key = options.key ?? options.path ?? `title:${title}`;
+    const existing = docs.find((doc) => doc.key === key);
+    const eol = options.eol ?? "\n";
+    if (existing) {
+      patchDoc(existing.id, {
+        title,
+        sql: text,
+        cleanSql: text,
+        eol,
+        cleanEol: eol,
+        path: options.path ?? existing.path,
+      });
+      setActiveDocId(existing.id);
+      return existing.id;
+    }
+    const doc = makeDoc(title, text, options.path ?? "");
+    doc.key = key;
+    doc.eol = eol;
+    doc.cleanEol = eol;
+    setDocs((current) => [...current, doc]);
+    setActiveDocId(doc.id);
+    return doc.id;
+  };
+
+  const closeDoc = (id: string) => {
+    const index = docs.findIndex((doc) => doc.id === id);
+    if (index < 0) return;
+    if (docs.length === 1) {
+      const fresh = makeDoc("SQL", "");
+      setDocs([fresh]);
+      setActiveDocId(fresh.id);
+      return;
+    }
+    const neighbor = docs[index - 1] ?? docs[index + 1];
+    setDocs(docs.filter((doc) => doc.id !== id));
+    setActiveDocId(neighbor.id);
+  };
+
+  const resetDocs = () => {
+    const fresh = makeDoc("SQL", "");
+    setDocs([fresh]);
+    setActiveDocId(fresh.id);
+  };
   const [columns, setColumns] = useState<ColumnMeta[]>([]);
   const [rows, setRows] = useState<Value[][]>([]);
   const [scrollTop, setScrollTop] = useState(0);
@@ -482,7 +572,7 @@ export default function App() {
         void api
           .readSqlFile(path)
           .then((file) => {
-            setSql(file.text);
+            openDoc(baseName(path), file.text, { path, eol: file.eol });
             setStatus(path);
           })
           .catch((error) => setStatus(String(error)));
@@ -923,6 +1013,8 @@ export default function App() {
     try {
       setSelectedObject(object);
       const owner = schema.trim() || null;
+      const qualifiedName = `${owner ? `${owner}.` : ""}${object.name}`;
+      const key = `ddl:${owner ?? ""}.${object.name}.${object.objectType}`;
       let ddl: string;
       if (object.objectType === "TABLE") {
         try {
@@ -943,9 +1035,28 @@ export default function App() {
           object.objectType,
         );
       }
-      setSql(ddl);
+      const specId = openDoc(
+        `${qualifiedName} (${object.objectType})`,
+        ddl,
+        { key },
+      );
+      // Packages and types have two parts; the original loads both, here each
+      // part gets its own tab so the spec and the body never mix.
+      let bodyError = "";
+      if (object.objectType === "PACKAGE" || object.objectType === "TYPE") {
+        const bodyType = `${object.objectType} BODY`;
+        try {
+          const body = await api.loadDdl(selected, owner, object.name, bodyType);
+          openDoc(`${qualifiedName} (${bodyType})`, body, { key: `${key}:body` });
+          setActiveDocId(specId);
+        } catch (error) {
+          const text = String(error);
+          // ORA-31603 is how DBMS_METADATA says "there is no body".
+          if (!text.includes("ORA-31603")) bodyError = text;
+        }
+      }
       setPanel("results");
-      setStatus(t("loadDdl"));
+      setStatus(bodyError || t("loadDdl"));
     } catch (error) {
       setStatus(String(error));
     }
@@ -1047,12 +1158,9 @@ export default function App() {
   const confirmDiscard = () => !dirty || window.confirm(t("discardChanges"));
 
   const newFile = () => {
-    if (!confirmDiscard()) return;
-    setSql("");
-    setCleanSql("");
-    setFilePath("");
-    setFileEol("\n");
-    setCleanEol("\n");
+    const doc = makeDoc("SQL", "");
+    setDocs((current) => [...current, doc]);
+    setActiveDocId(doc.id);
     setColumns([]);
     setRows([]);
     setPanel("results");
@@ -1060,16 +1168,11 @@ export default function App() {
   };
 
   const openFile = async () => {
-    if (!confirmDiscard()) return;
     try {
       const path = await api.pickSqlFile();
       if (!path) return;
       const file = await api.readSqlFile(path);
-      setSql(file.text);
-      setCleanSql(file.text);
-      setFilePath(path);
-      setFileEol(file.eol);
-      setCleanEol(file.eol);
+      openDoc(baseName(path), file.text, { path, eol: file.eol });
       setStatus(path);
     } catch (error) {
       setStatus(String(error));
@@ -1077,17 +1180,21 @@ export default function App() {
   };
 
   const saveFile = async (saveAs = false) => {
+    const target = activeDoc;
     try {
-      let path = filePath;
+      let path = target.path;
       if (saveAs || !path) {
-        const picked = await api.pickSqlSavePath(filePath || "query.sql");
+        const picked = await api.pickSqlSavePath(target.path || "query.sql");
         if (!picked) return;
         path = picked;
       }
-      await api.writeSqlFile(path, sql, fileEol);
-      setFilePath(path);
-      setCleanSql(sql);
-      setCleanEol(fileEol);
+      await api.writeSqlFile(path, target.sql, target.eol);
+      patchDoc(target.id, {
+        path,
+        title: baseName(path),
+        cleanSql: target.sql,
+        cleanEol: target.eol,
+      });
       setStatus(path);
     } catch (error) {
       setStatus(String(error));
@@ -1100,14 +1207,9 @@ export default function App() {
       setStatus(t("noFile"));
       return;
     }
-    if (!confirmDiscard()) return;
     try {
       const file = await api.readSqlFile(path);
-      setSql(file.text);
-      setCleanSql(file.text);
-      setFilePath(path);
-      setFileEol(file.eol);
-      setCleanEol(file.eol);
+      openDoc(baseName(path), file.text, { path, eol: file.eol });
       setStatus(path);
     } catch (error) {
       setStatus(String(error));
@@ -1120,13 +1222,16 @@ export default function App() {
       return;
     }
     if (!confirmDiscard()) return;
+    const target = activeDoc;
     try {
-      const file = await api.readSqlFile(filePath);
-      setSql(file.text);
-      setCleanSql(file.text);
-      setFileEol(file.eol);
-      setCleanEol(file.eol);
-      setStatus(filePath);
+      const file = await api.readSqlFile(target.path);
+      patchDoc(target.id, {
+        sql: file.text,
+        cleanSql: file.text,
+        eol: file.eol,
+        cleanEol: file.eol,
+      });
+      setStatus(target.path);
     } catch (error) {
       setStatus(String(error));
     }
@@ -1145,14 +1250,27 @@ export default function App() {
     }
   };
 
+  const toWorkspace = (): Workspace => ({
+    version: 1,
+    files: docs.map((doc) => ({ name: doc.title, sql: doc.sql })),
+    active: Math.max(0, docs.findIndex((doc) => doc.id === activeDoc.id)),
+  });
+
+  const restoreWorkspace = (workspace: Workspace) => {
+    const files = (workspace.files ?? []).filter(
+      (file) => typeof file.sql === "string",
+    );
+    if (!files.length) return false;
+    const fresh = files.map((file) => makeDoc(file.name || "SQL", file.sql));
+    setDocs(fresh);
+    const index = Math.min(Math.max(workspace.active ?? 0, 0), fresh.length - 1);
+    setActiveDocId(fresh[index].id);
+    return true;
+  };
+
   const copyWorkspace = async () => {
     try {
-      const workspace: Workspace = {
-        version: 1,
-        files: [{ name: "query.sql", sql }],
-        active: 0,
-      };
-      await navigator.clipboard.writeText(JSON.stringify(workspace));
+      await navigator.clipboard.writeText(JSON.stringify(toWorkspace()));
       setStatus(t("workspaceSave"));
     } catch (error) {
       setStatus(String(error));
@@ -1164,16 +1282,10 @@ export default function App() {
     try {
       const text = await navigator.clipboard.readText();
       const workspace = JSON.parse(text) as Workspace;
-      const file = workspace.files?.[workspace.active] ?? workspace.files?.[0];
-      if (!file || typeof file.sql !== "string") {
+      if (!restoreWorkspace(workspace)) {
         setStatus(t("workspaceLoad"));
         return;
       }
-      setSql(file.sql);
-      setCleanSql(file.sql);
-      setFilePath("");
-      setFileEol("\n");
-      setCleanEol("\n");
       setStatus(t("workspaceLoad"));
     } catch (error) {
       setStatus(String(error));
@@ -1185,14 +1297,18 @@ export default function App() {
       setStatus(t("selectObject"));
       return;
     }
+    const owner = schema.trim() || null;
     try {
-      setSql(
-        await api.loadDdl(
-          selected,
-          schema.trim() || null,
-          selectedObject.name,
-          selectedObject.objectType,
-        ),
+      const ddl = await api.loadDdl(
+        selected,
+        owner,
+        selectedObject.name,
+        selectedObject.objectType,
+      );
+      openDoc(
+        `${owner ? `${owner}.` : ""}${selectedObject.name} (DBMS_METADATA)`,
+        ddl,
+        { key: `ddlmeta:${owner ?? ""}.${selectedObject.name}` },
       );
       setPanel("results");
       setStatus(t("loadDdl"));
@@ -1267,11 +1383,7 @@ export default function App() {
   };
   const saveWorkspace = async () => {
     try {
-      await api.saveWorkspace({
-        version: 1,
-        files: [{ name: "query.sql", sql }],
-        active: 0,
-      });
+      await api.saveWorkspace(toWorkspace());
       setStatus(t("workspaceSave"));
     } catch (error) {
       setStatus(String(error));
@@ -1282,11 +1394,7 @@ export default function App() {
     try {
       const path = await api.pickWorkspaceSavePath("workspace.json");
       if (!path) return;
-      await api.saveWorkspaceTo(path, {
-        version: 1,
-        files: [{ name: "query.sql", sql }],
-        active: 0,
-      });
+      await api.saveWorkspaceTo(path, toWorkspace());
       setStatus(path);
     } catch (error) {
       setStatus(String(error));
@@ -1379,32 +1487,31 @@ export default function App() {
   };
 
   const createFromTemplate = async (name: string | null) => {
-    if (!confirmDiscard()) return;
     setNewExtendedOpen(false);
-    setSql("");
-    setCleanSql("");
-    setFilePath("");
-    setFileEol("\n");
-    setCleanEol("\n");
+    let text = "";
+    if (name) {
+      try {
+        const template = await api.loadTemplate(name);
+        if (!template) {
+          setStatus(`${t("templateMissing")}: ${name}`);
+          return;
+        }
+        text = template.body;
+        setStatus(`${t("templateExpanded")}: ${name}`);
+      } catch (error) {
+        setStatus(String(error));
+        return;
+      }
+    }
+    const doc = makeDoc("SQL", text);
+    setDocs((current) => [...current, doc]);
+    setActiveDocId(doc.id);
     setColumns([]);
     setRows([]);
     setOutput([]);
     setScriptErrors([]);
     setErrorIndex(-1);
     setPanel("results");
-    setStatus("");
-    if (!name) return;
-    try {
-      const template = await api.loadTemplate(name);
-      if (!template) {
-        setStatus(`${t("templateMissing")}: ${name}`);
-        return;
-      }
-      editorRef.current?.insertText(template.body);
-      setStatus(`${t("templateExpanded")}: ${name}`);
-    } catch (error) {
-      setStatus(String(error));
-    }
   };
 
   const executeCurrentAndStep = async () => {
@@ -1522,14 +1629,7 @@ export default function App() {
     if (!confirmDiscard()) return;
     try {
       const workspace: Workspace = await api.loadWorkspace();
-      const file = workspace.files[workspace.active] ?? workspace.files[0];
-      if (file) {
-        setSql(file.sql);
-        setCleanSql(file.sql);
-        setFilePath("");
-        setFileEol("\n");
-        setCleanEol("\n");
-      }
+      restoreWorkspace(workspace);
       setStatus(t("workspaceLoad"));
     } catch (error) {
       setStatus(String(error));
@@ -1637,8 +1737,12 @@ export default function App() {
         setStatus(`${t("lineEnding")}: CR`);
         break;
       case "File.Close":
+        if (!confirmDiscard()) break;
+        closeDoc(activeDoc.id);
+        break;
       case "File.CloseAll":
-        newFile();
+        if (!confirmDiscard()) break;
+        resetDocs();
         break;
       case "Session.RefreshObjectCache":
         void refreshObjectCache();
@@ -2689,17 +2793,44 @@ export default function App() {
             style={{ flex: `0 0 ${splitPercent}%` }}
           >
             <div className="editor-tabbar">
-              <div className="editor-tab">
-                <span>
-                  {dirty ? "*" : ""}
-                  {filePath ? filePath.split(/[\\/]/).pop() : "SQL"}
-                </span>
-                <span className="tab-conn">
-                  {isConnected
-                    ? `${draft.user}${draft.alias ? `@${draft.alias}` : ""}`
-                    : t("noConnection")}
-                </span>
-              </div>
+              {docs.map((doc) => (
+                <div
+                  key={doc.id}
+                  className={
+                    doc.id === activeDoc.id ? "editor-tab active" : "editor-tab"
+                  }
+                  title={doc.path || doc.title}
+                  role="tab"
+                  aria-selected={doc.id === activeDoc.id}
+                  onClick={() => {
+                    setActiveDocId(doc.id);
+                    editorRef.current?.focus();
+                  }}
+                >
+                  <span className="tab-title">
+                    {doc.sql !== doc.cleanSql || doc.eol !== doc.cleanEol
+                      ? "*"
+                      : ""}
+                    {doc.title}
+                  </span>
+                  <button
+                    className="tab-close"
+                    title={t("close")}
+                    aria-label={t("close")}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      closeDoc(doc.id);
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              <span className="tabbar-conn">
+                {isConnected
+                  ? `${draft.user}${draft.alias ? `@${draft.alias}` : ""}`
+                  : t("noConnection")}
+              </span>
             </div>
             <Editor
               ref={editorRef}
