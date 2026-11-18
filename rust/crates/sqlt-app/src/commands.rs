@@ -248,6 +248,22 @@ const EXTRA: &[&str] = &[
     "Workspace.OpenQuick",
 ];
 
+/// Keymap entries from `default.keymap` for the implemented commands that only
+/// exist in the Windows dictionary, so the menu spec never carried their keys.
+const LEGACY_KEYS: &[(&str, &[&str])] = &[
+    ("Edit.Autocomplete", &["Ctrl+Shift+Space"]),
+    ("Edit.FormatSQLwithSettings", &["Ctrl+Shift+K,E"]),
+    ("Help.Help", &["F1"]),
+    ("Help.ContextHelp", &["Shift+F1"]),
+    ("Tools.SessionDdlGridSettings", &["Ctrl+Q,S"]),
+    ("View.NextPane", &["Alt+PgDown"]),
+    ("View.PrevPane", &["Alt+PgUp"]),
+    ("View.ObjectTreeSetFocus", &["Alt+Shift+1"]),
+    ("Window.NextPane", &["F6"]),
+    ("Window.PreviousPane", &["Shift+F6"]),
+    ("Workspace.OpenQuick", &["Ctrl+Shift+W,I"]),
+];
+
 pub fn registry() -> Vec<CommandSpec> {
     let root: Value = serde_json::from_str(include_str!("../../../../ui/spec/menu_spec.json"))
         .expect("menu_spec.json is valid");
@@ -294,10 +310,15 @@ pub fn registry() -> Vec<CommandSpec> {
         if known.contains(*name) {
             continue;
         }
+        let keys = LEGACY_KEYS
+            .iter()
+            .find(|(command, _)| command == name)
+            .map(|(_, keys)| keys.iter().map(|key| (*key).to_string()).collect())
+            .unwrap_or_default();
         out.push(CommandSpec {
             id: format!("extra.{name}"),
             name: (*name).to_string(),
-            keys: Vec::new(),
+            keys,
             help: String::new(),
             implemented: IMPLEMENTED.contains(name),
         });
@@ -308,6 +329,31 @@ pub fn registry() -> Vec<CommandSpec> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_keymap_shortcuts_are_bound() {
+        let commands = registry();
+        let keys = |name: &str| {
+            commands
+                .iter()
+                .find(|command| command.name == name)
+                .map(|command| command.keys.clone())
+                .unwrap_or_default()
+        };
+        assert_eq!(keys("Help.Help"), vec!["F1"]);
+        assert_eq!(keys("Help.ContextHelp"), vec!["Shift+F1"]);
+        assert_eq!(keys("Edit.Autocomplete"), vec!["Ctrl+Shift+Space"]);
+        assert_eq!(keys("View.NextPane"), vec!["Alt+PgDown"]);
+        assert_eq!(keys("View.PrevPane"), vec!["Alt+PgUp"]);
+        assert_eq!(keys("View.ObjectTreeSetFocus"), vec!["Alt+Shift+1"]);
+        assert_eq!(keys("Window.NextPane"), vec!["F6"]);
+        assert_eq!(keys("Window.PreviousPane"), vec!["Shift+F6"]);
+        assert_eq!(keys("Edit.FormatSQLwithSettings"), vec!["Ctrl+Shift+K,E"]);
+        assert_eq!(keys("Tools.SessionDdlGridSettings"), vec!["Ctrl+Q,S"]);
+        assert_eq!(keys("Workspace.OpenQuick"), vec!["Ctrl+Shift+W,I"]);
+        // The MDI commands have no behaviour here, so they stay unbound.
+        assert!(keys("Window.NewWindow").is_empty());
+    }
 
     #[test]
     fn loads_all_original_commands() {

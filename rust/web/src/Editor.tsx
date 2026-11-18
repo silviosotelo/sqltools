@@ -346,7 +346,16 @@ const editorSetup = [
   highlightSelectionMatches(),
   keymap.of([
     ...closeBracketsKeymap,
-    ...defaultKeymap,
+    // The legacy keymap owns the `Ctrl+K,*` and `Ctrl+Shift+K,*` chords, so the
+    // emacs-style bindings `Ctrl-k` (delete to line end) and `Mod-Shift-k`
+    // (delete line) would swallow the prefix before the app sees it. Delete
+    // line stays on the legacy `Ctrl+Y` (`Edit.DeleteLine`).
+    ...defaultKeymap.filter(
+      (binding) =>
+        binding.key !== "Ctrl-k" &&
+        binding.key !== "Mod-Shift-k" &&
+        binding.key !== "Shift-Mod-k",
+    ),
     ...searchKeymap,
     ...historyKeymap,
     ...foldKeymap,

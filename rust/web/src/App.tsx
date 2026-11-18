@@ -61,12 +61,18 @@ const parseCombo = (text: string) => {
 const parseSequence = (text: string) =>
   text.split(",").map((part) => parseCombo(part)).filter(Boolean);
 
+/** Physical `Shift+1` reports `!` as `key`; the legacy map writes the digit. */
+const eventKey = (event: KeyboardEvent) => {
+  const digit = /^Digit(\d)$/.exec(event.code);
+  return digit && !/^\d$/.test(event.key) ? digit[1] : event.key;
+};
+
 const comboFromEvent = (event: KeyboardEvent) => {
   const mods: string[] = [];
   if (event.ctrlKey || event.metaKey) mods.push("Ctrl");
   if (event.altKey) mods.push("Alt");
   if (event.shiftKey) mods.push("Shift");
-  return [...mods, canonicalKey(event.key)].join("+");
+  return [...mods, canonicalKey(eventKey(event))].join("+");
 };
 
 /** `["Ctrl+K,A"]` → `Ctrl+K then A`; several alternatives are joined with `/`. */

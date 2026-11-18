@@ -132,6 +132,13 @@ pub fn list_columns(
         .collect())
 }
 
+/// `all_objects.object_type` spells these with a space; `DBMS_METADATA` wants
+/// an underscore (`PACKAGE BODY` -> `PACKAGE_BODY`), which `GET_DDL` rejects
+/// otherwise with ORA-31600.
+fn metadata_object_type(object_type: &str) -> String {
+    object_type.trim().to_uppercase().replace(' ', "_")
+}
+
 pub fn load_ddl(
     session: &Session,
     schema: Option<&str>,
@@ -146,6 +153,7 @@ pub fn load_ddl(
             rows.first().map(|row| cell(row, 0)).unwrap_or_default()
         }
     };
+    let object_type = metadata_object_type(object_type);
     let rows = fetch_rows(
         session,
         "select dbms_metadata.get_ddl(:1, :2, :3) from dual",
@@ -156,6 +164,20 @@ pub fn load_ddl(
         .map(|row| cell(row, 0))
         .filter(|text| !text.is_empty())
         .ok_or_else(|| "DBMS_METADATA returned an empty DDL".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::metadata_object_type;
+
+    #[test]
+    fn metadata_object_types_use_underscores() {
+        assert_eq!(metadata_object_type("TABLE"), "TABLE");
+        assert_eq!(metadata_object_type("PACKAGE BODY"), "PACKAGE_BODY");
+        assert_eq!(metadata_object_type("TYPE BODY"), "TYPE_BODY");
+        assert_eq!(metadata_object_type("DATABASE LINK"), "DATABASE_LINK");
+        assert_eq!(metadata_object_type(" package body "), "PACKAGE_BODY");
+    }
 }
 
 pub fn load_table_ddl_meta(
