@@ -19,10 +19,10 @@ Method and limits:
 
 | | Count |
 |---|---|
-| Feature areas listed by the vendor | 20 |
-| Areas we can consider complete | 4 |
-| Areas partially covered | 7 |
-| Areas missing | 9 |
+| Capabilities tracked (inside the vendor's 20 areas) | 23 |
+| Complete | 4 |
+| Partial | 9 |
+| Missing | 10 |
 
 ## Areas
 
