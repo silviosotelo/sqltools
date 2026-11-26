@@ -398,3 +398,23 @@ Golden para F2: `rust/web/e2e/golden-f1.json`.
 Extraídos `components/ResultsPanel.tsx` (339 líneas de JSX fuera de `App.tsx`: 3598 → ~3250), `components/EditorTabs.tsx` y `results.ts` (tipos/constantes/`cellText`). **Desviación declarada:** `SidePanel` no se extrae: el panel lateral usa 34 nombres de `App` y F3 (`ObjectTree`) y F4 (`ConnectionsView`) lo reemplazan por componentes nuevos con su propio hook; extraerlo ahora sería trabajo descartado.
 
 Evidencia (app instalada 26/11/2026 11:46, firmada autofirmada): `flow --compare golden-f1.json` IDENTICAL; `phase-f2.mjs` OK (3: el texto, las pestañas y el historial de deshacer sobreviven al cambio de vista); `phase-f1.mjs` OK; axe 0; keyboard-walk OK; `npm run build` exit 0. Sin cambios de Rust. Revisión externa omitida en F2 por ser extracción mecánica con golden idéntico; se cubre en la revisión de F3.
+
+### F3 — cerrada (2026-11-26)
+
+**Qué cambió:** `count_objects` (Rust: `ObjectCount` DTO, mismas reglas de alcance que `list_objects`; comando Tauri; `api.countObjects`); `tree/treeModel.ts` (lógica pura) + `treeModel.test.ts`; `tree/useObjectTree.ts` (contadores al conectar, carga por grupo al expandir, `requestId` por grupo y época de contexto invalidada durante el render, `loadAll` cancelable con id de corrida); `components/ObjectTree.tsx` (`role=tree`, `aria-activedescendant`, ventana virtual de 26 px, la fila activa siempre montada, flechas/Home/End/Enter/menú contextual). Se retiraron la rejilla de tipos, la tabla plana y los estados `objects`/`objectFilter`/`chooseType`/`shownObjects` (0 referencias colgando; `objectType` queda como "último grupo enfocado" para `extractSchemaDdl`). CI: `npm test` en `tauri-check`.
+
+**Revisión externa (codex gpt-6.2-sol):** 4 BLOQUEA, 3 aceptados y corregidos (época y filas del contexto anterior, `loadAll` con id de corrida, fila activa fuera de ventana), 1 declarado: la jerarquía es plana con `aria-level/setsize/posinset` (patrón APG para árboles virtualizados) sin `role=group`. Menores: `aria-selected` solo en objetos (corregido); doble `toggle` antes del render y conteos fuera de orden quedan declarados.
+
+**Evidencia (app instalada 26/11/2026 12:09, firmada autofirmada):**
+
+| Comando | Resultado |
+|---|---|
+| `node e2e/tree.mjs` | `TREE CHECKS OK (11)`: 9 grupos con contador; `Paquetes` (382) en 484 ms con 28 treeitems en el DOM, `Sinónimos` en 472 ms con 10; el contador de cada grupo es igual al número de hijos (equivalente al test de Oracle por tipo); flechas, Home/End, `aria-activedescendant` válido; `Ctrl+F12` sobre `AS_PDF3_MOD` abre `AS_PDF3_MOD (PACKAGE)` y `(PACKAGE BODY)` en pestañas distintas |
+| `axe-cdp.mjs` | 0 violaciones, 3 vistas × 2 temas (con un grupo expandido) |
+| `phase-f1` / `phase-f2` / `keyboard-walk` / `commands-check` | OK (19 / 3 / 34 paradas / 283-226-213) |
+| `flow --compare golden-f3.json` | IDENTICAL (el golden de F3 reemplaza el listado plano por el árbol; contra `golden-f1` solo difieren `explorer` y `objectGroups`) |
+| `cargo fmt` / `clippy -D warnings` / `check -p sqlt-desktop` / `test` | 0 / 0 / 0 / 0 (19 ok) |
+| `npm run build` / `npm test` | 0 / **73 passed** (11 nuevos del árbol) |
+| Capturas 1366×768 y 1024×700 claro/oscuro | `docs/screenshots/workbench-f3-*.png`, sin desbordes |
+
+**NO VERIFICADO:** el test Rust `count_objects_matches_list_objects_per_type` (`#[ignore]`) compila pero no se ejecutó: falta `SQLT_PASS` en el entorno (la contraseña no se persiste). La igualdad contador/lista se verificó por CDP contra la base real.

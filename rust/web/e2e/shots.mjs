@@ -16,8 +16,9 @@ for (const theme of ["light", "dark"]) {
   await cdp.clickTitle("Conectar");
   await cdp.waitFor(`/(Conectado|anamnesis@)/.test(document.querySelector("[data-e2e='conn-chip'], .connection-chip")?.innerText ?? '')`, 20000);
   await cdp.wait(2500); // let connect() finish its follow-up requests before loading objects
-  await cdp.clickTitle("Cargar objetos");
-  const loaded = await cdp.waitFor(`document.querySelectorAll('.objects-panel tbody tr').length > 0`, 30000);
+  await cdp.waitFor(`document.querySelectorAll('[role="treeitem"]').length > 0`, 30000);
+  await cdp.evaluate(`document.querySelector('[role="treeitem"][aria-expanded]')?.click()`);
+  const loaded = await cdp.waitFor(`document.querySelectorAll('[role="treeitem"][aria-level="2"]').length > 0`, 30000);
   if (!loaded) throw new Error(`objects did not load in the ${theme} pass`);
   for (const [w, h] of sizes) {
     await cdp.setViewport(w, h);

@@ -9,6 +9,7 @@ import type {
   GrantInfo,
   HistoryEntry,
   IndexInfo,
+  ObjectCount,
   ObjectInfo,
   QueryEvent,
   StatEntry,
@@ -74,6 +75,8 @@ export const api = {
       schema,
       objectType,
     }),
+  countObjects: (connectionId: string, schema: string | null) =>
+    invoke<ObjectCount[]>("count_objects", { connectionId, schema }),
   listColumns: (
     connectionId: string,
     schema: string | null,

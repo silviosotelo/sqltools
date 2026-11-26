@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 
 import { Editor, type EditorHandle } from "./Editor";
@@ -8,6 +8,9 @@ import { TitleBar, type ThemeMode } from "./components/TitleBar";
 import { ActivityBar, type SideView } from "./components/ActivityBar";
 import { StatusBar } from "./components/StatusBar";
 import { EditorTabs } from "./components/EditorTabs";
+import { ObjectTree } from "./components/ObjectTree";
+import { useObjectTree } from "./tree/useObjectTree";
+import { objectId, type TreeGroup } from "./tree/treeModel";
 import { ResultsPanel } from "./components/ResultsPanel";
 import { cellText, type ObjectTab, type Panel } from "./results";
 import { useTranslation } from "./i18n";
@@ -285,8 +288,6 @@ export default function App() {
   const [panel, setPanel] = useState<Panel>("results");
   const [schema, setSchema] = useState("");
   const [objectType, setObjectType] = useState("");
-  const [objectFilter, setObjectFilter] = useState("");
-  const [objects, setObjects] = useState<ObjectInfo[]>([]);
   const [selectedObject, setSelectedObject] = useState<ObjectInfo | null>(null);
   const [objectColumns, setObjectColumns] = useState<ColumnInfo[]>([]);
   const [objectTab, setObjectTab] = useState<ObjectTab>("columns");
@@ -475,6 +476,19 @@ export default function App() {
   const [paletteIndex, setPaletteIndex] = useState(0);
 
   const isConnected = Boolean(selected && connected[selected]);
+  const treeGroups: TreeGroup[] = useMemo(
+    () =>
+      objectTypes
+        .filter((type) => type.value !== "")
+        .map((type) => ({ type: type.value, label: t(type.key) })),
+    [t],
+  );
+  const tree = useObjectTree(
+    isConnected ? selected : null,
+    schema,
+    treeGroups,
+    selectedObject ? objectId(selectedObject.objectType, selectedObject.name) : undefined,
+  );
 
   const refresh = async () => {
     setConnections(await api.listConnections());
@@ -647,7 +661,6 @@ export default function App() {
       setDraft(fromConfig(config));
       setPassword("");
     }
-    setObjects([]);
     setSelectedObject(null);
     setObjectColumns([]);
     setConstraints([]);
@@ -746,8 +759,7 @@ export default function App() {
         return next;
       });
       setTables([]);
-      setObjects([]);
-      setSelectedObject(null);
+        setSelectedObject(null);
       setObjectColumns([]);
       setStats([]);
       setStatus(t("disconnect"));
@@ -959,22 +971,12 @@ export default function App() {
     }
   };
 
-  const loadObjects = async (type: string = objectType) => {
+  const loadObjects = async () => {
     if (!isConnected) {
       setStatus(t("noConnection"));
       return;
     }
-    try {
-      setObjects(
-        await api.listObjects(
-          selected,
-          schema.trim() || null,
-          type.trim() || null,
-        ),
-      );
-    } catch (error) {
-      setStatus(String(error));
-    }
+    tree.refresh();
   };
 
   const findObject = async () => {
@@ -998,11 +1000,6 @@ export default function App() {
     } catch (error) {
       setStatus(String(error));
     }
-  };
-
-  const chooseType = (type: string) => {
-    setObjectType(type);
-    if (isConnected) void loadObjects(type);
   };
 
   const qualified = (object: ObjectInfo) =>
@@ -2358,12 +2355,6 @@ export default function App() {
         }))
     : [];
 
-  const shownObjects = objects.filter(
-    (object) =>
-      !objectFilter ||
-      object.name.toLowerCase().includes(objectFilter.toLowerCase()),
-  );
-
   return (
     <div className="app">
       <pre className="print-script" ref={printScriptRef} aria-hidden="true" />
@@ -2615,11 +2606,11 @@ export default function App() {
             />
             <input
               ref={objectsFilterRef}
-              value={objectFilter}
+              value={tree.filter}
               placeholder={t("filter")}
               aria-label={t("filter")}
               title={t("filter")}
-              onChange={(event) => setObjectFilter(event.target.value)}
+              onChange={(event) => tree.setFilter(event.target.value)}
             />
             <button
               className="tb"
@@ -2631,57 +2622,35 @@ export default function App() {
               <Icon name="refresh" />
             </button>
           </div>
-          <div className="type-grid">
-            {objectTypes.map((type) => (
-              <button
-                key={type.value || "all"}
-                className={
-                  objectType === type.value ? "type-button active" : "type-button"
-                }
-                onClick={() => chooseType(type.value)}
-                disabled={!isConnected}
-              >
-                {t(type.key)}
-              </button>
-            ))}
-          </div>
-          <div
-            className="object-scroll"
-            tabIndex={0}
-            role="region"
-            aria-label={t("objects")}
-          >
-            <table className="object-table">
-              <thead>
-                <tr>
-                  <th>{t("name")}</th>
-                  <th>{t("objectType")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {shownObjects.map((object) => (
-                  <tr
-                    key={`${object.objectType}-${object.name}`}
-                    className={
-                      selectedObject?.name === object.name &&
-                      selectedObject?.objectType === object.objectType
-                        ? "active"
-                        : ""
-                    }
-                    title={object.status}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      setMenu({ object, x: event.clientX, y: event.clientY });
-                    }}
-                    onClick={() => void openObject(object)}
-                  >
-                    <td>{object.name}</td>
-                    <td>{object.objectType}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {isConnected ? (
+            <>
+              {tree.filter.trim() !== "" && (
+                <div className="tree-search">
+                  {tree.loadingAll ? (
+                    <button className="tb text" onClick={tree.cancelLoadAll}>
+                      {t("cancel")}
+                    </button>
+                  ) : (
+                    <button className="tb text" onClick={() => void tree.loadAll()}>
+                      {t("searchAll")}
+                    </button>
+                  )}
+                </div>
+              )}
+              <ObjectTree
+                rows={tree.rows}
+                label={t("objects")}
+                onToggle={tree.toggle}
+                onExpand={tree.expand}
+                onRetry={(type) => void tree.retry(type)}
+                onOpen={(object) => void openObject(object)}
+                onContext={(object, x, y) => setMenu({ object, x, y })}
+                onGroupFocus={setObjectType}
+              />
+            </>
+          ) : (
+            <p className="side-empty">{t("connectToExplore")}</p>
+          )}
             </>
           )}
 

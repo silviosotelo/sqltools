@@ -34,10 +34,19 @@ out.connected = Boolean(await cdp.waitFor(`/(Conectado|anamnesis@)/.test(documen
 out.chip = await cdp.text(CHIP);
 
 // Objects: old flat list (button "Cargar objetos") or the new tree (counts at connect).
-const tree = await cdp.waitFor(`document.querySelector("[role='tree']")`, 1500);
+const tree = await cdp.waitFor(`Boolean(document.querySelector("[role='tree']"))`, 1500);
 if (tree) {
   out.explorer = "tree";
   out.objectGroups = await cdp.count(`${TREE_ITEMS}[aria-expanded]`);
+  await cdp.waitFor(`document.querySelectorAll('.tree-count').length > 0`, 20000); // counts arrived: the tree is settled
+  // Expand the tables group, filter to the target and open it.
+  await cdp.evaluate(`Array.from(document.querySelectorAll(${JSON.stringify(TREE_ITEMS)})).find(r => /^Tablas/.test(r.innerText.trim()))?.click()`);
+  await cdp.waitFor(`Array.from(document.querySelectorAll(${JSON.stringify(TREE_ITEMS)})).some(r => r.getAttribute('aria-level') === '2')`, 20000);
+  await cdp.evaluate(`(() => { const i = document.querySelector('.objects-panel input[title="Filtro"]'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, ${JSON.stringify(TARGET)}); i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await cdp.wait(500);
+  out.targetFound = await cdp.evaluate(`Array.from(document.querySelectorAll(${JSON.stringify(TREE_ITEMS)})).some(r => r.getAttribute('aria-level') === '2' && r.innerText.trim() === ${JSON.stringify(TARGET)})`);
+  await cdp.evaluate(`Array.from(document.querySelectorAll(${JSON.stringify(TREE_ITEMS)})).find(r => r.getAttribute('aria-level') === '2' && r.innerText.trim() === ${JSON.stringify(TARGET)})?.click()`);
+  await cdp.wait(1200);
 } else {
   out.explorer = "list";
   await cdp.clickTitle("Cargar objetos");

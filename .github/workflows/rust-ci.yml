@@ -64,6 +64,7 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
       - run: npm ci --prefix rust/web
       - run: npm --prefix rust/web run build
+      - run: npm --prefix rust/web test
       - run: cargo check -p sqlt-desktop
         working-directory: rust
 

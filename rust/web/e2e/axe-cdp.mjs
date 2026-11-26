@@ -38,12 +38,12 @@ const VIEWS = {
   objects: {
     steps: async (cdp) => {
       await ensureConnected(cdp);
-      if (!(await cdp.evaluate(`Boolean(document.querySelector("[role='tree']"))`))) {
-        await cdp.clickTitle("Cargar objetos");
-        await cdp.waitFor(`document.querySelectorAll('.objects-panel tbody tr').length > 0`, 20000);
-      }
+      await cdp.waitFor(`document.querySelectorAll('[role="treeitem"]').length > 0`, 20000);
+      // Expand the first group so the axe pass also sees object rows.
+      await cdp.evaluate(`document.querySelector('[role="treeitem"][aria-expanded]')?.click()`);
+      await cdp.waitFor(`document.querySelectorAll('[role="treeitem"][aria-level="2"]').length > 0`, 20000);
     },
-    expect: `document.querySelectorAll('.objects-panel tbody tr, [role="treeitem"]').length > 0`,
+    expect: `document.querySelectorAll('[role="treeitem"][aria-level="2"]').length > 0`,
   },
 };
 

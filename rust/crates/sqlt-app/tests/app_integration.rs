@@ -593,3 +593,50 @@ fn continue_after_error_runs_the_remaining_statements() {
     );
     let _ = fs::remove_file(path);
 }
+
+#[test]
+#[ignore = "requires OS keyring and a real Oracle connection"]
+fn count_objects_matches_list_objects_per_type() {
+    use sqlt_app::catalog;
+    let user = std::env::var("SQLT_USER").expect("SQLT_USER");
+    let password = std::env::var("SQLT_PASS").expect("SQLT_PASS");
+    let alias = std::env::var("SQLT_ALIAS").expect("SQLT_ALIAS");
+    let path = std::env::temp_dir().join(format!("sqlt-count-{}.json", std::process::id()));
+    let _ = fs::remove_file(&path);
+    let mut store = ConnectionStore::new(path.clone());
+    let mut config = ConnectionConfig::new("Count", &user);
+    config.alias = Some(alias);
+    config.tns_admin = std::env::var("SQLT_TNS_ADMIN").ok();
+    config.oci_dir = std::env::var("SQLT_OCI_DIR").ok();
+    store.upsert(config.clone()).unwrap();
+    store.set_password(&config.id, &password).unwrap();
+    let state = AppState::with_store(store);
+    state.connect(&config.id).expect("connect");
+    let session = state.session(&config.id).expect("session");
+    let options = state.query_options(&config.id);
+
+    let counts = catalog::count_objects(&session, None, options).expect("counts");
+    for kind in [
+        "TABLE",
+        "VIEW",
+        "SEQUENCE",
+        "PROCEDURE",
+        "FUNCTION",
+        "PACKAGE",
+        "TRIGGER",
+        "TYPE",
+        "SYNONYM",
+    ] {
+        let listed = catalog::list_objects(&session, None, Some(kind), options)
+            .expect("list")
+            .len() as u64;
+        let counted = counts
+            .iter()
+            .find(|c| c.object_type == kind)
+            .map_or(0, |c| c.count);
+        eprintln!("{kind}: count={counted} list={listed}");
+        assert_eq!(counted, listed, "{kind}");
+    }
+    state.disconnect(&config.id).unwrap();
+    let _ = fs::remove_file(&path);
+}

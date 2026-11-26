@@ -336,6 +336,20 @@ fn list_objects(
 }
 
 #[tauri::command]
+fn count_objects(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    schema: Option<String>,
+) -> Result<Vec<catalog::ObjectCount>, String> {
+    let session = state.session(&connection_id)?;
+    catalog::count_objects(
+        &session,
+        schema.as_deref(),
+        state.query_options(&connection_id),
+    )
+}
+
+#[tauri::command]
 fn list_columns(
     state: State<'_, Arc<AppState>>,
     connection_id: String,
@@ -897,6 +911,7 @@ fn main() {
             history,
             list_table_names,
             list_objects,
+            count_objects,
             list_columns,
             load_ddl,
             load_ddl_meta,

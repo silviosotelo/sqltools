@@ -13,6 +13,14 @@ pub struct ObjectInfo {
     pub status: String,
 }
 
+/// Number of objects of one type, shown next to each group of the object tree.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectCount {
+    pub object_type: String,
+    pub count: u64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ColumnInfo {
@@ -90,6 +98,29 @@ pub fn list_objects(
             name: cell(row, 0),
             object_type: cell(row, 1),
             status: cell(row, 2),
+        })
+        .collect())
+}
+
+/// Counts objects per type with the same scope rules as [`list_objects`] (own schema by default).
+pub fn count_objects(
+    session: &Session,
+    schema: Option<&str>,
+    options: QueryOptions,
+) -> Result<Vec<ObjectCount>, String> {
+    let sql = if schema.is_some() {
+        "select object_type, count(*) from all_objects where owner = :1 group by object_type"
+    } else {
+        "select object_type, count(*) from user_objects group by object_type"
+    };
+    let owner = schema.map(str::to_string);
+    let bindings: Vec<&dyn ToSql> = owner.iter().map(|v| v as &dyn ToSql).collect();
+    let rows = fetch_rows(session, sql, &bindings, options)?;
+    Ok(rows
+        .iter()
+        .map(|row| ObjectCount {
+            object_type: cell(row, 0),
+            count: cell(row, 1).parse().unwrap_or(0),
         })
         .collect())
 }

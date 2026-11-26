@@ -55,6 +55,8 @@ export type HistoryEntry = {
   startedAt: number;
 };
 
+export type ObjectCount = { objectType: string; count: number };
+
 export type ObjectInfo = {
   name: string;
   objectType: string;
