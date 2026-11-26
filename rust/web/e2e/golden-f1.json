@@ -1,0 +1,17 @@
+{
+  "flow": "connect-explore-ddl-run",
+  "connected": true,
+  "chip": "Conectado:\nanamnesis@desa02",
+  "explorer": "list",
+  "objectRows": 12656,
+  "targetFound": true,
+  "ddlLoaded": true,
+  "ddlStart": "CREATE TABLE a11 ( tipo_cto NUMBER NULL,",
+  "tabs": [
+    "SQL",
+    "A11 (TABLE)"
+  ],
+  "gridRows": 1,
+  "firstRow": "1|X",
+  "status": "1 fila · 1 ms"
+}

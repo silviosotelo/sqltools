@@ -361,3 +361,34 @@ Se consulta al terminar una ejecución y tras commit/rollback (nunca durante una
 | Capturas 1366×768 y 1024×700, claro y oscuro (sin desbordes: `docW == winW`, `docH == winH`) | `docs/screenshots/workbench-f1-*.png` |
 
 **Hallazgos de la revisión de la propia fase:** los controles de edición (`Ctrl+Shift+P`, `Ctrl+F12`) y el flujo de conexión no cambiaron de comportamiento; la barra de 21 botones sigue hasta F5 (por diseño del plan).
+
+#### F1 — ronda de revisión externa (codex gpt-6.2-sol) y correcciones
+
+La revisión de cierre (el `advisor` interno sigue sin cupo) dijo **"F1 todavía no la daría por cerrada"** y marcó cuatro bloqueos, todos verificados y corregidos:
+
+| Hallazgo | Corrección | Prueba |
+|---|---|---|
+| Foco al cambiar de vista: `View.ObjectTreeSetFocus` y `NextPane/PrevPane` sin destino con Conexiones abierta; guardar desmonta el control enfocado | `focusObjectsFilter()` cambia a Objetos y enfoca; si el foco se pierde al desmontarse (queda en `<body>`) cae en el botón de la vista; `View.ObjectList/ObjectTree` también muestran Objetos | `phase-f1`: Alt+Shift+1 desde Conexiones → foco en `Filtro`; con foco dentro del formulario, Alt+1 → foco en el botón `Objetos` (no en `BODY`) |
+| Conexiones con dos estados que divergen (`<details>` colapsable + vista activa) y un `save/connect` tardío que cierra la vista | Conexiones es una `<section>` con encabezado (sin `<details>`); `connectionsVisit` hace que una acción asíncrona solo cierre la vista de la visita que la inició; se eliminó el shim `setShowConnections` | `phase-f1`: encabezado `#connections-title` y sin `summary` de Conexiones |
+| `Ln/Col` dentro de una región viva atómica | `role="status"` solo en el mensaje; `Ln/Col` es texto consultable | `phase-f1`: un único `[role=status]` y no contiene `Ln` |
+| `--control-border` 2,82:1 contra `--bg` y 2,67:1 contra `--side` (el test solo lo comparaba con `--surface`) | claro `#8a93a2` → `#7a8394`; el test compara contra `--surface`, `--bg`, `--side` y `--surface-alt` | `tokens.test.ts`: 62 tests (estaba en rojo con el valor anterior) |
+
+Menores incorporados: `aria-pressed` solo en los dos botones que son vistas (Historial y Estadísticas son acciones); la barra de 21 botones es `role="group"` (no promete navegación con flechas); el anillo de foco del editor estaba anulado por una regla vieja `.cm-editor.cm-focused { outline: none }` y ahora se ve; `axe-cdp.mjs` **falla** si no llegó a la vista o al tema pedido y muestra los `incomplete`.
+
+**Hallazgo adicional propio:** al arrancar, la app abría siempre el panel de Conexiones aunque hubiera conexiones guardadas (el efecto `connections.length === 0` corría antes de que cargara la lista; comportamiento heredado que el test de foco destapó). Ahora solo se abre sola si, **ya cargada** la lista, no hay ninguna.
+
+**Evidencia final de F1 (app instalada 26/11/2026 11:39, firmada `CN=SQLTools Self-Signed`):**
+
+| Comando | Resultado |
+|---|---|
+| `node e2e/phase-f1.mjs` | `F1 CHECKS OK (19)` |
+| `node e2e/axe-cdp.mjs` | `AXE OK: 0 violations in 3 view(s) x 2 themes` (con `reached=true` y tema aplicado verificados) |
+| `node e2e/keyboard-walk.mjs --theme light` / `dark` | `KEYBOARD WALK OK (35 stops)` en ambos; orden: título → barra → actividad → panel lateral → editor → panel inferior; foco visible en todas las paradas |
+| `node e2e/commands-check.mjs --compare e2e/golden-commands.json` | `COMMANDS CHECK OK` (283 / 226 / 213, mismo digest) |
+| `node e2e/flow.mjs --compare e2e/golden-before.json --ignore objectRows` | `IDENTICAL` |
+| `cargo fmt` / `clippy -D warnings` / `check -p sqlt-desktop` / `test` | exit 0 / 0 / 0 / 0 (19 `test result: ok`) |
+| `npm --prefix rust/web run build` / `npm --prefix rust/web test` | exit 0 / **62 passed** |
+
+Golden para F2: `rust/web/e2e/golden-f1.json`.
+
+**No cubierto en F1 (declarado):** lector de pantalla real (NVDA); el recorrido de teclado verifica foco e indicador, no lo que se anuncia. La verificación NVDA queda para el cierre del goal si el entorno lo permite.

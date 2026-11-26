@@ -28,7 +28,7 @@ ratio in either theme.
 |---|---|---|---|
 | `--line` / `--line-soft` | `#d9dde4` | `#252a32` | pane separators, grid rules |
 | `--line-strong` | `#a9b0bc` | `#3e4551` | separators that need weight |
-| `--control-border` | `#8a93a2` | `#6b7482` | borders of inputs, selects and buttons (≥ 3:1 on `--surface`, WCAG 1.4.11) |
+| `--control-border` | `#7a8394` | `#6b7482` | borders of inputs, selects and buttons (≥ 3:1 on `--surface`, `--bg`, `--side` and `--surface-alt`, WCAG 1.4.11) |
 
 ## Text
 

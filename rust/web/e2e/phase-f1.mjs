@@ -50,6 +50,48 @@ for (const theme of ["light", "dark"]) {
   check(`${theme}: editor uses the mono font token`, /JetBrains Mono/.test(colors.font), colors.font);
 }
 
+// 3b) Focus must land somewhere meaningful when the side view changes (review finding).
+await cdp.reload();
+await cdp.wait(1200);
+check("startup view is Objects when saved connections exist", (await cdp.evaluate(`Array.from(document.querySelectorAll('.activity .act[aria-pressed="true"]')).map(b => b.getAttribute('aria-label')).join(',')`)) === "Objetos");
+const focusInfo = () => cdp.evaluate(`JSON.stringify((() => { const a = document.activeElement; return { tag: a?.tagName, title: a?.title ?? '', label: a?.getAttribute('aria-label') ?? '', inActivity: Boolean(a?.closest('.activity')), pressed: a?.getAttribute('aria-pressed') ?? null }; })())`);
+const pressedView = () => cdp.evaluate(`Array.from(document.querySelectorAll('.activity .act[aria-pressed="true"]')).map(b => b.getAttribute('aria-label')).join(',')`);
+// a) With Connections open, View.ObjectTreeSetFocus (Alt+Shift+1) switches to Objects and focuses its filter.
+await cdp.click('.activity .act[aria-label="Conexiones"]');
+await cdp.wait(400);
+check("opening Connections marks only that view as pressed", (await pressedView()) === "Conexiones", await pressedView());
+await cdp.evaluate(`document.querySelector('.cm-content')?.focus()`);
+await cdp.key("!", "Digit1", 49, 1 | 8);
+await cdp.wait(600);
+const afterA = JSON.parse(await focusInfo());
+check("Alt+Shift+1 from Connections focuses the Objects filter", afterA.title === "Filtro" && (await pressedView()) === "Objetos", afterA);
+// b) Focus inside the Connections form, then an accelerator that closes that view: focus must not fall to <body>.
+await cdp.click('.activity .act[aria-label="Conexiones"]');
+await cdp.wait(400);
+await cdp.evaluate(`document.querySelector('.objects-panel input')?.focus()`);
+await cdp.key("1", "Digit1", 49, 1);   // Alt+1 = View.ObjectTree
+await cdp.wait(900);
+const afterB = JSON.parse(await focusInfo());
+check("focus is not lost when the focused Connections control is unmounted", afterB.tag !== "BODY" && afterB.inActivity, afterB);
+// c) Connections is a plain section now: no collapsible summary that could diverge from the active view.
+await cdp.click('.activity .act[aria-label="Conexiones"]');
+await cdp.wait(400);
+const structure = JSON.parse(await cdp.evaluate(`JSON.stringify({ heading: Boolean(document.querySelector('#connections-title')), summaries: Array.from(document.querySelectorAll('.objects-panel summary')).map(x => x.innerText.trim()) })`));
+check("Connections has a heading and no collapsible summary", structure.heading && !structure.summaries.includes("Conexiones"), structure);
+// d) Only the two view toggles expose aria-pressed; History and Stats are plain actions.
+const pressedAttrs = JSON.parse(await cdp.evaluate(`JSON.stringify(Array.from(document.querySelectorAll('.activity .act')).map(b => [b.getAttribute('aria-label'), b.hasAttribute('aria-pressed')]))`));
+check("History and Stats buttons are not toggles", pressedAttrs.filter(([l]) => /Historial|Estad/.test(l)).every(([, has]) => !has), pressedAttrs);
+// e) The status bar announces only its message, not the cursor position.
+const live = JSON.parse(await cdp.evaluate(`JSON.stringify({ roleStatus: document.querySelectorAll('.statusbar [role="status"]').length, statusContainsCursor: /Ln \\d/.test(document.querySelector('.statusbar [role="status"]')?.innerText ?? '') })`));
+check("only the status message is a live region", live.roleStatus === 1 && !live.statusContainsCursor, live);
+await cdp.click('.activity .act[aria-label="Objetos"]');
+
+// 3c) The editor shows a focus ring when it receives focus.
+await cdp.evaluate(`document.querySelector('.cm-content')?.focus()`);
+await cdp.wait(300);
+const ring = JSON.parse(await cdp.evaluate(`JSON.stringify((() => { const e = document.querySelector('.cm-editor'); const cs = getComputedStyle(e); return { focused: e.classList.contains('cm-focused'), outlineStyle: cs.outlineStyle, outlineWidth: cs.outlineWidth }; })())`));
+check("the editor shows a focus ring", ring.focused && ring.outlineStyle !== "none" && parseFloat(ring.outlineWidth) >= 2, ring);
+
 // 4) The UI font is IBM Plex Sans (the bundled woff2 loaded, not the system fallback).
 const font = await cdp.evaluate(`document.fonts.check('13px "IBM Plex Sans"') && document.fonts.check('13px "JetBrains Mono"')`);
 check("IBM Plex Sans and JetBrains Mono are loaded", font);

@@ -30,13 +30,13 @@ export function StatusBar({
   const { t } = useTranslation();
   return (
     <footer className="statusbar">
-      <div className="status" role="status">
+      <div className="status">
         <span className="seg" title={server || undefined}>
           <span className={dot ? `dot ${dot}` : "dot"} />
           <b>{connLabel ? connLabel : t("noConnection")}</b>
           {server && <span className="muted">· {shortServer(server)}</span>}
         </span>
-        <span className="seg msg" data-e2e="status-message">
+        <span className="seg msg" role="status" data-e2e="status-message">
           {message}
         </span>
         <span className="sp" />

@@ -215,6 +215,7 @@ export default function App() {
   );
   const [darkTheme, setDarkTheme] = useState(false);
   const [connections, setConnections] = useState<ConnectionConfig[]>([]);
+  const [connectionsLoaded, setConnectionsLoaded] = useState(false);
   const [selected, setSelected] = useState("");
   const [connected, setConnected] = useState<Record<string, string>>({});
   const [draft, setDraft] = useState<Draft>(emptyDraft);
@@ -350,7 +351,7 @@ export default function App() {
   const focusPane = (index: number) => {
     const next = ((index % 3) + 3) % 3;
     lastPane.current = next;
-    if (next === 0) objectsFilterRef.current?.focus();
+    if (next === 0) focusObjectsFilter();
     else if (next === 1) editorRef.current?.focus();
     else dataPanelRef.current?.focus();
   };
@@ -378,14 +379,42 @@ export default function App() {
   const [showStatus, setShowStatus] = useState(true);
   const [sideView, setSideView] = useState<SideView>("objects");
   const showConnections = sideView === "connections";
-  const setShowConnections = (
-    value: boolean | ((current: boolean) => boolean),
-  ) =>
-    setSideView((view) => {
-      const next =
-        typeof value === "function" ? value(view === "connections") : value;
-      return next ? "connections" : view === "connections" ? "objects" : view;
-    });
+  // Bumped every time the user opens the connections view: a save or connect that finishes later
+  // may only close the view if the user has not left and come back since it started.
+  const connectionsVisit = useRef(0);
+  const openConnections = () => {
+    connectionsVisit.current += 1;
+    setSideView("connections");
+  };
+  const closeConnectionsFrom = (visit: number) => {
+    if (connectionsVisit.current === visit)
+      setSideView((view) => (view === "connections" ? "objects" : view));
+  };
+  const pendingObjectsFocus = useRef(false);
+  const focusObjectsFilter = () => {
+    if (objectsFilterRef.current) objectsFilterRef.current.focus();
+    else {
+      pendingObjectsFocus.current = true;
+      setSideView("objects");
+    }
+  };
+  const firstSideViewRender = useRef(true);
+  useEffect(() => {
+    if (firstSideViewRender.current) {
+      firstSideViewRender.current = false;
+      return;
+    }
+    if (sideView === "objects" && pendingObjectsFocus.current) {
+      pendingObjectsFocus.current = false;
+      objectsFilterRef.current?.focus();
+      return;
+    }
+    // A control of the previous view was unmounted with the focus: land on this view's activity button.
+    const active = document.activeElement;
+    if (!active || active === document.body) {
+      document.querySelector<HTMLElement>(".activity .act[aria-pressed='true']")?.focus();
+    }
+  }, [sideView]);
   const [cursor, setCursor] = useState<{ line: number; col: number } | null>(
     null,
   );
@@ -462,6 +491,7 @@ export default function App() {
 
   const refresh = async () => {
     setConnections(await api.listConnections());
+    setConnectionsLoaded(true);
   };
 
   useEffect(() => {
@@ -484,8 +514,9 @@ export default function App() {
   }, [themeMode]);
 
   useEffect(() => {
-    if (connections.length === 0) setShowConnections(true);
-  }, [connections.length]);
+    // Only after the list has loaded: the first render always has zero connections.
+    if (connectionsLoaded && connections.length === 0) openConnections();
+  }, [connectionsLoaded, connections.length]);
 
   // Changing the buffer invalidates the offsets of the last run's errors and
   // makes late events from that run unusable.
@@ -649,6 +680,7 @@ export default function App() {
   const handleSideView = (view: SideView) => {
     if (view === "history") void showHistory();
     else if (view === "stats") void showStats();
+    else if (view === "connections") openConnections();
     else setSideView(view);
   };
 
@@ -669,12 +701,13 @@ export default function App() {
   };
 
   const save = async () => {
+    const visit = connectionsVisit.current;
     try {
       await api.saveConnection(toConfig(draft), password);
       setPassword("");
       await refresh();
       setSelected(draft.id);
-      setShowConnections(false);
+      closeConnectionsFrom(visit);
       setStatus(t("save"));
     } catch (error) {
       setStatus(String(error));
@@ -704,12 +737,13 @@ export default function App() {
       setStatus(t("noConnection"));
       return;
     }
+    const visit = connectionsVisit.current;
     try {
       const version = await api.connect(selected);
       setConnected((current) => ({ ...current, [selected]: version }));
       setStatus(`${t("connected")}: ${version}`);
       setTables(await api.listTableNames(selected));
-      setShowConnections(false);
+      closeConnectionsFrom(visit);
     } catch (error) {
       setStatus(String(error));
     }
@@ -1816,6 +1850,7 @@ export default function App() {
         break;
       case "View.ObjectList":
       case "View.ObjectTree":
+        setSideView("objects");
         void loadObjects();
         break;
       case "View.History":
@@ -2023,7 +2058,7 @@ export default function App() {
         setPanel("plan");
         break;
       case "View.ObjectTreeSetFocus":
-        objectsFilterRef.current?.focus();
+        focusObjectsFilter();
         break;
       case "Edit.FormatSQLwithSettings":
         if (profileDetailsRef.current) profileDetailsRef.current.open = true;
@@ -2365,11 +2400,11 @@ export default function App() {
         language={language}
         onLanguage={setLanguage}
         onPalette={() => setPaletteOpen(true)}
-        onChip={() => setSideView("connections")}
+        onChip={openConnections}
       />
       <div
         className={showToolbar ? "topbar" : "topbar hidden"}
-        role="toolbar"
+        role="group"
         aria-label={t("toolbar")}
       >
         <div className="toolbar">
@@ -2554,7 +2589,7 @@ export default function App() {
             className={showConnections ? "tb active" : "tb"}
             title={t("connections")}
             aria-label={t("connections")}
-            onClick={() => setShowConnections((visible) => !visible)}
+            onClick={() => (showConnections ? setSideView("objects") : openConnections())}
           >
             <Icon name="settings" />
           </button>
@@ -2666,8 +2701,10 @@ export default function App() {
           )}
 
           {sideView === "connections" && (
-          <details className="side-section" open>
-            <summary>{t("connections")}</summary>
+          <section className="side-section" aria-labelledby="connections-title">
+            <h2 id="connections-title" className="panel-title">
+              {t("connections")}
+            </h2>
             <div className="section-body">
               <label className="field-row">
                 <span>{t("label")}</span>
@@ -2770,7 +2807,7 @@ export default function App() {
                 </button>
               </div>
             </div>
-          </details>
+          </section>
           )}
 
           <details className="side-section" ref={profileDetailsRef}>

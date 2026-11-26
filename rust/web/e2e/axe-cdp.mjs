@@ -23,7 +23,7 @@ async function ensureConnected(cdp) {
 
 // Each view: how to reach it. `steps(cdp)` runs after the page is ready in the chosen theme.
 const VIEWS = {
-  shell: { steps: async () => {} },
+  shell: { steps: async () => {}, expect: `Boolean(document.querySelector('.titlebar') && document.querySelector('.activity'))` },
   results: {
     steps: async (cdp) => {
       await ensureConnected(cdp);
@@ -33,6 +33,7 @@ const VIEWS = {
       await cdp.key("F5", "F5", 116);
       await cdp.waitFor(`document.querySelectorAll('.grid tbody tr').length > 0`, 15000);
     },
+    expect: `document.querySelectorAll('.grid tbody tr').length > 0`,
   },
   objects: {
     steps: async (cdp) => {
@@ -42,6 +43,7 @@ const VIEWS = {
         await cdp.waitFor(`document.querySelectorAll('.objects-panel tbody tr').length > 0`, 20000);
       }
     },
+    expect: `document.querySelectorAll('.objects-panel tbody tr, [role="treeitem"]').length > 0`,
   },
 };
 
@@ -59,11 +61,16 @@ for (const theme of ["light", "dark"]) {
     await view.steps(cdp);
     await cdp.wait(300);
     await cdp.evaluate(axeSource);
-    const result = JSON.parse(await cdp.evaluate(`(async () => { const r = await window.axe.run(document); return JSON.stringify(r.violations.map(v => ({ id: v.id, impact: v.impact, nodes: v.nodes.length, sample: v.nodes.slice(0, 2).map(n => n.target.join(' ') + ' :: ' + (n.failureSummary || '').split('\\n')[1]) }))); })()`));
+    const raw = JSON.parse(await cdp.evaluate(`(async () => { const r = await window.axe.run(document); return JSON.stringify({ violations: r.violations.map(v => ({ id: v.id, impact: v.impact, nodes: v.nodes.length, sample: v.nodes.slice(0, 2).map(n => n.target.join(' ') + ' :: ' + (n.failureSummary || '').split('\\n')[1]) })), incomplete: r.incomplete.map(v => v.id + ' x' + v.nodes.length) }); })()`));
+    const result = raw.violations;
     const dataTheme = await cdp.evaluate(`document.documentElement.dataset.theme`);
-    report.push({ theme, requested: theme, applied: dataTheme, view: name, violations: result });
-    total += result.length;
-    console.log(`${theme.padEnd(5)} ${name.padEnd(12)} applied=${dataTheme} violations=${result.length}`);
+    const reached = Boolean(await cdp.evaluate(view.expect));
+    report.push({ theme, requested: theme, applied: dataTheme, view: name, reached, violations: result, incomplete: raw.incomplete });
+    const problems = (reached ? 0 : 1) + (dataTheme === theme ? 0 : 1);
+    total += result.length + problems;
+    console.log(`${theme.padEnd(5)} ${name.padEnd(12)} applied=${dataTheme} reached=${reached} violations=${result.length}${raw.incomplete.length ? " incomplete=[" + raw.incomplete.join(", ") + "]" : ""}`);
+    if (!reached) console.log("   VIEW NOT REACHED: the checks below did not run on the expected screen");
+    if (dataTheme !== theme) console.log(`   THEME NOT APPLIED: wanted ${theme}, got ${dataTheme}`);
     for (const v of result) console.log(`   ${v.impact}:${v.id} nodes=${v.nodes}\n      ${v.sample.join("\n      ")}`);
   }
 }

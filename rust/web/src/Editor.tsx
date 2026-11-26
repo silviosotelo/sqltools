@@ -297,6 +297,7 @@ const tokenEditorTheme = (dark: boolean) =>
   EditorView.theme(
     {
       "&": { color: "var(--text)", backgroundColor: "var(--surface)" },
+      "&.cm-focused": { outline: "2px solid var(--accent)", outlineOffset: "-2px" },
       ".cm-content, .cm-gutters": { fontFamily: "var(--mono)", fontSize: "13px" },
       ".cm-content": { caretColor: "var(--text)" },
       ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--text)" },

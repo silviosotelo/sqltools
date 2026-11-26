@@ -67,6 +67,9 @@ const pairs: Array<[string, string, number]> = [
   ["--t-n", "--surface", 4.5],
   ["--t-c", "--surface", 4.5],
   ["--control-border", "--surface", 3],
+  ["--control-border", "--bg", 3],
+  ["--control-border", "--side", 3],
+  ["--control-border", "--surface-alt", 3],
   ["--accent", "--surface", 3],
 ];
 

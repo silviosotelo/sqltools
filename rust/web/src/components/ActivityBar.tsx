@@ -28,7 +28,11 @@ export function ActivityBar({
         <button
           key={item.id}
           className="act"
-          aria-pressed={view === item.id}
+          aria-pressed={
+            item.id === "objects" || item.id === "connections"
+              ? view === item.id
+              : undefined
+          }
           aria-label={t(item.label)}
           title={t(item.label)}
           onClick={() => onView(item.id)}
