@@ -1607,3 +1607,19 @@ kbd {
   padding: 0;
   margin: 0;
 }
+
+/* Inline action inside a grid row (enable/disable a constraint or a trigger). */
+.link-btn {
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid var(--control-border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.link-btn:hover {
+  background: var(--accent-soft);
+}

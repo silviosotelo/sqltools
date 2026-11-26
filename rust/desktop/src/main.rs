@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use sqlt_app::{catalog, AppState, ConnectionConfig, HistoryEntry};
+use sqlt_app::{browser, catalog, AppState, ConnectionConfig, HistoryEntry};
 use sqlt_core::{Batch, ColumnMeta};
 use tauri::ipc::Channel;
 use tauri::State;
@@ -323,6 +323,111 @@ async fn transaction_pending(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn list_dependencies(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    schema: Option<String>,
+    name: String,
+    object_type: String,
+    dependents: bool,
+) -> Result<Vec<browser::Dependency>, String> {
+    let session = state.session(&connection_id)?;
+    browser::list_dependencies(
+        &session,
+        schema.as_deref(),
+        &name,
+        &object_type,
+        dependents,
+        state.query_options(&connection_id),
+    )
+}
+
+#[tauri::command]
+fn list_invalid_objects(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    schema: Option<String>,
+) -> Result<Vec<catalog::ObjectInfo>, String> {
+    let session = state.session(&connection_id)?;
+    browser::list_invalid_objects(
+        &session,
+        schema.as_deref(),
+        state.query_options(&connection_id),
+    )
+}
+
+#[tauri::command]
+fn compile_object(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    schema: Option<String>,
+    name: String,
+    object_type: String,
+) -> Result<(), String> {
+    let session = state.session(&connection_id)?;
+    browser::compile_object(&session, schema.as_deref(), &name, &object_type)
+}
+
+/// Compiles every invalid unit and returns `[attempted, still_invalid]`.
+#[tauri::command]
+fn compile_invalid_objects(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    schema: Option<String>,
+) -> Result<Vec<usize>, String> {
+    let session = state.session(&connection_id)?;
+    browser::compile_invalid_objects(
+        &session,
+        schema.as_deref(),
+        state.query_options(&connection_id),
+    )
+    .map(|(attempted, remaining)| vec![attempted, remaining])
+}
+
+#[tauri::command]
+fn list_compile_errors(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    schema: Option<String>,
+    name: String,
+    object_type: String,
+) -> Result<Vec<browser::CompileError>, String> {
+    let session = state.session(&connection_id)?;
+    browser::list_errors(
+        &session,
+        schema.as_deref(),
+        &name,
+        &object_type,
+        state.query_options(&connection_id),
+    )
+}
+
+#[tauri::command]
+fn toggle_trigger(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    schema: Option<String>,
+    name: String,
+    enabled: bool,
+) -> Result<(), String> {
+    let session = state.session(&connection_id)?;
+    browser::set_trigger_enabled(&session, schema.as_deref(), &name, enabled)
+}
+
+#[tauri::command]
+fn toggle_constraint(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    schema: Option<String>,
+    table: String,
+    name: String,
+    enabled: bool,
+) -> Result<(), String> {
+    let session = state.session(&connection_id)?;
+    browser::set_constraint_enabled(&session, schema.as_deref(), &table, &name, enabled)
 }
 
 #[tauri::command]
@@ -932,6 +1037,13 @@ fn main() {
             list_table_names,
             list_objects,
             transaction_pending,
+            list_dependencies,
+            list_invalid_objects,
+            compile_object,
+            compile_invalid_objects,
+            list_compile_errors,
+            toggle_trigger,
+            toggle_constraint,
             count_objects,
             list_columns,
             load_ddl,

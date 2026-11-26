@@ -128,3 +128,62 @@ formas DDL dependen del árbol** (selección múltiple y menú contextual), que 
 1. **Orden:** P1 a P10 en secuencia estricta; no se avanza sin cerrar la fase anterior.
 2. **Comandos sin implementar:** se retiran del registry solo los que PL/SQL Developer no implemente, con la auditoría de P1 como evidencia. Los que existan en PL/SQL Developer se quedan listados.
 3. **AI Assistant:** se planifica como P10, agnóstico de proveedor.
+
+## Evidencia por fase
+
+### P1 — cerrada (2026-11-26)
+
+**Qué cambió:** `crates/sqlt-app/src/browser.rs` (nuevo módulo): dependencias por objeto en las dos
+direcciones sobre `ALL_DEPENDENCIES` (siempre filtradas: la tabla tiene 211 k filas), objetos inválidos,
+`ALTER ... COMPILE REUSE SETTINGS` con errores de `ALL_ERRORS`/`USER_ERRORS`, recompilación de todos los
+inválidos, `ALTER TRIGGER ... ENABLE|DISABLE` y `ALTER TABLE ... ENABLE|DISABLE CONSTRAINT`. Los
+identificadores se citan y se rechazan si traen comillas; el tipo de objeto se valida contra una lista
+blanca antes de llegar al `ALTER` (2 tests unitarios). Comandos Tauri nuevos: `list_dependencies`,
+`list_invalid_objects`, `compile_object`, `compile_invalid_objects`, `list_compile_errors`, `toggle_trigger`,
+`toggle_constraint`. UI: pestaña **Dependencias** en el panel de objeto (ambas direcciones), botón
+**Recompilar** en la cabecera, botón **Recompilar objetos inválidos** con el conteo en el panel de objetos,
+acciones habilitar/deshabilitar por fila en Restricciones y Triggers, y **Dependencias / Recompilar /
+Habilitar-Deshabilitar** en el menú contextual del árbol.
+
+**Auditoría de los 13 comandos sin implementar (tarea de P1):** intenté leer los menús de PL/SQL Developer 17
+por su propia interfaz de accesibilidad (UI Automation) y por el `HMENU` de la ventana. Resultado: la app es
+Delphi con ribbon de DevExpress y **no publica** ni árbol UIA ni menú clásico (0 controles expuestos), así que
+no hay evidencia observable de qué comandos implementa. Decisión aplicada: **no se retira ningún comando**
+(el dueño autorizó retirar solo lo que PSD no implemente, y sin evidencia no se toca el registry). Los 13
+siguen listados; el digest de `golden-commands.json` queda igual.
+
+**Verificación contra Oracle (anamnesis@desa02, conexión del keyring):** sonda temporal
+`examples/p1_probe.rs` (se borró después; creaba y eliminaba sus propios objetos):
+
+```
+invalid after broken create: PKG_APP_VENTAS_ESCRITURA=PACKAGE BODY, CARGAR_PLAN_WEB=PROCEDURE, ..., SQLT_P1_PROBE=PROCEDURE, ...
+compile errors: 2
+after recompile of the broken unit: 2 error(s)
+status after fixing: VALID
+AS_PDF3_MOD package body references 17 object(s)
+objects depending on A11: 2
+trigger after disable: DISABLED / after enable: ENABLED
+constraint after disable: DISABLED / after enable: ENABLED
+compiling a TABLE refused: true
+leftovers: table=0 procedure=0
+P1 PROBE OK
+```
+
+**Evidencia en la app instalada** (19:5x–20:0x, firmada autofirmada):
+
+| Comando | Resultado |
+|---|---|
+| `node e2e/phase-p1.mjs` | `P1 CHECKS OK (15)`: pestaña Dependencias con A11 → `ANAMNESIS.FECHA_REP_AUX2` y `PUBLIC.A11` como dependientes; menú contextual con Dependencias/Recompilar; recompilar `AS_PDF3_MOD` → "Compilado sin errores"; botón de inválidos con el conteo (3) → "Recompilados 3; quedan 3 inválidos"; acciones por fila en las restricciones de `ARCHIVO_AUDITORIA_OPERATIVA` (9) y en los triggers de `NOT_CRED_PREST_REPAGA` (4) |
+| `axe-cdp.mjs` | 0 violaciones, 8 vistas × 2 temas |
+| `phase-f1` / `phase-f2` / `phase-f5` / `tree` / `env` / `keyboard-walk` | 19 / 3 / 39 / 11 / 12 / 26 paradas |
+| `commands-check --compare` | OK, mismo digest (sin cambios de registry) |
+| `flow --compare golden-f3.json` | IDENTICAL |
+| capturas 1366×768, 1024×700 y 1024×640, claro y oscuro | `docs/screenshots/parity-p1-dependencies-*.png`, sin desbordes y `clipped: 0` |
+| `cargo fmt` / `clippy -D warnings` / `check -p sqlt-desktop` / `test` | 0 / 0 / 0 / 0 (19 ok; +2 tests nuevos) |
+| `npm run build` / `npm test` | 0 / **81 passed** |
+
+**Hallazgo fuera de alcance (se reporta):** el esquema `ANAMNESIS` ya tenía objetos inválidos antes de esta
+fase (`PKG_APP_VENTAS_ESCRITURA`, `CARGAR_PLAN_WEB`, `CARGAR_PLAN_WEB2`, `MIGRA_ADHERENTE`,
+`RESCISION_CONTRATO_JNTRG`); la recompilación los intenta y deja 3 todavía inválidos. No es un defecto de la
+app: son errores de esos objetos en la base.
+

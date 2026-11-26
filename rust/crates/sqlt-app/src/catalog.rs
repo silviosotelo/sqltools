@@ -30,14 +30,14 @@ pub struct ColumnInfo {
     pub data_default: Option<String>,
 }
 
-fn cell(row: &[Value], index: usize) -> String {
+pub(crate) fn cell(row: &[Value], index: usize) -> String {
     row.get(index)
         .and_then(Value::display)
         .unwrap_or_default()
         .to_string()
 }
 
-fn fetch_rows(
+pub(crate) fn fetch_rows(
     session: &Session,
     sql: &str,
     params: &[&dyn ToSql],

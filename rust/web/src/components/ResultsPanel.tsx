@@ -6,6 +6,7 @@ import type {
   ColumnInfo,
   ColumnMeta,
   ConstraintInfo,
+  Dependency,
   GrantInfo,
   IndexInfo,
   ObjectInfo,
@@ -40,11 +41,15 @@ export interface ResultsPanelProps {
   indexes: IndexInfo[];
   triggers: TriggerInfo[];
   grants: GrantInfo[];
+  dependencies: Dependency[];
+  onRecompile: (object: ObjectInfo) => void;
+  onToggleTrigger: (trigger: TriggerInfo) => void;
+  onToggleConstraint: (constraint: ConstraintInfo) => void;
 }
 
 /** The bottom panel: tab bar plus the content of the active tab (results grid, history, plan, object, output). */
 export function ResultsPanel({
-  panel, setPanel, columns, rows, scrollTop, setScrollTop, setRows, setColumns, running, isConnected, dataPanelRef, exportCsv, setStatus, setActiveCell, setCellView, plan, output, selectedObject, objectTab, loadDetail, loadDdlFor, objectColumns, constraints, indexes, triggers, grants,
+  panel, setPanel, columns, rows, scrollTop, setScrollTop, setRows, setColumns, running, isConnected, dataPanelRef, exportCsv, setStatus, setActiveCell, setCellView, plan, output, selectedObject, objectTab, loadDetail, loadDdlFor, objectColumns, constraints, indexes, triggers, grants, dependencies, onRecompile, onToggleTrigger, onToggleConstraint,
 }: ResultsPanelProps) {
   const { t } = useTranslation();
   const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
@@ -192,6 +197,9 @@ export function ResultsPanel({
                   >
                     {t("loadDdl")}
                   </button>
+                  <button onClick={() => onRecompile(selectedObject)}>
+                    {t("recompile")}
+                  </button>
                 </header>
                 <nav className="object-tabs">
                   {(
@@ -201,6 +209,7 @@ export function ResultsPanel({
                       "indexes",
                       "triggers",
                       "grants",
+                      "dependencies",
                     ] as ObjectTab[]
                   ).map((tab) => (
                     <button
@@ -252,7 +261,17 @@ export function ResultsPanel({
                         <tr key={constraint.name}>
                           <td>{constraint.name}</td>
                           <td>{constraint.kind}</td>
-                          <td>{constraint.status}</td>
+                          <td>
+                            {constraint.status}{" "}
+                            <button
+                              className="link-btn"
+                              onClick={() => onToggleConstraint(constraint)}
+                            >
+                              {/^ENABLED$/.test(constraint.status)
+                                ? t("disable")
+                                : t("enable")}
+                            </button>
+                          </td>
                           <td>{constraint.columns.join(", ")}</td>
                         </tr>
                       ))}
@@ -297,9 +316,50 @@ export function ResultsPanel({
                           <td>{trigger.name}</td>
                           <td>{trigger.triggerType}</td>
                           <td>{trigger.event}</td>
-                          <td>{trigger.status}</td>
+                          <td>
+                            {trigger.status}{" "}
+                            <button
+                              className="link-btn"
+                              onClick={() => onToggleTrigger(trigger)}
+                            >
+                              {/^ENABLED$/.test(trigger.status)
+                                ? t("disable")
+                                : t("enable")}
+                            </button>
+                          </td>
                         </tr>
                       ))}
+                    </tbody>
+                  </table>
+                )}
+                {objectTab === "dependencies" && (
+                  <table className="grid">
+                    <thead>
+                      <tr>
+                        <th>{t("dependency")}</th>
+                        <th>{t("objectType")}</th>
+                        <th>{t("name")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dependencies.map((dependency, index) => (
+                        <tr key={`${dependency.owner}-${dependency.name}-${index}`}>
+                          <td>
+                            {dependency.direction === "dependents"
+                              ? t("dependents")
+                              : t("referenced")}
+                          </td>
+                          <td>{dependency.objectType}</td>
+                          <td>
+                            {dependency.owner}.{dependency.name}
+                          </td>
+                        </tr>
+                      ))}
+                      {dependencies.length === 0 && (
+                        <tr>
+                          <td colSpan={3}>{t("noDependencies")}</td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 )}

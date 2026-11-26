@@ -1,7 +1,13 @@
 import type { Value } from "./types";
 
 export type Panel = "results" | "plan" | "object" | "output";
-export type ObjectTab = "columns" | "constraints" | "indexes" | "triggers" | "grants";
+export type ObjectTab =
+  | "columns"
+  | "constraints"
+  | "indexes"
+  | "triggers"
+  | "grants"
+  | "dependencies";
 
 // Virtualised grid: fixed row height, only the visible window (plus overscan) is rendered.
 export const ROW_HEIGHT = 24;

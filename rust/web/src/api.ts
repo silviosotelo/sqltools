@@ -9,6 +9,8 @@ import type {
   GrantInfo,
   HistoryEntry,
   IndexInfo,
+  CompileError,
+  Dependency,
   ObjectCount,
   ObjectInfo,
   QueryEvent,
@@ -65,6 +67,69 @@ export const api = {
   transactionPending: (connectionId: string) =>
     invoke<boolean>("transaction_pending", { connectionId }),
   history: () => invoke<HistoryEntry[]>("history"),
+  listDependencies: (
+    connectionId: string,
+    schema: string | null,
+    name: string,
+    objectType: string,
+    dependents: boolean,
+  ) =>
+    invoke<Dependency[]>("list_dependencies", {
+      connectionId,
+      schema,
+      name,
+      objectType,
+      dependents,
+    }),
+  listInvalidObjects: (connectionId: string, schema: string | null) =>
+    invoke<ObjectInfo[]>("list_invalid_objects", { connectionId, schema }),
+  compileObject: (
+    connectionId: string,
+    schema: string | null,
+    name: string,
+    objectType: string,
+  ) =>
+    invoke<void>("compile_object", {
+      connectionId,
+      schema,
+      name,
+      objectType,
+    }),
+  compileInvalidObjects: (connectionId: string, schema: string | null) =>
+    invoke<number[]>("compile_invalid_objects", { connectionId, schema }),
+  listCompileErrors: (
+    connectionId: string,
+    schema: string | null,
+    name: string,
+    objectType: string,
+  ) =>
+    invoke<CompileError[]>("list_compile_errors", {
+      connectionId,
+      schema,
+      name,
+      objectType,
+    }),
+  toggleTrigger: (
+    connectionId: string,
+    schema: string | null,
+    name: string,
+    enabled: boolean,
+  ) =>
+    invoke<void>("toggle_trigger", { connectionId, schema, name, enabled }),
+  toggleConstraint: (
+    connectionId: string,
+    schema: string | null,
+    table: string,
+    name: string,
+    enabled: boolean,
+  ) =>
+    invoke<void>("toggle_constraint", {
+      connectionId,
+      schema,
+      table,
+      name,
+      enabled,
+    }),
   listTableNames: (connectionId: string) =>
     invoke<string[]>("list_table_names", { connectionId }),
   listObjects: (

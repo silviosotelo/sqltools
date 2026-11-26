@@ -26,6 +26,7 @@ import type {
   CommandSpec,
   ConnectionConfig,
   ConstraintInfo,
+  Dependency,
   FormatOptions,
   GrantInfo,
   HistoryEntry,
@@ -297,6 +298,8 @@ export default function App() {
   const [indexes, setIndexes] = useState<IndexInfo[]>([]);
   const [triggers, setTriggers] = useState<TriggerInfo[]>([]);
   const [grants, setGrants] = useState<GrantInfo[]>([]);
+  const [dependencies, setDependencies] = useState<Dependency[]>([]);
+  const [invalidCount, setInvalidCount] = useState(0);
   const [menu, setMenu] = useState<{
     object: ObjectInfo;
     x: number;
@@ -516,6 +519,23 @@ export default function App() {
     };
   }, [isConnected, running, selected, transactionTick]);
   const transactionPending = transactionFlag?.id === selected ? transactionFlag.pending : null;
+  useEffect(() => {
+    if (!isConnected) {
+      setInvalidCount(0);
+      return;
+    }
+    let current = true;
+    const timer = setTimeout(() => {
+      api
+        .listInvalidObjects(selected, schema.trim() || null)
+        .then((list) => current && setInvalidCount(list.length))
+        .catch(() => current && setInvalidCount(0));
+    }, 400);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+  }, [isConnected, selected, schema]);
   const environment = connections.find((config) => config.id === selected)?.environment ?? null;
   const treeGroups: TreeGroup[] = useMemo(
     () =>
@@ -724,6 +744,7 @@ export default function App() {
     setIndexes([]);
     setTriggers([]);
     setGrants([]);
+    setDependencies([]);
     setObjectTab("columns");
     setMenu(null);
     setStats([]);
@@ -1087,6 +1108,7 @@ export default function App() {
     setIndexes([]);
     setTriggers([]);
     setGrants([]);
+    setDependencies([]);
     setObjectTab("columns");
     setPanel("object");
     if (!["TABLE", "VIEW"].includes(object.objectType)) return;
@@ -1110,6 +1132,9 @@ export default function App() {
         );
       } else if (tab === "indexes") {
         setIndexes(await api.listIndexes(selected, owner, selectedObject.name));
+      } else if (tab === "dependencies") {
+        setObjectTab(tab);
+        await loadDependencies(selectedObject);
       } else if (tab === "triggers") {
         setTriggers(
           await api.listTriggers(selected, owner, selectedObject.name),
@@ -1117,6 +1142,102 @@ export default function App() {
       } else if (tab === "grants") {
         setGrants(await api.listGrants(selected, owner, selectedObject.name));
       }
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  /** Both directions of ALL_DEPENDENCIES, merged for the Dependencies tab. */
+  const loadDependencies = async (object: ObjectInfo) => {
+    const owner = schema.trim() || null;
+    try {
+      const [referenced, dependents] = await Promise.all([
+        api.listDependencies(selected, owner, object.name, object.objectType, false),
+        api.listDependencies(selected, owner, object.name, object.objectType, true),
+      ]);
+      setDependencies([
+        ...referenced.map((item) => ({ ...item, direction: "referenced" as const })),
+        ...dependents.map((item) => ({ ...item, direction: "dependents" as const })),
+      ]);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const showDependencies = async (object: ObjectInfo) => {
+    await openObject(object);
+    setObjectTab("dependencies");
+    setPanel("object");
+    await loadDependencies(object);
+  };
+
+  /** ALTER ... COMPILE; the compiler errors go to the Output tab, like the editor's. */
+  const recompileObject = async (object: ObjectInfo) => {
+    const owner = schema.trim() || null;
+    try {
+      await api.compileObject(selected, owner, object.name, object.objectType);
+      const errors = await api.listCompileErrors(selected, owner, object.name, object.objectType);
+      if (errors.length === 0) {
+        setStatus(`${object.name}: ${t("objectValid")}`);
+      } else {
+        setOutput(errors.map((error) => `ORA ${error.line}:${error.position} ${error.text}`));
+        setPanel("output");
+        setStatus(`${object.name}: ${errors.length} ${t("compileErrors")}`);
+      }
+      tree.refresh();
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  /** Compiles every invalid unit of the schema and reports how many are left. */
+  const recompileInvalid = async () => {
+    if (!isConnected) {
+      setStatus(t("noConnection"));
+      return;
+    }
+    try {
+      const [attempted, remaining] = await api.compileInvalidObjects(
+        selected,
+        schema.trim() || null,
+      );
+      setInvalidCount(remaining);
+      setStatus(
+        t("compiledInvalid")
+          .replace("{attempted}", String(attempted))
+          .replace("{remaining}", String(remaining)),
+      );
+      tree.refresh();
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const toggleTrigger = async (trigger: { name: string; status: string }) => {
+    const enabled = !/^ENABLED$/.test(trigger.status);
+    try {
+      await api.toggleTrigger(selected, schema.trim() || null, trigger.name, enabled);
+      setStatus(`${trigger.name}: ${enabled ? t("enable") : t("disable")}`);
+      if (objectTab === "triggers") await loadDetail("triggers");
+      tree.refresh();
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const toggleConstraint = async (constraint: { name: string; status: string }) => {
+    if (!selectedObject) return;
+    const enabled = !/^ENABLED$/.test(constraint.status);
+    try {
+      await api.toggleConstraint(
+        selected,
+        schema.trim() || null,
+        selectedObject.name,
+        constraint.name,
+        enabled,
+      );
+      setStatus(`${constraint.name}: ${enabled ? t("enable") : t("disable")}`);
+      await loadDetail("constraints");
     } catch (error) {
       setStatus(String(error));
     }
@@ -2585,6 +2706,15 @@ export default function App() {
             >
               <Icon name="refresh" />
             </button>
+            <button
+              className="tb"
+              title={`${t("recompileInvalid")} (${invalidCount})`}
+              aria-label={t("recompileInvalid")}
+              onClick={() => void recompileInvalid()}
+              disabled={!isConnected || invalidCount === 0}
+            >
+              <Icon name="warning" />
+            </button>
           </div>
           {isConnected ? (
             <>
@@ -2770,6 +2900,10 @@ export default function App() {
             indexes={indexes}
             triggers={triggers}
             grants={grants}
+          dependencies={dependencies}
+          onRecompile={(object) => void recompileObject(object)}
+          onToggleTrigger={(trigger) => void toggleTrigger(trigger)}
+          onToggleConstraint={(constraint) => void toggleConstraint(constraint)}
           />
 
         </main>
@@ -3179,6 +3313,32 @@ export default function App() {
             >
               {t("loadDdl")}
             </button>
+            <button
+              onClick={() => {
+                setMenu(null);
+                void showDependencies(menu.object);
+              }}
+            >
+              {t("dependencies")}
+            </button>
+            <button
+              onClick={() => {
+                setMenu(null);
+                void recompileObject(menu.object);
+              }}
+            >
+              {t("recompile")}
+            </button>
+            {menu.object.objectType === "TRIGGER" && (
+              <button
+                onClick={() => {
+                  setMenu(null);
+                  void toggleTrigger(menu.object);
+                }}
+              >
+                {/^ENABLED$/.test(menu.object.status) ? t("disable") : t("enable")}
+              </button>
+            )}
             <button
               onClick={() => {
                 setMenu(null);

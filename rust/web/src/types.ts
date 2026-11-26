@@ -173,3 +173,13 @@ export type GrantInfo = {
   privilege: string;
   grantable: boolean;
 };
+
+export type Dependency = {
+  owner: string;
+  name: string;
+  objectType: string;
+  /** Filled in by the app: the catalog returns one direction per query. */
+  direction?: "referenced" | "dependents";
+};
+
+export type CompileError = { line: number; position: number; text: string };
