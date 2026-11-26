@@ -44,6 +44,8 @@ export type ConnectionConfig = {
   readOnly: boolean;
   prefetch: number;
   savePassword: boolean;
+  /** Absent in files written before environments existed. */
+  environment?: { label: string; color: string } | null;
 };
 
 export type HistoryEntry = {

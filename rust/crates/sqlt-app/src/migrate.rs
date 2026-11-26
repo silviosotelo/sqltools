@@ -95,12 +95,14 @@ pub fn import_legacy_json(path: &Path, store: &mut ConnectionStore) -> Result<us
         config.mode = mode(&profile);
         config.read_only = bool_value(&profile, "readOnly", false);
         config.save_password = false;
-        let duplicate = store.list().iter().any(|existing| {
-            existing.label == config.label
-                && existing.user == config.user
-                && existing.alias == config.alias
-                && existing.connect == config.connect
-        });
+        // Never replace a profile that already has this id: it may carry edits (environment, paths).
+        let duplicate = store.get(&config.id).is_some()
+            || store.list().iter().any(|existing| {
+                existing.label == config.label
+                    && existing.user == config.user
+                    && existing.alias == config.alias
+                    && existing.connect == config.connect
+            });
         if duplicate {
             continue;
         }

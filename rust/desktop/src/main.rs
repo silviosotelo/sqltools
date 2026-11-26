@@ -63,7 +63,8 @@ fn save_connection(
             .lock()
             .map_err(|_| "Connection store lock poisoned".to_string())?;
         store.upsert(config).map_err(|e| e.to_string())?;
-        if let Some(password) = password.filter(|_| save_password) {
+        // An empty password field means keep the stored one: editing a connection must not wipe it.
+        if let Some(password) = password.filter(|p| save_password && !p.is_empty()) {
             store
                 .set_password(&id, &password)
                 .map_err(|e| e.to_string())?;

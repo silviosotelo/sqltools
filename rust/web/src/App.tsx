@@ -8,7 +8,10 @@ import { TitleBar, type ThemeMode } from "./components/TitleBar";
 import { ActivityBar, type SideView } from "./components/ActivityBar";
 import { StatusBar } from "./components/StatusBar";
 import { EditorTabs } from "./components/EditorTabs";
+import { ConnectionsView, type ConnectionDraft } from "./components/ConnectionsView";
+import { safeColor, validateEnvironment } from "./environment";
 import { ObjectTree } from "./components/ObjectTree";
+import { EnvBadge } from "./components/EnvBadge";
 import { useObjectTree } from "./tree/useObjectTree";
 import { objectId, type TreeGroup } from "./tree/treeModel";
 import { ResultsPanel } from "./components/ResultsPanel";
@@ -115,18 +118,7 @@ const formatKeys = (keys: string[]) =>
   keys.map((key) => key.split(",").join(" then ")).join(" / ");
 
 
-type Draft = {  id: string;
-  label: string;
-  user: string;
-  alias: string;
-  connect: string;
-  tnsAdmin: string;
-  ociDir: string;
-  mode: "NORMAL" | "SYSDBA" | "SYSOPER";
-  readOnly: boolean;
-  prefetch: number;
-  savePassword: boolean;
-};
+type Draft = ConnectionDraft;
 
 const objectTypes = [
   { value: "", key: "typeAll" },
@@ -154,6 +146,8 @@ function emptyDraft(): Draft {
     readOnly: false,
     prefetch: 1000,
     savePassword: true,
+    envLabel: "",
+    envColor: "neutral",
   };
 }
 
@@ -170,6 +164,8 @@ function fromConfig(config: ConnectionConfig): Draft {
     readOnly: config.readOnly,
     prefetch: config.prefetch,
     savePassword: config.savePassword,
+    envLabel: config.environment?.label ?? "",
+    envColor: safeColor(config.environment?.color ?? "neutral"),
   };
 }
 
@@ -187,6 +183,9 @@ function toConfig(draft: Draft): ConnectionConfig {
     readOnly: draft.readOnly,
     prefetch: draft.prefetch,
     savePassword: draft.savePassword,
+    environment: draft.envLabel.trim()
+      ? { label: draft.envLabel.trim(), color: draft.envColor }
+      : null,
   };
 }
 
@@ -476,6 +475,7 @@ export default function App() {
   const [paletteIndex, setPaletteIndex] = useState(0);
 
   const isConnected = Boolean(selected && connected[selected]);
+  const environment = connections.find((config) => config.id === selected)?.environment ?? null;
   const treeGroups: TreeGroup[] = useMemo(
     () =>
       objectTypes
@@ -702,6 +702,13 @@ export default function App() {
 
   const save = async () => {
     const visit = connectionsVisit.current;
+    if (draft.envLabel.trim()) {
+      const env = validateEnvironment({ label: draft.envLabel, color: draft.envColor });
+      if (!env.ok) {
+        setStatus(t("envInvalid"));
+        return;
+      }
+    }
     try {
       await api.saveConnection(toConfig(draft), password);
       setPassword("");
@@ -712,6 +719,12 @@ export default function App() {
     } catch (error) {
       setStatus(String(error));
     }
+  };
+
+  const newConnection = () => {
+    setSelected("");
+    setDraft(emptyDraft());
+    setPassword("");
   };
 
   const remove = async () => {
@@ -2362,6 +2375,7 @@ export default function App() {
       <TitleBar
         isConnected={isConnected}
         connLabel={`${draft.user}${draft.alias ? `@${draft.alias}` : ""}`}
+        environment={isConnected ? environment : null}
         connTitle={isConnected ? (connected[selected] ?? "") : t("noConnection")}
         theme={themeMode}
         onTheme={() =>
@@ -2595,7 +2609,10 @@ export default function App() {
         <aside className="objects-panel">
           {sideView === "objects" && (
             <>
-          <div className="panel-title">{t("objects")}</div>
+          <div className="panel-title">
+            {t("objects")}
+            {isConnected && <EnvBadge environment={environment} />}
+          </div>
           <div className="object-filter">
             <input
               value={schema}
@@ -2655,113 +2672,21 @@ export default function App() {
           )}
 
           {sideView === "connections" && (
-          <section className="side-section" aria-labelledby="connections-title">
-            <h2 id="connections-title" className="panel-title">
-              {t("connections")}
-            </h2>
-            <div className="section-body">
-              <label className="field-row">
-                <span>{t("label")}</span>
-                <input
-                  value={draft.label}
-                  onChange={(event) => update("label", event.target.value)}
-                />
-              </label>
-              <label className="field-row">
-                <span>{t("user")}</span>
-                <input
-                  value={draft.user}
-                  onChange={(event) => update("user", event.target.value)}
-                />
-              </label>
-              <label className="field-row">
-                <span>{t("password")}</span>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                />
-              </label>
-              <label className="field-row">
-                <span>{t("alias")}</span>
-                <input
-                  value={draft.alias}
-                  onChange={(event) => update("alias", event.target.value)}
-                />
-              </label>
-              <label className="field-row">
-                <span>{t("connectString")}</span>
-                <input
-                  value={draft.connect}
-                  placeholder="//host:1521/service"
-                  onChange={(event) => update("connect", event.target.value)}
-                />
-              </label>
-              <label className="field-row">
-                <span>{t("tnsAdmin")}</span>
-                <input
-                  value={draft.tnsAdmin}
-                  onChange={(event) => update("tnsAdmin", event.target.value)}
-                />
-              </label>
-              <label className="field-row">
-                <span>{t("ociDir")}</span>
-                <input
-                  value={draft.ociDir}
-                  onChange={(event) => update("ociDir", event.target.value)}
-                />
-              </label>
-              <label className="field-row">
-                <span>{t("mode")}</span>
-                <select
-                  value={draft.mode}
-                  onChange={(event) =>
-                    update("mode", event.target.value as Draft["mode"])
-                  }
-                >
-                  <option value="NORMAL">NORMAL</option>
-                  <option value="SYSDBA">SYSDBA</option>
-                  <option value="SYSOPER">SYSOPER</option>
-                </select>
-              </label>
-              <label className="field-row">
-                <span>{t("prefetch")}</span>
-                <input
-                  type="number"
-                  min={1}
-                  value={draft.prefetch}
-                  onChange={(event) =>
-                    update("prefetch", Number(event.target.value) || 1000)
-                  }
-                />
-              </label>
-              <label className="check-inline">
-                <input
-                  type="checkbox"
-                  checked={draft.savePassword}
-                  onChange={(event) =>
-                    update("savePassword", event.target.checked)
-                  }
-                />
-                {t("savePassword")}
-              </label>
-              <div className="row">
-                <button className="plain" onClick={() => void save()}>
-                  {t("save")}
-                </button>
-                <button
-                  className="plain"
-                  onClick={() => void remove()}
-                  disabled={!selected}
-                >
-                  {t("delete")}
-                </button>
-                <button className="plain" onClick={() => void importLegacy()}>
-                  {t("importLegacy")}
-                </button>
-              </div>
-            </div>
-          </section>
+            <ConnectionsView
+              connections={connections}
+              selected={selected}
+              connected={connected}
+              draft={draft}
+              password={password}
+              update={update}
+              setPassword={setPassword}
+              onSelect={selectConnection}
+              onNew={newConnection}
+              onSave={() => void save()}
+              onConnect={() => void connect()}
+              onRemove={() => void remove()}
+              onImportLegacy={() => void importLegacy()}
+            />
           )}
 
           <details className="side-section" ref={profileDetailsRef}>
@@ -2910,6 +2835,7 @@ export default function App() {
               ? `${draft.user}${draft.alias ? `@${draft.alias}` : ""}`
               : ""
           }
+          environment={isConnected ? environment : null}
           message={status}
           eol={fileEol}
           cursor={cursor}

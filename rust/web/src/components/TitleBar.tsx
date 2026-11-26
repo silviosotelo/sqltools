@@ -1,5 +1,6 @@
 import { Icon } from "../icons";
 import { useTranslation } from "../i18n";
+import { EnvBadge } from "./EnvBadge";
 
 export type ThemeMode = "light" | "dark" | "system";
 
@@ -15,6 +16,7 @@ export function TitleBar({
   onLanguage,
   onPalette,
   onChip,
+  environment,
 }: {
   isConnected: boolean;
   /** `user@alias` of the active connection. */
@@ -27,6 +29,7 @@ export function TitleBar({
   onLanguage: (language: "es" | "en") => void;
   onPalette: () => void;
   onChip: () => void;
+  environment?: { label: string; color: string } | null;
 }) {
   const { t } = useTranslation();
   return (
@@ -56,6 +59,7 @@ export function TitleBar({
             <>
               <span className="sr-only">{t("connected")}: </span>
               {connLabel}
+              <EnvBadge environment={environment} />
             </>
           ) : (
             t("noConnection")

@@ -45,6 +45,17 @@ const VIEWS = {
     },
     expect: `document.querySelectorAll('[role="treeitem"][aria-level="2"]').length > 0`,
   },
+  connections: {
+    steps: async (cdp) => {
+      await cdp.click('.activity .act[aria-label="Conexiones"]');
+      await cdp.wait(400);
+      // a filled environment so the badge, the swatches and the preview are part of the audit
+      await cdp.evaluate(`(() => { const f = Array.from(document.querySelectorAll('.objects-panel .field-row')).find(x => x.querySelector('span')?.innerText.trim() === 'Etiqueta de entorno'); const i = f?.querySelector('input'); if (!i) return; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, 'DESA'); i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+      await cdp.evaluate(`document.querySelector('.swatch[data-color="cyan"]')?.click()`);
+      await cdp.wait(300);
+    },
+    expect: `Boolean(document.querySelector('.conn-list') && document.querySelector('.env-swatches') && document.querySelector('.env-preview .env-badge'))`,
+  },
 };
 
 const names = viewsArg ?? Object.keys(VIEWS);

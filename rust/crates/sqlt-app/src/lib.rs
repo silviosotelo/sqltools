@@ -20,5 +20,7 @@ pub use catalog::{
 };
 pub use commands::{registry, CommandSpec};
 pub use state::{AppState, HistoryEntry};
-pub use store::{config_dir, ConnectionConfig, ConnectionStore, StoreError};
+pub use store::{
+    config_dir, ConnectionConfig, ConnectionStore, Environment, StoreError, ENV_COLORS,
+};
 pub use workspace::{Workspace, WorkspaceFile};

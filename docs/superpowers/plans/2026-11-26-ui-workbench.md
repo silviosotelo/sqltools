@@ -418,3 +418,13 @@ Evidencia (app instalada 26/11/2026 11:46, firmada autofirmada): `flow --compare
 | Capturas 1366×768 y 1024×700 claro/oscuro | `docs/screenshots/workbench-f3-*.png`, sin desbordes |
 
 **NO VERIFICADO:** el test Rust `count_objects_matches_list_objects_per_type` (`#[ignore]`) compila pero no se ejecutó: falta `SQLT_PASS` en el entorno (la contraseña no se persiste). La igualdad contador/lista se verificó por CDP contra la base real.
+
+### F4 — cerrada (2026-11-26)
+
+**Qué cambió:** `Environment { label, color }` (Rust: `store.rs`, `ENV_COLORS`, `#[serde(default)]`, validación en `upsert`: recorte, 1..=12 **caracteres**, paleta de 6; el color es `String` para que un archivo editado a mano nunca impida cargar y se pinte neutro); `environment.ts` + 12 tokens `--env-*` (6 × 2 temas, ≥ 4.5:1 verificado por vitest); `EnvBadge` único en chip, lista, panel de objetos y barra de estado; `ConnectionsView` (lista con insignia, formulario, grupo de radios de color con flechas y un solo tab-stop); `contrast.ts` compartido.
+
+**Hallazgos reportados y corregidos por tocar el mismo camino:** (1) `save_connection` guardaba `""` en el keyring cuando el campo contraseña quedaba vacío: editar una conexión (por ejemplo para poner el entorno) **borraba la contraseña guardada**; ahora una contraseña vacía conserva la almacenada (`desktop/src/main.rs`). TWINS: busqué `set_password(` — 1 sitio de producción. (2) La importación de perfiles antiguos reemplazaba un perfil existente con el mismo `id` (perdiendo el entorno); ahora se omite si el id ya existe (`migrate.rs`).
+
+**Revisión externa (codex):** 2 bloqueos (reimportar borra la insignia → corregido; el test Unicode "falla" → era un artefacto de codificación del diff, el test pasa) y 1 menor (teclado del radiogroup → implementado y probado por CDP; `null` explícito queda cubierto por `legacy_json_without_environment_loads` + round-trip).
+
+**Evidencia (app instalada 26/11/2026, firmada autofirmada):** `e2e/env.mjs` **ENV CHECKS OK (12)**: conexión vieja sin entorno conecta y sin insignia; guardar `  DESA  ` + cian → `DESA:cyan` en la lista, el chip, la barra de estado y el panel de objetos; la contraseña sobrevive a la edición (conecta); 13 caracteres se rechazan con mensaje; flechas mueven color y foco con un solo tab-stop; restaurado sin entorno. `axe-cdp.mjs`: **0 violaciones, 4 vistas × 2 temas** (incluye Conexiones con entorno cargado). `phase-f1` OK (19), `keyboard-walk` OK, `commands-check` OK, `tree` OK (11), `flow` IDENTICAL a `golden-f3`. cargo fmt/clippy `-D warnings`/check desktop/test (19 ok; 6 tests nuevos de `store`) en 0; `npm run build` 0; vitest **79 passed**. Capturas 1366×768 y 1024×640 claro/oscuro: `docs/screenshots/workbench-f4-connections-*.png` (sin desbordes).

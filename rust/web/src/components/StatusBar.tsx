@@ -1,4 +1,5 @@
 import { useTranslation } from "../i18n";
+import { EnvBadge } from "./EnvBadge";
 
 export type StatusDot = "ok" | "warn" | "err" | "";
 
@@ -17,6 +18,7 @@ export function StatusBar({
   eol,
   cursor,
   server,
+  environment,
 }: {
   dot: StatusDot;
   /** `user@alias`, or empty when there is no connection. */
@@ -26,6 +28,7 @@ export function StatusBar({
   cursor: { line: number; col: number } | null;
   /** Full server banner (shown shortened, full text as tooltip). */
   server: string;
+  environment?: { label: string; color: string } | null;
 }) {
   const { t } = useTranslation();
   return (
@@ -34,6 +37,7 @@ export function StatusBar({
         <span className="seg" title={server || undefined}>
           <span className={dot ? `dot ${dot}` : "dot"} />
           <b>{connLabel ? connLabel : t("noConnection")}</b>
+          {connLabel && <EnvBadge environment={environment} />}
           {server && <span className="muted">· {shortServer(server)}</span>}
         </span>
         <span className="seg msg" role="status" data-e2e="status-message">

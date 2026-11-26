@@ -45,6 +45,39 @@ impl From<serde_json::Error> for StoreError {
     }
 }
 
+/// Palette of an environment badge; the color is purely visual.
+pub const ENV_COLORS: [&str; 6] = ["neutral", "cyan", "green", "amber", "red", "violet"];
+const ENV_LABEL_MAX: usize = 12;
+
+/// Free label (1..=12 characters) plus a color of the fixed palette, shown next to a connection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Environment {
+    pub label: String,
+    pub color: String,
+}
+
+impl Environment {
+    /// Trims the label and checks the length (in characters) and the palette.
+    pub fn validated(label: &str, color: &str) -> Result<Self, StoreError> {
+        let label = label.trim();
+        let length = label.chars().count();
+        if length == 0 || length > ENV_LABEL_MAX {
+            return Err(StoreError::Invalid(format!(
+                "Environment label must be 1 to {ENV_LABEL_MAX} characters"
+            )));
+        }
+        if !ENV_COLORS.contains(&color) {
+            return Err(StoreError::Invalid(format!(
+                "Unknown environment color: {color}"
+            )));
+        }
+        Ok(Environment {
+            label: label.to_string(),
+            color: color.to_string(),
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionConfig {
@@ -59,6 +92,9 @@ pub struct ConnectionConfig {
     pub read_only: bool,
     pub prefetch: u32,
     pub save_password: bool,
+    /// Absent in files written before the workbench UI.
+    #[serde(default)]
+    pub environment: Option<Environment>,
 }
 
 impl ConnectionConfig {
@@ -82,6 +118,7 @@ impl ConnectionConfig {
             read_only: false,
             prefetch: 1000,
             save_password: true,
+            environment: None,
         }
     }
 }
@@ -129,7 +166,13 @@ impl ConnectionStore {
         self.connections.iter().find(|c| c.id == id)
     }
 
-    pub fn upsert(&mut self, config: ConnectionConfig) -> Result<(), StoreError> {
+    pub fn upsert(&mut self, mut config: ConnectionConfig) -> Result<(), StoreError> {
+        if let Some(environment) = &config.environment {
+            config.environment = Some(Environment::validated(
+                &environment.label,
+                &environment.color,
+            )?);
+        }
         if config.user.trim().is_empty() {
             return Err(StoreError::Invalid("User is required".to_string()));
         }
@@ -303,6 +346,62 @@ mod tests {
         let loaded = ConnectionStore::load_from(path.clone()).unwrap();
         assert_eq!(loaded.list(), vec![config]);
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn legacy_json_without_environment_loads() {
+        let (path, _store) = temp_store("legacy");
+        fs::write(
+            &path,
+            r#"[{"id":"a","label":"Old","user":"u","alias":"x","connect":null,"tnsAdmin":null,"ociDir":null,"mode":"NORMAL","readOnly":false,"prefetch":1000,"savePassword":true}]"#,
+        )
+        .unwrap();
+        let loaded = ConnectionStore::load_from(path.clone()).unwrap();
+        assert_eq!(loaded.list()[0].environment, None);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn environment_round_trips() {
+        let (path, mut store) = temp_store("env-roundtrip");
+        let mut config = ConnectionConfig::new("Dev", "scott");
+        config.alias = Some("dev".to_string());
+        config.environment = Some(Environment::validated("DESA", "cyan").unwrap());
+        store.upsert(config.clone()).unwrap();
+        let loaded = ConnectionStore::load_from(path.clone()).unwrap();
+        assert_eq!(loaded.list(), vec![config]);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn label_is_trimmed_and_limited_to_12() {
+        assert_eq!(
+            Environment::validated("  PROD  ", "red").unwrap().label,
+            "PROD"
+        );
+        assert!(Environment::validated("123456789012", "red").is_ok());
+        assert!(Environment::validated("1234567890123", "red").is_err());
+        // 12 characters, more than 12 bytes: the limit counts characters, not bytes.
+        assert!(Environment::validated("ñandú-pre-01", "green").is_ok());
+        assert!(Environment::validated("日本語日本語日本語日本語日", "green").is_err());
+    }
+
+    #[test]
+    fn empty_label_is_rejected() {
+        assert!(Environment::validated("", "red").is_err());
+        assert!(Environment::validated("   ", "red").is_err());
+    }
+
+    #[test]
+    fn unknown_color_is_rejected_on_the_save_path() {
+        let (_path, mut store) = temp_store("env-color");
+        let mut config = ConnectionConfig::new("Dev", "scott");
+        config.alias = Some("dev".to_string());
+        config.environment = Some(Environment {
+            label: "DESA".to_string(),
+            color: "pink".to_string(),
+        });
+        assert!(store.upsert(config).is_err());
     }
 
     #[test]
