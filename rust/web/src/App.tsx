@@ -7,6 +7,9 @@ import { Icon } from "./icons";
 import { TitleBar, type ThemeMode } from "./components/TitleBar";
 import { ActivityBar, type SideView } from "./components/ActivityBar";
 import { StatusBar } from "./components/StatusBar";
+import { EditorTabs } from "./components/EditorTabs";
+import { ResultsPanel } from "./components/ResultsPanel";
+import { cellText, type ObjectTab, type Panel } from "./results";
 import { useTranslation } from "./i18n";
 import type {
   ColumnInfo,
@@ -26,8 +29,6 @@ import type {
   Value,
   Workspace,
 } from "./types";
-
-type ObjectTab = "columns" | "constraints" | "indexes" | "triggers" | "grants";
 
 /** One editor tab: a scratch buffer, a file, or a piece of generated DDL. */
 type EditorDoc = {
@@ -124,8 +125,6 @@ type Draft = {  id: string;
   savePassword: boolean;
 };
 
-type Panel = "results" | "history" | "plan" | "object" | "stats" | "output";
-
 const objectTypes = [
   { value: "", key: "typeAll" },
   { value: "TABLE", key: "typeTable" },
@@ -138,10 +137,6 @@ const objectTypes = [
   { value: "TYPE", key: "typeType" },
   { value: "SYNONYM", key: "typeSynonym" },
 ] as const;
-
-const ROW_HEIGHT = 24;
-const OVERSCAN = 8;
-const VISIBLE_ROWS = 60;
 
 function emptyDraft(): Draft {
   return {
@@ -190,14 +185,6 @@ function toConfig(draft: Draft): ConnectionConfig {
     prefetch: draft.prefetch,
     savePassword: draft.savePassword,
   };
-}
-
-function cellText(value: Value): string {
-  if (value.kind === "null") return "";
-  if (value.kind === "binary") {
-    return value.value.map((byte) => byte.toString(16).padStart(2, "0")).join("");
-  }
-  return value.value;
 }
 
 function csvCell(value: Value): string {
@@ -2357,8 +2344,6 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
-  const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
-  const end = Math.min(rows.length, start + VISIBLE_ROWS + OVERSCAN * 2);
 
   const findMatches = findQuery
     ? sql
@@ -2849,43 +2834,20 @@ export default function App() {
             className="editor-shell"
             style={{ flex: `0 0 ${splitPercent}%` }}
           >
-            <div className="editor-tabbar">
-              <ul className="editor-tab-list" aria-label={t("openFiles")}>
-                {docs.map((doc) => (
-                  <li
-                    key={doc.id}
-                    className={
-                      doc.id === activeDoc.id ? "editor-tab active" : "editor-tab"
-                    }
-                    title={doc.path || doc.title}
-                  >
-                    <button
-                      className="tab-btn"
-                      aria-current={doc.id === activeDoc.id ? "true" : undefined}
-                      onClick={() => {
-                        setActiveDocId(doc.id);
-                        editorRef.current?.focus();
-                      }}
-                    >
-                      <span className="tab-title">
-                        {doc.sql !== doc.cleanSql || doc.eol !== doc.cleanEol
-                          ? "*"
-                          : ""}
-                        {doc.title}
-                      </span>
-                    </button>
-                    <button
-                      className="tab-close"
-                      title={t("close")}
-                      aria-label={`${t("close")}: ${doc.title}`}
-                      onClick={() => closeDoc(doc.id)}
-                    >
-                      <Icon name="close" size={12} />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <EditorTabs
+              docs={docs.map((doc) => ({
+                id: doc.id,
+                title: doc.title,
+                path: doc.path,
+                dirty: doc.sql !== doc.cleanSql || doc.eol !== doc.cleanEol,
+              }))}
+              activeId={activeDoc.id}
+              onSelect={(id) => {
+                setActiveDocId(id);
+                editorRef.current?.focus();
+              }}
+              onClose={closeDoc}
+            />
             <Editor
               ref={editorRef}
               initialValue={sql}
@@ -2934,345 +2896,39 @@ export default function App() {
             }}
           />
 
-          <div className="panel-bar">
-            <nav className="tabs">
-              <button
-                className={panel === "results" ? "active" : ""}
-                onClick={() => setPanel("results")}
-              >
-                {t("results")}
-              </button>
-              <button
-                className={panel === "history" ? "active" : ""}
-                onClick={() => void showHistory()}
-              >
-                {t("history")}
-              </button>
-              <button
-                className={panel === "plan" ? "active" : ""}
-                onClick={() => setPanel("plan")}
-              >
-                {t("plan")}
-              </button>
-              <button
-                className={panel === "object" ? "active" : ""}
-                onClick={() => setPanel("object")}
-              >
-                {t("object")}
-              </button>
-              <button
-                className={panel === "stats" ? "active" : ""}
-                onClick={() => void showStats()}
-              >
-                {t("stats")}
-              </button>
-              <button
-                className={panel === "output" ? "active" : ""}
-                onClick={() => setPanel("output")}
-              >
-                {t("output")}
-              </button>
-            </nav>
-            <button
-              className="tb"
-              title={t("exportCsv")}
-              aria-label={t("exportCsv")}
-              onClick={() => void exportCsv()}
-              disabled={!columns.length && !isConnected}
-            >
-              <Icon name="export" />
-            </button>
-            <button
-              className="tb"
-              title={t("clear")}
-              aria-label={t("clear")}
-              onClick={() => {
-                setRows([]);
-                setColumns([]);
-                setStatus("");
-              }}
-            >
-              <Icon name="clear" />
-            </button>
-            <span className="hint">{t("bookmarkHint")}</span>
-          </div>
-
-          <section className="content" ref={dataPanelRef} tabIndex={-1}>
-            {panel === "results" && (
-              <div
-                className="results"
-                onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
-              >
-                {columns.length === 0 ? (
-                  <p className="no-results">{t("noResults")}</p>
-                ) : (
-                <table className="grid">
-                  <thead>
-                    <tr>
-                      <th className="row-number">#</th>
-                      {columns.map((column) => (
-                        <th key={column.name} title={column.typeName}>
-                          {column.name}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {!running && rows.length === 0 && (
-                      <tr className="empty">
-                        <td colSpan={Math.max(columns.length + 1, 1)}>
-                          {t("emptyRows")}
-                        </td>
-                      </tr>
-                    )}
-                    {start > 0 && (
-                      <tr
-                        className="spacer"
-                        style={{ height: start * ROW_HEIGHT }}
-                      >
-                        <td colSpan={Math.max(columns.length + 1, 1)} />
-                      </tr>
-                    )}
-                    {rows.slice(start, end).map((row, index) => (
-                      <tr key={start + index} style={{ height: ROW_HEIGHT }}>
-                        <td className="row-number">{start + index + 1}</td>
-                        {row.map((value, columnIndex) => (
-                          <td
-                            key={columnIndex}
-                            className={value.kind === "null" ? "null" : ""}
-                            onClick={() =>
-                              setActiveCell({
-                                column: columns[columnIndex]?.name ?? "",
-                                value: cellText(value),
-                              })
-                            }
-                            onDoubleClick={() =>
-                              setCellView({
-                                column: columns[columnIndex]?.name ?? "",
-                                value: cellText(value),
-                              })
-                            }
-                          >
-                            {cellText(value)}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                    {end < rows.length && (
-                      <tr
-                        className="spacer"
-                        style={{ height: (rows.length - end) * ROW_HEIGHT }}
-                      >
-                        <td colSpan={Math.max(columns.length + 1, 1)} />
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-                )}
-              </div>
-            )}
-
-            {panel === "history" && (
-              <div className="history">
-                {historyEntries.map((entry, index) => (
-                  <button
-                    key={index}
-                    className="history-row"
-                    onClick={() => setSql(entry.sql)}
-                  >
-                    <span>
-                      {new Date(entry.startedAt * 1000).toLocaleString()}
-                    </span>
-                    <code>{entry.sql}</code>
-                    <span>
-                      {entry.rows} {entry.rows === 1 ? t("row") : t("rows")} ·{" "}
-                      {entry.elapsedMs} ms
-                      {entry.error ? ` · ${entry.error}` : ""}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {panel === "plan" && <pre className="plan">{plan}</pre>}
-
-            {panel === "object" && (
-              <div className="object-panel">
-                {selectedObject ? (
-                  <>
-                    <header className="object-header">
-                      <strong>{selectedObject.name}</strong>
-                      <span>{selectedObject.objectType}</span>
-                      <button
-                        className="plain"
-                        onClick={() => void loadDdlFor(selectedObject)}
-                      >
-                        {t("loadDdl")}
-                      </button>
-                    </header>
-                    <nav className="object-tabs">
-                      {(
-                        [
-                          "columns",
-                          "constraints",
-                          "indexes",
-                          "triggers",
-                          "grants",
-                        ] as ObjectTab[]
-                      ).map((tab) => (
-                        <button
-                          key={tab}
-                          className={objectTab === tab ? "active" : ""}
-                          onClick={() => void loadDetail(tab)}
-                        >
-                          {t(tab)}
-                        </button>
-                      ))}
-                    </nav>
-                    {objectTab === "columns" &&
-                      (objectColumns.length > 0 ? (
-                        <table className="grid">
-                          <thead>
-                            <tr>
-                              <th>{t("columns")}</th>
-                              <th>{t("dataType")}</th>
-                              <th>{t("nullable")}</th>
-                              <th>{t("defaultValue")}</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {objectColumns.map((column) => (
-                              <tr key={column.name}>
-                                <td>{column.name}</td>
-                                <td>{column.dataType}</td>
-                                <td>{column.nullable ? "Y" : "N"}</td>
-                                <td>{column.dataDefault ?? ""}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      ) : (
-                        <p className="hint">{selectedObject.status}</p>
-                      ))}
-                    {objectTab === "constraints" && (
-                      <table className="grid">
-                        <thead>
-                          <tr>
-                            <th>{t("constraints")}</th>
-                            <th>{t("objectType")}</th>
-                            <th>Status</th>
-                            <th>{t("columns")}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {constraints.map((constraint) => (
-                            <tr key={constraint.name}>
-                              <td>{constraint.name}</td>
-                              <td>{constraint.kind}</td>
-                              <td>{constraint.status}</td>
-                              <td>{constraint.columns.join(", ")}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    )}
-                    {objectTab === "indexes" && (
-                      <table className="grid">
-                        <thead>
-                          <tr>
-                            <th>{t("indexes")}</th>
-                            <th>{t("uniqueness")}</th>
-                            <th>Status</th>
-                            <th>{t("columns")}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {indexes.map((index) => (
-                            <tr key={index.name}>
-                              <td>{index.name}</td>
-                              <td>{index.uniqueness}</td>
-                              <td>{index.status}</td>
-                              <td>{index.columns.join(", ")}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    )}
-                    {objectTab === "triggers" && (
-                      <table className="grid">
-                        <thead>
-                          <tr>
-                            <th>{t("triggers")}</th>
-                            <th>{t("objectType")}</th>
-                            <th>{t("event")}</th>
-                            <th>Status</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {triggers.map((trigger) => (
-                            <tr key={trigger.name}>
-                              <td>{trigger.name}</td>
-                              <td>{trigger.triggerType}</td>
-                              <td>{trigger.event}</td>
-                              <td>{trigger.status}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    )}
-                    {objectTab === "grants" && (
-                      <table className="grid">
-                        <thead>
-                          <tr>
-                            <th>{t("grantee")}</th>
-                            <th>{t("privilege")}</th>
-                            <th>{t("grantable")}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {grants.map((grant, index) => (
-                            <tr key={`${grant.grantee}-${index}`}>
-                              <td>{grant.grantee}</td>
-                              <td>{grant.privilege}</td>
-                              <td>{grant.grantable ? "Y" : "N"}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    )}
-                  </>
-                ) : (
-                  <p className="hint">{t("selectObject")}</p>
-                )}
-              </div>
-            )}
-
-            {panel === "output" &&
-              (output.length === 0 ? (
-                <p className="no-results">{t("noOutput")}</p>
-              ) : (
-                <pre className="plan output">{output.join("\n")}</pre>
-              ))}
-
-            {panel === "stats" && (
-              <table className="grid">
-                <thead>
-                  <tr>
-                    <th>{t("stats")}</th>
-                    <th>Value</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stats.map(([name, value]) => (
-                    <tr key={name}>
-                      <td>{name}</td>
-                      <td>{value}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </section>
+          <ResultsPanel
+            panel={panel}
+            setPanel={setPanel}
+            columns={columns}
+            rows={rows}
+            scrollTop={scrollTop}
+            setScrollTop={setScrollTop}
+            setRows={setRows}
+            setColumns={setColumns}
+            running={running}
+            isConnected={isConnected}
+            dataPanelRef={dataPanelRef}
+            exportCsv={exportCsv}
+            setStatus={setStatus}
+            setSql={setSql}
+            setActiveCell={setActiveCell}
+            setCellView={setCellView}
+            historyEntries={historyEntries}
+            showHistory={showHistory}
+            showStats={showStats}
+            stats={stats}
+            plan={plan}
+            output={output}
+            selectedObject={selectedObject}
+              objectTab={objectTab}
+            loadDetail={loadDetail}
+            loadDdlFor={loadDdlFor}
+            objectColumns={objectColumns}
+            constraints={constraints}
+            indexes={indexes}
+            triggers={triggers}
+            grants={grants}
+          />
 
         </main>
       </div>

@@ -392,3 +392,9 @@ Menores incorporados: `aria-pressed` solo en los dos botones que son vistas (His
 Golden para F2: `rust/web/e2e/golden-f1.json`.
 
 **No cubierto en F1 (declarado):** lector de pantalla real (NVDA); el recorrido de teclado verifica foco e indicador, no lo que se anuncia. La verificación NVDA queda para el cierre del goal si el entorno lo permite.
+
+### F2 — cerrada (2026-11-26)
+
+Extraídos `components/ResultsPanel.tsx` (339 líneas de JSX fuera de `App.tsx`: 3598 → ~3250), `components/EditorTabs.tsx` y `results.ts` (tipos/constantes/`cellText`). **Desviación declarada:** `SidePanel` no se extrae: el panel lateral usa 34 nombres de `App` y F3 (`ObjectTree`) y F4 (`ConnectionsView`) lo reemplazan por componentes nuevos con su propio hook; extraerlo ahora sería trabajo descartado.
+
+Evidencia (app instalada 26/11/2026 11:46, firmada autofirmada): `flow --compare golden-f1.json` IDENTICAL; `phase-f2.mjs` OK (3: el texto, las pestañas y el historial de deshacer sobreviven al cambio de vista); `phase-f1.mjs` OK; axe 0; keyboard-walk OK; `npm run build` exit 0. Sin cambios de Rust. Revisión externa omitida en F2 por ser extracción mecánica con golden idéntico; se cubre en la revisión de F3.
