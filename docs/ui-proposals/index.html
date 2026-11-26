@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SQLTools — propuestas de UI/UX</title>
+<link rel="stylesheet" href="shared/fonts.css">
+<style>
+:root{--bg:#f3f4f6;--surface:#fff;--line:#d5d9e0;--text:#1b1f27;--muted:#4f5767;--accent:#1f5fbf}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 "IBM Plex Sans",system-ui,sans-serif}
+main{max-width:1180px;margin:0 auto;padding:40px 24px 56px}
+h1{margin:0 0 6px;font-size:26px;font-weight:600}
+p.lead{margin:0 0 28px;color:var(--muted);max-width:68ch}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:20px}
+.card{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;text-decoration:none;color:inherit}
+.card:hover,.card:focus-visible{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.card:focus-visible{outline:none}
+.card img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;object-position:top left;border-bottom:1px solid var(--line)}
+.card .body{padding:16px 18px 18px}
+.card h2{margin:0 0 4px;font-size:17px;font-weight:600}
+.card .tag{color:var(--muted);font-size:13px;margin:0 0 10px}
+.card ul{margin:0;padding-left:18px;color:var(--text)}
+.card li{margin:2px 0}
+.links{margin-top:28px;display:flex;gap:18px;flex-wrap:wrap;color:var(--muted)}
+.links a{color:var(--accent)}
+.links a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+</head>
+<body>
+<main>
+  <h1>SQLTools — propuestas de UI/UX</h1>
+  <p class="lead">Tres direcciones para elegir. Son maquetas estáticas con seis estados y tema claro y oscuro; no tocan la aplicación. La comparación, el costo de implementarlas y la recomendación están en el README.</p>
+  <div class="cards">
+    <a class="card" href="a-clasico/index.html">
+      <img src="a-clasico/shots/resultados-light-1366x768.png" alt="Propuesta A: barra de herramientas agrupada, explorador con iconos y grilla de resultados">
+      <div class="body"><h2>A · Clásico refinado</h2><p class="tag">Menor riesgo · acento azul · tema claro</p>
+        <ul><li>Mismo esqueleto del SQLTools original</li><li>Barra agrupada y un solo botón con etiqueta</li><li>Explorador con iconos y barra de estado útil</li></ul></div>
+    </a>
+    <a class="card" href="b-workbench/index.html">
+      <img src="b-workbench/shots/resultados-dark-1366x768.png" alt="Propuesta B: barra de actividad, árbol de objetos y paleta de comandos en la barra superior">
+      <div class="body"><h2>B · Banco de trabajo moderno</h2><p class="tag">Estructura tipo IDE · acento cian · oscuro por defecto</p>
+        <ul><li>Árbol por conexión, esquema y tipo</li><li>Paleta de comandos protagonista</li><li>Insignia de entorno DESA / PROD</li></ul></div>
+    </a>
+    <a class="card" href="c-editor-primero/index.html">
+      <img src="c-editor-primero/shots/dock-derecha-light-1366x768.png" alt="Propuesta C: editor a ancho completo con resultados acoplados a la derecha">
+      <div class="body"><h2>C · Editor primero</h2><p class="tag">Más espacio para el código · acento ámbar</p>
+        <ul><li>Explorador como cajón (Alt+3)</li><li>Error en línea, bajo la sentencia</li><li>Resultados abajo o a la derecha</li></ul></div>
+    </a>
+  </div>
+  <p class="links"><a href="README.md">Leer el README (comparación y recomendación)</a></p>
+</main>
+</body>
+</html>

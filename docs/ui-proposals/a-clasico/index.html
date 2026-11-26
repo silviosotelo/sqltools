@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="es" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SQLTools — Propuesta A: Clásico refinado</title>
+<link rel="stylesheet" href="../shared/fonts.css">
+<style>
+/* Tokens. Acento único: azul. Neutros fríos, una sola rampa. */
+:root{
+  --bg:#eef0f3; --surface:#ffffff; --surface-alt:#f6f7f9; --sunken:#e4e7ec;
+  --line:#d5d9e0; --line-strong:#aab1bd;
+  --text:#1b1f27; --muted:#4f5767; --faint:#566070;
+  --accent:#1f5fbf; --accent-ink:#ffffff; --accent-soft:#dce8fb; --accent-text:#174a96;
+  --ok:#1a7f4b; --warn:#8f5200; --warn-soft:#fbeccb; --err:#b3261e; --err-soft:#fbe4e1;
+  --shadow:0 8px 24px rgba(20,28,45,.18);
+  --font:"IBM Plex Sans","Segoe UI",system-ui,sans-serif; --mono:"JetBrains Mono",Consolas,monospace;
+  --t-k:#1f5fbf; --t-s:#8a4b00; --t-n:#0f7a5a; --t-c:#5c6572;
+  color-scheme:light;
+}
+[data-theme="dark"]{
+  --bg:#16181d; --surface:#1e2127; --surface-alt:#1a1d22; --sunken:#121418;
+  --line:#2c3038; --line-strong:#454b57;
+  --text:#e3e6ec; --muted:#9ba4b3; --faint:#8b94a3;
+  --accent:#6ea8f7; --accent-ink:#0d1b33; --accent-soft:#243756; --accent-text:#a9ceff;
+  --ok:#4cc38a; --warn:#e3a93e; --warn-soft:#3a2d12; --err:#f28b82; --err-soft:#3d1f1d;
+  --shadow:0 8px 28px rgba(0,0,0,.5);
+  --t-k:#7db4ff; --t-s:#e9b46a; --t-n:#6fd3ad; --t-c:#8d97a6;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font:13px/1.4 var(--font);display:flex;flex-direction:column;min-height:100vh}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+kbd{font:500 11px var(--mono);color:var(--muted);background:var(--surface-alt);border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+
+.app{flex:1;min-height:0;display:grid;grid-template-rows:auto 1fr 28px;height:calc(100vh - 0px)}
+body:not(.shot) .app{height:calc(100vh - 37px)}
+
+/* Barra de herramientas: grupos separados, un solo botón con etiqueta */
+.toolbar{background:var(--surface);border-bottom:1px solid var(--line);min-height:46px}
+.toolbar-in{display:flex;align-items:center;gap:4px;padding:6px 10px}
+.brand{display:flex;align-items:center;gap:8px;font-weight:600;padding-right:10px;margin-right:2px;border-right:1px solid var(--line);height:28px}
+.brand .ic{width:18px;height:18px;color:var(--accent)}
+.group{display:flex;align-items:center;gap:2px;padding:0 6px;border-right:1px solid var(--line);height:28px}
+.group:last-of-type{border-right:0}
+.tb{display:inline-flex;align-items:center;gap:6px;height:28px;min-width:28px;padding:0 6px;justify-content:center;background:transparent;border:1px solid transparent;border-radius:6px;color:var(--text)}
+.tb:hover:not(:disabled){background:var(--sunken)}
+.tb:active:not(:disabled){transform:translateY(1px)}
+.tb:disabled{color:var(--faint);cursor:default;opacity:.7}
+.tb.primary{background:var(--accent);color:var(--accent-ink);padding:0 10px;font-weight:500}
+.tb.primary:hover:not(:disabled){background:var(--accent);filter:brightness(1.08)}
+.tb.primary kbd{background:transparent;border-color:color-mix(in srgb,var(--accent-ink) 40%,transparent);color:var(--accent-ink)}
+.tb.conn{border-color:var(--line);padding:0 8px;min-width:200px;justify-content:space-between;background:var(--surface-alt)}
+.tb .badge{background:var(--warn);color:var(--surface);border-radius:8px;padding:0 6px;font:600 11px/16px var(--font)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--faint);flex:none}
+.dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.err{background:var(--err)}
+.spacer{flex:1}
+.cmd-pill{display:flex;align-items:center;gap:8px;height:28px;min-width:230px;padding:0 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--muted)}
+.cmd-pill:hover{border-color:var(--line-strong)}
+.cmd-pill kbd{margin-left:auto}
+.lang{height:28px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);padding:0 6px;font:inherit;color:var(--text)}
+
+.body{display:grid;grid-template-columns:292px 1fr;min-height:0}
+/* Explorador */
+.explorer{display:flex;flex-direction:column;min-height:0;background:var(--surface);border-right:1px solid var(--line)}
+.ex-head{display:flex;align-items:center;gap:6px;padding:10px 12px 6px}
+.ex-head h2{margin:0;font-size:13px;font-weight:600;flex:1}
+.ex-fields{display:grid;grid-template-columns:104px 1fr;gap:6px;padding:0 12px 8px}
+.field{display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--muted)}
+.field input{border:0;background:transparent;font:inherit;color:var(--text);min-width:0;width:100%;outline:none}
+.field:focus-within{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.field input::placeholder{color:var(--faint)}
+.types{display:flex;gap:0;padding:0 12px 6px}
+.types button{flex:1;min-width:0;height:28px;display:grid;place-items:center;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--muted)}
+.types button:hover{background:var(--sunken);color:var(--text)}
+.types button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent-text);border-color:color-mix(in srgb,var(--accent) 35%,transparent)}
+.ex-meta{padding:2px 12px 6px;color:var(--muted);font-size:12px;display:flex;justify-content:space-between;border-bottom:1px solid var(--line)}
+.ex-meta b{color:var(--text);font-weight:500}
+.objs{list-style:none;margin:0;padding:4px 6px;overflow:auto;flex:1}
+.obj{display:flex;align-items:center;gap:8px;height:26px;padding:0 8px;border-radius:6px;position:relative}
+.obj:hover{background:var(--sunken)}
+.obj.is-selected{background:var(--accent-soft);color:var(--accent-text)}
+.obj.is-selected::before{content:"";position:absolute;left:0;top:5px;bottom:5px;width:2px;background:var(--accent);border-radius:2px}
+.obj-ic{color:var(--muted)} .obj.is-selected .obj-ic{color:var(--accent-text)}
+.obj-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums}
+.obj-type{font-size:11px;color:var(--faint)}
+.obj.is-selected .obj-type{color:var(--accent-text)}
+.ex-foot{border-top:1px solid var(--line);padding:6px 12px;display:flex;align-items:center;gap:8px;color:var(--muted)}
+.ex-foot button{background:transparent;border:0;display:flex;align-items:center;gap:6px;color:var(--muted);padding:2px 0}
+.ex-foot button:hover{color:var(--text)}
+.ex-empty{padding:24px 18px;color:var(--muted);display:grid;gap:10px;justify-items:start}
+.ex-empty strong{color:var(--text);font-weight:500}
+
+/* Centro */
+.main{display:grid;grid-template-rows:32px minmax(120px,1fr) 6px minmax(160px,0.9fr);min-width:0;min-height:0}
+.tabs{display:flex;align-items:flex-end;gap:2px;padding:0 8px;background:var(--sunken);border-bottom:1px solid var(--line-strong)}
+.tabs ul{display:flex;align-items:flex-end;gap:2px;list-style:none;margin:0;padding:0}
+.tab{display:flex;align-items:center;gap:2px;height:28px;padding:0 4px 0 0;background:transparent;border:1px solid transparent;border-bottom:0;border-radius:6px 6px 0 0;color:var(--muted);max-width:280px}
+.tab:hover{color:var(--text);background:color-mix(in srgb,var(--surface) 55%,transparent)}
+.tab.is-active{background:var(--surface);color:var(--text);border-color:var(--line-strong);height:29px;margin-bottom:-1px}
+.tab-btn{font:inherit;display:flex;align-items:center;gap:8px;height:100%;padding:0 4px 0 10px;border:0;background:transparent;color:inherit;min-width:0;border-radius:6px 6px 0 0}
+.tab .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tab .x{width:18px;height:18px;display:grid;place-items:center;border-radius:4px;border:0;background:transparent;color:var(--faint)}
+.tab .x:hover{background:var(--sunken);color:var(--text)}
+.tab .dirty{width:8px;height:8px;border-radius:50%;background:var(--muted);margin:0 5px}
+.tabs .plus{align-self:center;margin-left:4px;width:24px;height:24px;display:grid;place-items:center;border:0;background:transparent;border-radius:6px;color:var(--muted)}
+.tabs .plus:hover{background:var(--surface);color:var(--text)}
+.editor{background:var(--surface);overflow:auto;position:relative}
+.cm{font:13px/20px var(--mono);font-variant-ligatures:none;padding:6px 0;min-width:max-content}
+.cm:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.cm-row{display:flex}
+.cm-ln{width:48px;text-align:right;padding-right:12px;color:var(--faint);user-select:none;flex:none;font-variant-numeric:tabular-nums}
+.cm-line{white-space:pre;flex:1;padding-right:16px}
+.cm-active{background:var(--surface-alt)} .cm-active .cm-ln{color:var(--text)}
+.cm-error{background:var(--err-soft);box-shadow:inset 3px 0 0 var(--err)} .cm-error .cm-ln{color:var(--err)}
+.t-k{color:var(--t-k)} .t-s{color:var(--t-s)} .t-n{color:var(--t-n)} .t-c{color:var(--t-c)}
+.splitter{background:var(--sunken);border-top:1px solid var(--line);border-bottom:1px solid var(--line);cursor:row-resize;position:relative}
+.splitter::after{content:"";position:absolute;left:50%;top:1px;width:32px;height:3px;transform:translateX(-50%);border-radius:2px;background:var(--line-strong)}
+
+/* Panel inferior */
+.panel{display:grid;grid-template-rows:34px 1fr;min-height:0;background:var(--surface)}
+.ptabs{display:flex;align-items:center;gap:2px;padding:0 8px;border-bottom:1px solid var(--line);background:var(--surface-alt)}
+.ptabs [role="tablist"]{display:flex;align-items:center;gap:2px}
+.ptab{height:34px;padding:0 12px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--muted);display:flex;align-items:center;gap:6px}
+.ptab:hover{color:var(--text)}
+.ptab[aria-selected="true"]{color:var(--text);border-bottom-color:var(--accent);font-weight:500}
+.ptab .count{font-size:11px;color:var(--muted);background:var(--sunken);border-radius:8px;padding:0 6px;font-variant-numeric:tabular-nums}
+.pactions{margin-left:auto;display:flex;gap:4px}
+.pbody{overflow:auto;min-height:0}
+.grid{border-collapse:separate;border-spacing:0;width:100%;font-variant-numeric:tabular-nums}
+.grid th,.grid td{padding:0 12px;height:26px;white-space:nowrap;text-align:left;border-bottom:1px solid var(--line)}
+.grid thead th{position:sticky;top:0;z-index:1;background:var(--surface-alt);height:40px;border-bottom:1px solid var(--line-strong);font-weight:500;vertical-align:middle}
+.grid .col-name{display:block;line-height:16px}
+.grid .col-type{display:block;color:var(--muted);font:11px/14px var(--mono)}
+.grid .num{text-align:right}
+.grid .rn{width:44px;text-align:right;color:var(--faint);font-weight:400;background:var(--surface-alt);border-right:1px solid var(--line)}
+.grid tbody tr:nth-child(even) td{background:color-mix(in srgb,var(--surface-alt) 60%,var(--surface))}
+.grid tbody tr:hover td{background:var(--accent-soft)}
+.grid td.null{color:var(--faint);font:11px var(--mono)}
+.kv{display:grid;grid-template-columns:150px 1fr;gap:6px 16px;padding:14px 18px;max-width:640px}
+.kv dt{color:var(--muted)} .kv dd{margin:0;font-variant-numeric:tabular-nums}
+.btn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:6px;border:1px solid var(--line-strong);background:var(--surface);color:var(--text)}
+.btn:hover{background:var(--sunken)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:500}
+.empty{display:grid;gap:10px;justify-items:start;padding:28px 24px;color:var(--muted);max-width:520px}
+.empty strong{color:var(--text);font-weight:500;font-size:14px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.msg{display:grid;grid-template-columns:20px 1fr auto;gap:2px 10px;padding:14px 18px;align-items:start}
+.msg.err{background:var(--err-soft)} .msg.err .ic{color:var(--err)}
+.msg.warn{background:var(--warn-soft)} .msg.warn .ic{color:var(--warn)}
+.msg .ic{margin-top:2px}
+.msg h3{margin:0;font-size:13px;font-weight:600}
+.msg p{margin:0;grid-column:2;color:var(--muted)}
+.msg pre{grid-column:2;margin:6px 0 0;font:12px/18px var(--mono);color:var(--text)}
+
+/* Barra de estado */
+.status-wrap{background:var(--surface);border-top:1px solid var(--line)}
+.status{display:flex;align-items:center;gap:14px;padding:0 12px;height:100%;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+.status .sp{flex:1} .status .s{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.status .s+.s:not(.sp)::before{content:"";}
+.status b{color:var(--text);font-weight:500}
+
+/* Paleta de comandos */
+.scrim{position:fixed;inset:0;background:rgba(10,14,22,.45);display:none;justify-content:center;align-items:flex-start;padding-top:12vh;z-index:50}
+.scrim.open{display:flex}
+.palette{width:560px;max-width:92vw;background:var(--surface);border:1px solid var(--line-strong);border-radius:10px;box-shadow:var(--shadow);overflow:hidden}
+.palette .q{display:flex;align-items:center;gap:8px;padding:0 14px;height:46px;border-bottom:1px solid var(--line);color:var(--muted)}
+.palette .q input{flex:1;border:0;background:transparent;font:inherit;font-size:14px;color:var(--text);outline:none}
+.pal-list{list-style:none;margin:0;padding:6px;max-height:320px;overflow:auto}
+.pal-row{display:grid;grid-template-columns:1fr auto auto;gap:14px;align-items:center;height:34px;padding:0 10px;border-radius:6px}
+.pal-row.is-active{background:var(--accent-soft);color:var(--accent-text)}
+.pal-id{font:11px var(--mono);color:var(--faint)}
+.pal-row.is-active .pal-id{color:var(--accent-text)}
+.pal-foot{display:flex;gap:14px;padding:8px 14px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+
+@media (max-width:1280px){ .cmd-pill{min-width:0} .cmd-pill span,.cmd-pill kbd{display:none} .tb.conn{min-width:168px} }
+@media (prefers-reduced-motion:no-preference){ .tb,.obj,.ptab,.tab{transition:background-color .12s,color .12s,border-color .12s} }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="toolbar"><h1 class="sr-only">SQLTools, editor Oracle</h1><div class="toolbar-in" role="toolbar" aria-label="Barra de herramientas">
+    <div class="brand"><svg class="ic"><use href="#i-database"/></svg>SQLTools</div>
+    <div class="group" role="group" aria-label="Conexión">
+      <button class="tb conn" id="conn" aria-haspopup="dialog"></button>
+      <button class="tb" id="btn-connect" aria-label="Conectar" title="Conectar"></button>
+    </div>
+    <div class="group" role="group" aria-label="Ejecución">
+      <button class="tb primary" id="btn-run" title="Ejecutar (F5)"></button>
+      <button class="tb" id="btn-stop" aria-label="Cancelar ejecución" title="Cancelar"></button>
+    </div>
+    <div class="group" role="group" aria-label="Transacción">
+      <button class="tb" id="btn-commit" aria-label="Confirmar (commit)" title="Confirmar (commit)"></button>
+      <button class="tb" id="btn-rollback" aria-label="Deshacer (rollback)" title="Deshacer (rollback)"></button>
+    </div>
+    <div class="group" role="group" aria-label="Herramientas">
+      <button class="tb" aria-label="Formatear SQL" title="Formatear SQL (Ctrl+K, E)"></button>
+      <button class="tb" aria-label="Historial" title="Historial"></button>
+      <button class="tb" aria-label="Plan de ejecución" title="Plan de ejecución"></button>
+      <button class="tb" aria-label="Estadísticas" title="Estadísticas"></button>
+    </div>
+    <div class="group" role="group" aria-label="Archivo">
+      <button class="tb" aria-label="Guardar" title="Guardar"></button>
+      <button class="tb" aria-label="Abrir" title="Abrir"></button>
+      <button class="tb" aria-label="Exportar CSV" title="Exportar CSV"></button>
+    </div>
+    <span class="spacer"></span>
+    <button class="cmd-pill" id="open-palette"><svg class="ic"><use href="#i-magnifying-glass"/></svg><span>Buscar comando…</span><kbd>Ctrl+Shift+P</kbd></button>
+    <button class="tb" id="ro" aria-pressed="false" aria-label="Solo lectura" title="Solo lectura"></button>
+    <button class="tb" id="theme" aria-label="Cambiar tema" title="Tema"></button>
+    <select class="lang" aria-label="Idioma"><option>Español</option><option>English</option></select>
+  </div></header>
+
+  <div class="body">
+    <aside class="explorer" aria-label="Explorador de objetos">
+      <div class="ex-head"><h2>Objetos</h2><button class="tb" id="refresh" aria-label="Actualizar objetos" title="Actualizar"></button></div>
+      <div class="ex-fields">
+        <label class="field"><span class="sr-only">Esquema</span><input value="ANAMNESIS" aria-label="Esquema" spellcheck="false"></label>
+        <label class="field"><svg class="ic"><use href="#i-magnifying-glass"/></svg><span class="sr-only">Filtro</span><input placeholder="Filtrar objetos" aria-label="Filtro"></label>
+      </div>
+      <div class="types" id="types" role="group" aria-label="Tipo de objeto"></div>
+      <div class="ex-meta" id="ex-meta"></div>
+      <ul class="objs" id="objs" role="listbox" aria-label="Objetos"></ul>
+      <div id="ex-empty" class="ex-empty" hidden></div>
+      <div class="ex-foot"><button id="manage-conn"><svg class="ic"><use href="#i-plugs-connected"/></svg>Conexiones (3)</button></div>
+    </aside>
+
+    <main class="main">
+      <div class="tabs" id="tabs"></div>
+      <div class="editor" id="editor"></div>
+      <div class="splitter" role="separator" aria-orientation="horizontal" aria-label="Divisor entre editor y resultados" aria-valuenow="58" aria-valuemin="20" aria-valuemax="85" tabindex="0"></div>
+      <section class="panel" aria-label="Panel de resultados">
+        <div class="ptabs" id="ptabs"></div>
+        <div class="pbody" id="pbody" tabindex="0" role="region" aria-label="Contenido del panel"></div>
+      </section>
+    </main>
+  </div>
+
+  <footer class="status-wrap"><div class="status" id="status" role="status"></div></footer>
+</div>
+
+<div class="scrim" id="scrim">
+  <div class="palette" role="dialog" aria-modal="true" aria-label="Paleta de comandos">
+    <div class="q"><svg class="ic"><use href="#i-command"/></svg><input id="pal-q" aria-label="Buscar comando" value="form" autocomplete="off"></div>
+    <ul class="pal-list" id="pal-list" role="listbox" aria-label="Comandos"></ul>
+    <div class="pal-foot"><span><kbd>↑</kbd> <kbd>↓</kbd> moverse</span><span><kbd>Enter</kbd> ejecutar</span><span><kbd>Esc</kbd> cerrar</span></div>
+  </div>
+</div>
+
+<script src="../shared/icons.js"></script>
+<script src="../shared/mock.js"></script>
+<script>
+const I = (n,c)=>window.icon(n,c);
+const $ = (id)=>document.getElementById(id);
+const TYPES = ["","TABLE","VIEW","PACKAGE","PROCEDURE","FUNCTION","TRIGGER","SEQUENCE","TYPE","SYNONYM"];
+const TYPE_IC = Object.assign({"":"squares-four"}, MOCK.TYPE_ICON);
+
+function setStatic(){
+  $("btn-run").innerHTML = I("play")+"<span>Ejecutar</span><kbd>F5</kbd>";
+  $("btn-stop").innerHTML = I("stop");
+  $("btn-commit").innerHTML = I("check");
+  $("btn-rollback").innerHTML = I("arrow-counter-clockwise");
+  const tools=[...document.querySelectorAll('[aria-label="Formatear SQL"],[aria-label="Historial"],[aria-label="Plan de ejecución"],[aria-label="Estadísticas"],[aria-label="Guardar"],[aria-label="Abrir"],[aria-label="Exportar CSV"]')];
+  ["text-align-left","clock-counter-clockwise","tree-structure","chart-bar","floppy-disk","folder-open","download-simple"].forEach((n,i)=>tools[i].innerHTML=I(n));
+  $("ro").innerHTML = I("lock-simple-open"); $("theme").innerHTML = I("circle-half"); $("refresh").innerHTML = I("arrow-clockwise");
+  $("theme").onclick=()=>document.querySelector("[data-theme-btn]").click();
+  $("open-palette").onclick=()=>document.querySelector('[data-state="paleta"]').click();
+}
+
+function typesBar(active, disabled){
+  $("types").innerHTML = TYPES.map(t=>`<button type="button" ${disabled?"disabled":""} aria-pressed="${t===active}" aria-label="${MOCK.TYPE_LABEL[t]}" title="${MOCK.TYPE_LABEL[t]} · ${MOCK.n0.format(MOCK.COUNTS[t])}">${I(TYPE_IC[t])}</button>`).join("");
+}
+function tabsBar(items, active){
+  $("tabs").innerHTML = `<ul aria-label="Documentos abiertos">` + items.map((t,i)=>`<li class="tab${i===active?" is-active":""}"><button class="tab-btn"${i===active?' aria-current="true"':""}>${I(t.icon)}<span class="t">${MOCK.esc(t.title)}</span>${t.dirty?'<span class="dirty" role="img" aria-label="Sin guardar"></span>':""}</button>${t.dirty?"":`<button class="x" aria-label="Cerrar ${MOCK.esc(t.title)}">${I("x")}</button>`}</li>`).join("") + `</ul><button class="plus" aria-label="Nuevo documento">${I("plus")}</button>`;
+}
+function ptabs(active, count){
+  const names=["Resultados","Historial","Plan de ejecución","Objeto","Estadísticas","Salida"];
+  $("ptabs").innerHTML = `<div role="tablist" aria-label="Paneles de resultados">` + names.map(n=>`<button class="ptab" role="tab" aria-selected="${n===active}">${n}${n==="Resultados"&&count!=null?`<span class="count">${count}</span>`:""}</button>`).join("") + `</div><div class="pactions"><button class="btn">${I("download-simple")}Exportar CSV</button><button class="tb" aria-label="Limpiar resultados" title="Limpiar">${I("x")}</button></div>`;
+}
+function statusBar(o){
+  $("status").innerHTML = `<span class="s"><span class="dot ${o.dot}"></span><b>${o.state}</b>${o.conn?` · ${o.conn}`:""}</span>`+
+    (o.msg?`<span class="s">${o.msg}</span>`:"")+`<span class="sp"></span>`+
+    (o.tx?`<span class="s" style="color:var(--warn)"><span class="dot warn"></span><b style="color:var(--warn)">${o.tx}</b></span>`:"")+
+    `<span class="s">${o.right||"Ln 5, Col 28"}</span><span class="s">UTF-8</span><span class="s">LF</span><span class="s">Autocommit: no</span>`;
+}
+function connButton(on){
+  $("conn").innerHTML = on
+    ? `<span style="display:flex;align-items:center;gap:8px"><span class="dot ok"></span><span class="sr-only">Conexión activa: </span>${MOCK.conn.user}@${MOCK.conn.alias}</span>${I("caret-down")}`
+    : `<span style="display:flex;align-items:center;gap:8px"><span class="dot"></span>Sin conexión</span>${I("caret-down")}`;
+  $("btn-connect").innerHTML = on ? I("plugs") : I("plugs-connected");
+  $("btn-connect").setAttribute("aria-label", on?"Desconectar":"Conectar"); $("btn-connect").title = on?"Desconectar":"Conectar";
+}
+
+function render(state){
+  setStatic();
+  const on = state!=="sin-conexion";
+  connButton(on);
+  $("btn-run").disabled=!on; $("btn-stop").disabled=true;
+  const tx = state==="transaccion";
+  $("btn-commit").disabled=!tx; $("btn-rollback").disabled=!tx;
+  $("btn-commit").innerHTML = I("check")+(tx?'<span class="badge">3</span>':"");
+  $("btn-commit").setAttribute("aria-label", tx?"Confirmar (commit): 3 cambios pendientes":"Confirmar (commit)");
+  $("scrim").classList.toggle("open", state==="paleta");
+
+  const sel = state==="paquete" ? "AS_PDF3_MOD" : "CLIENTE";
+  const activeType = state==="paquete" ? "PACKAGE" : "TABLE";
+  typesBar(activeType, !on);
+  if(!on){
+    $("objs").hidden=true; $("ex-meta").innerHTML="<span>Sin objetos</span>";
+    $("ex-empty").hidden=false;
+    $("ex-empty").innerHTML = `<strong>Conectate para explorar el esquema</strong><span>Los objetos de ANAMNESIS aparecen acá apenas se abra la conexión.</span><button class="btn primary">${I("plugs-connected")}Conectar a anamnesis@desa02</button>`;
+  } else {
+    $("objs").hidden=false; $("ex-empty").hidden=true;
+    $("ex-meta").innerHTML = `<span><b>${MOCK.TYPE_LABEL[activeType]}</b></span><span>${MOCK.n0.format(MOCK.COUNTS[activeType])} objetos</span>`;
+    $("objs").innerHTML = MOCK.objectRows(sel, activeType);
+  }
+
+  // Documentos
+  let docs, active=0, lines, opts={};
+  if(state==="paquete"){
+    docs=[{icon:"file-sql",title:"SQL"},{icon:"package",title:"AS_PDF3_MOD (PACKAGE)"},{icon:"package",title:"AS_PDF3_MOD (PACKAGE BODY)"}];
+    active=1; lines=MOCK.PKG_SPEC; opts={activeLine:1};
+  } else if(state==="error"){ docs=[{icon:"file-sql",title:"consulta_clientes.sql"}]; lines=MOCK.SQL_ERROR; opts={errorLine:MOCK.ERROR.line};
+  } else if(state==="transaccion"){ docs=[{icon:"file-sql",title:"SQL",dirty:true}]; lines=MOCK.SQL_TX; opts={activeLine:3};
+  } else if(state==="sin-conexion"){ docs=[{icon:"file-sql",title:"SQL"}]; lines=MOCK.SQL_QUERY; opts={activeLine:5};
+  } else { docs=[{icon:"file-sql",title:"SQL"}]; lines=MOCK.SQL_QUERY; opts={activeLine:5}; }
+  tabsBar(docs, active);
+  $("editor").innerHTML = MOCK.editorHTML(lines, opts);
+
+  // Panel inferior + estado
+  const conn = `${MOCK.conn.user}@${MOCK.conn.alias} · Oracle 12c`;
+  if(state==="sin-conexion"){
+    ptabs("Resultados", null);
+    $("pbody").innerHTML = `<div class="empty"><strong>Todavía no hay resultados</strong><span>Conectate para ejecutar con F5. También podés abrir o editar un archivo .sql sin conexión.</span><div class="row"><button class="btn primary">${I("plugs-connected")}Conectar a anamnesis@desa02</button><button class="btn">${I("plus")}Nueva conexión</button></div></div>`;
+    statusBar({dot:"",state:"Sin conexión",msg:"Elegí una conexión guardada para empezar",right:"Ln 5, Col 28"});
+  } else if(state==="error"){
+    ptabs("Resultados", null);
+    $("pbody").innerHTML = `<div class="msg err" role="alert">${I("warning-circle")}<h3>${MOCK.ERROR.code}: ${MOCK.ERROR.text}</h3><button class="btn" style="grid-column:3;grid-row:1">${I("caret-right")}Ir a la línea ${MOCK.ERROR.line}</button><p>Sentencia 1 · línea 3, columna 8 · “SUCURSALES” no existe en el esquema ANAMNESIS</p><pre>${MOCK.esc(MOCK.ERROR.detail)}</pre></div>`;
+    statusBar({dot:"err",state:"Error en la ejecución",conn,msg:"1 sentencia · 52 ms",right:"Ln 3, Col 8"});
+  } else if(state==="transaccion"){
+    ptabs("Resultados", null);
+    $("pbody").innerHTML = `<div class="msg warn" role="status">${I("info")}<h3>3 filas actualizadas · 41 ms</h3><span style="grid-column:3;grid-row:1;display:flex;gap:8px"><button class="btn primary">${I("check")}Confirmar</button><button class="btn">${I("arrow-counter-clockwise")}Deshacer</button></span><p>Hay una transacción abierta con 3 cambios en CLIENTE. Se pierden si cerrás la conexión sin confirmar.</p></div>`;
+    statusBar({dot:"warn",state:"Conectado",conn,msg:"3 filas actualizadas · 41 ms",tx:"Transacción pendiente (3)",right:"Ln 3, Col 44"});
+  } else if(state==="paquete"){
+    ptabs("Objeto", null);
+    $("pbody").innerHTML = `<dl class="kv"><dt>Objeto</dt><dd>ANAMNESIS.AS_PDF3_MOD</dd><dt>Tipo</dt><dd>Paquete · especificación y cuerpo</dd><dt>Estado</dt><dd>VÁLIDO</dd><dt>Última modificación</dt><dd>12/08/2026 16:41</dd><dt>Líneas</dt><dd>16 en la especificación · 20 en el cuerpo</dd><dt></dt><dd class="row"><button class="btn">${I("file-text")}Cargar DDL</button><button class="btn">${I("file-sql")}Con DBMS_METADATA</button></dd></dl>`;
+    statusBar({dot:"ok",state:"Conectado",conn,msg:"DDL cargado en 2 pestañas: especificación y cuerpo",right:"Ln 1, Col 1"});
+  } else {
+    ptabs("Resultados", MOCK.GRID.rows.length);
+    $("pbody").innerHTML = MOCK.gridHTML();
+    statusBar({dot:"ok",state:"Conectado",conn,msg:"14 filas · 38 ms"});
+  }
+  $("pal-list").innerHTML = MOCK.paletteRows(MOCK.PALETTE_QUERY);
+}
+MOCK.init({title:"A · Clásico refinado",states:[["resultados","Resultados"],["paquete","Paquete: spec y body"],["sin-conexion","Sin conexión"],["paleta","Paleta de comandos"],["error","Error de ejecución"],["transaccion","Transacción pendiente"]],render});
+</script>
+</body>
+</html>

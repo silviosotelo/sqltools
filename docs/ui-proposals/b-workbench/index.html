@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SQLTools — Propuesta B: Banco de trabajo moderno</title>
+<link rel="stylesheet" href="../shared/fonts.css">
+<style>
+/* Tokens. Acento único: cian. Oscuro primero. */
+:root{
+  --bg:#f3f4f7; --side:#eceef2; --surface:#ffffff; --raised:#f7f8fa; --sunken:#e3e6eb;
+  --line:#d9dde4; --line-strong:#a9b0bc;
+  --text:#1a1e26; --muted:#4d5666; --faint:#586272;
+  --accent:#0a7285; --accent-ink:#ffffff; --accent-soft:#d5eef3; --accent-text:#075565;
+  --ok:#17794a; --warn:#8f5200; --warn-soft:#fbeccb; --err:#b3261e; --err-soft:#fbe4e1;
+  --shadow:0 10px 30px rgba(15,23,42,.2);
+  --font:"IBM Plex Sans","Segoe UI",system-ui,sans-serif; --mono:"JetBrains Mono",Consolas,monospace;
+  --t-k:#0a6a80; --t-s:#8a4b00; --t-n:#0f7a5a; --t-c:#586272;
+  color-scheme:light;
+}
+[data-theme="dark"]{
+  --bg:#0e1013; --side:#12151a; --surface:#171a20; --raised:#1c2027; --sunken:#0b0d10;
+  --line:#252a32; --line-strong:#3e4551;
+  --text:#dde1e8; --muted:#98a2b2; --faint:#8791a1;
+  --accent:#3cc4dc; --accent-ink:#04222a; --accent-soft:#12333b; --accent-text:#8fe0ef;
+  --ok:#4cc38a; --warn:#e3a93e; --warn-soft:#35290f; --err:#f28b82; --err-soft:#3a1d1b;
+  --shadow:0 12px 36px rgba(0,0,0,.6);
+  --t-k:#59c9de; --t-s:#e9b46a; --t-n:#7ad8b4; --t-c:#8791a1;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font:13px/1.4 var(--font);display:flex;flex-direction:column;min-height:100vh}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+kbd{font:500 11px var(--mono);color:var(--muted);background:var(--raised);border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+ul{list-style:none;margin:0;padding:0}
+.app{display:grid;grid-template-rows:40px 1fr 26px;height:100vh;min-height:0}
+body:not(.shot) .app{height:calc(100vh - 37px)}
+
+/* Barra de título con la paleta como protagonista */
+.titlebar{display:grid;grid-template-columns:1fr minmax(320px,520px) 1fr;align-items:center;gap:12px;padding:0 10px;background:var(--side);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:8px;font-weight:600}
+.brand .ic{color:var(--accent);width:18px;height:18px}
+.palette-field{position:relative}
+.palette-btn,.palette-field input{width:100%;height:28px;display:flex;align-items:center;gap:8px;padding:0 10px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--muted);font:inherit}
+.palette-btn:hover{border-color:var(--line-strong);color:var(--text)}
+.palette-btn kbd{margin-left:auto}
+.palette-field input{color:var(--text);border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.palette-field .ic-in{position:absolute;left:10px;top:6px;color:var(--accent)}
+.palette-field input{padding-left:32px}
+.drop{position:absolute;left:0;right:0;top:34px;background:var(--raised);border:1px solid var(--line-strong);border-radius:9px;box-shadow:var(--shadow);overflow:hidden;z-index:40}
+.drop h2{margin:0;padding:8px 12px 4px;font-size:11px;font-weight:500;color:var(--muted)}
+.pal-row{display:grid;grid-template-columns:20px 1fr auto auto;gap:12px;align-items:center;height:32px;padding:0 12px}
+.pal-row.is-active{background:var(--accent-soft);color:var(--accent-text)}
+.pal-id{font:11px var(--mono);color:var(--faint)}
+.pal-row.is-active .pal-id{color:var(--accent-text)}
+.pal-label{white-space:nowrap}
+.drop-foot{display:flex;gap:14px;padding:7px 12px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+.tright{display:flex;justify-content:flex-end;align-items:center;gap:6px}
+.ib{display:inline-grid;place-items:center;width:28px;height:28px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--muted)}
+.ib:hover:not(:disabled){background:var(--sunken);color:var(--text)}
+.ib:disabled{opacity:.55;cursor:default}
+.lang{height:28px;border:1px solid var(--line);border-radius:6px;background:var(--surface);padding:0 6px;font:inherit;color:var(--text)}
+.chip{display:inline-flex;align-items:center;gap:8px;height:28px;padding:0 4px 0 8px;border:1px solid var(--line);border-radius:7px;background:var(--surface)}
+.chip:hover{border-color:var(--line-strong)}
+.env{font:600 10px/16px var(--mono);letter-spacing:.04em;padding:0 6px;border-radius:4px;background:var(--accent-soft);color:var(--accent-text)}
+.env.prod{background:var(--err-soft);color:var(--err)}
+.env.off{background:var(--sunken);color:var(--muted)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--faint);flex:none}
+.dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.err{background:var(--err)}
+
+.work{display:grid;grid-template-columns:48px 272px 1fr;min-height:0}
+.activity{display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 0;background:var(--side);border-right:1px solid var(--line)}
+.activity .grow{flex:1}
+.act{position:relative;width:40px;height:40px;display:grid;place-items:center;border:0;border-radius:8px;background:transparent;color:var(--muted)}
+.act .ic{width:20px;height:20px}
+.act:hover{color:var(--text);background:var(--sunken)}
+.act[aria-pressed="true"]{color:var(--text)}
+.act[aria-pressed="true"]::before{content:"";position:absolute;left:-4px;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;background:var(--accent)}
+
+/* Panel lateral + árbol */
+.side{display:flex;flex-direction:column;min-height:0;background:var(--side);border-right:1px solid var(--line)}
+.side-head{display:flex;align-items:center;gap:2px;padding:8px 8px 6px 14px}
+.side-head h2{margin:0;font-size:11px;font-weight:600;color:var(--muted);flex:1;letter-spacing:.02em;text-transform:none}
+.side-search{margin:0 10px 8px;display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--muted)}
+.side-search:focus-within{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.side-search input{border:0;background:transparent;font:inherit;color:var(--text);outline:none;width:100%;min-width:0}
+.side-search input::placeholder{color:var(--faint)}
+.tree{overflow:auto;flex:1;padding:0 6px 8px}
+.tree [role="group"]{padding-left:14px;position:relative}
+.tree [role="group"]::before{content:"";position:absolute;left:11px;top:0;bottom:0;border-left:1px solid var(--line)}
+.node{display:flex;align-items:center;gap:6px;height:26px;padding:0 8px;border-radius:6px;color:var(--text);white-space:nowrap}
+.node:hover{background:var(--sunken)}
+.node .chev{width:12px;height:12px;color:var(--faint);transition:transform .12s}
+li[aria-expanded="true"]>.node .chev{transform:rotate(90deg)}
+.node .n-ic{color:var(--muted)}
+.node .n-name{flex:1;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.node .n-count{font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
+.node.leaf{padding-left:26px}
+.node.is-selected{background:var(--accent-soft);color:var(--accent-text)}
+.node.is-selected .n-ic{color:var(--accent-text)}
+.node.group .n-name{font-weight:500}
+.cons{padding:0 10px}
+.con{display:grid;grid-template-columns:1fr auto;gap:2px 8px;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);margin-bottom:8px}
+.con b{font-weight:500}
+.con span{color:var(--muted);font-size:12px}
+.con .row{grid-column:1/-1;display:flex;gap:8px;margin-top:6px}
+.btn{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:6px;border:1px solid var(--line-strong);background:var(--surface);color:var(--text)}
+.btn:hover{background:var(--sunken)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:500}
+.btn.primary:hover{filter:brightness(1.08)}
+
+/* Centro */
+.col{display:grid;grid-template-rows:34px 26px 34px minmax(110px,1fr) 6px minmax(150px,.9fr);min-width:0;min-height:0;background:var(--surface)}
+.tabs{display:flex;background:var(--side);border-bottom:1px solid var(--line)}
+.tabs ul{display:flex;align-items:stretch}
+.tab{display:flex;align-items:center;border-right:1px solid var(--line);color:var(--muted);position:relative;max-width:260px}
+.tab-btn{font:inherit;display:flex;align-items:center;gap:8px;height:100%;padding:0 6px 0 12px;border:0;background:transparent;color:inherit;min-width:0}
+.tab .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tab.is-active{background:var(--surface);color:var(--text)}
+.tab.is-active::before{content:"";position:absolute;left:0;right:0;top:0;height:2px;background:var(--accent)}
+.tab:hover:not(.is-active){background:var(--raised);color:var(--text)}
+.tab .x{width:20px;height:20px;margin-right:6px;display:grid;place-items:center;border:0;border-radius:4px;background:transparent;color:var(--faint)}
+.tab .x:hover{background:var(--sunken);color:var(--text)}
+.tab .dirty{width:8px;height:8px;border-radius:50%;background:var(--muted);margin:0 8px 0 4px}
+.crumbs{display:flex;align-items:center;gap:6px;padding:0 14px;color:var(--muted);font-size:12px;border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden}
+.crumbs .ic{width:12px;height:12px;color:var(--faint)}
+.crumbs b{color:var(--text);font-weight:500}
+.actions{display:flex;align-items:center;gap:4px;padding:0 10px;border-bottom:1px solid var(--line);background:var(--surface)}
+.actions .sep{width:1px;height:18px;background:var(--line);margin:0 6px}
+.abtn{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 8px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--text)}
+.abtn:hover:not(:disabled){background:var(--sunken)}
+.abtn:disabled{color:var(--faint);opacity:.7;cursor:default}
+.abtn.run{background:var(--accent);color:var(--accent-ink);font-weight:500}
+.abtn.run:hover:not(:disabled){filter:brightness(1.08);background:var(--accent)}
+.abtn.run kbd{background:transparent;border-color:color-mix(in srgb,var(--accent-ink) 40%,transparent);color:var(--accent-ink)}
+.abtn .badge{background:var(--warn);color:var(--surface);border-radius:8px;padding:0 6px;font:600 11px/16px var(--font)}
+.switch{display:inline-flex;align-items:center;gap:8px;height:26px;padding:0 6px;border:0;background:transparent;color:var(--muted)}
+.switch i{width:26px;height:14px;border-radius:8px;background:var(--sunken);border:1px solid var(--line-strong);position:relative}
+.switch i::after{content:"";position:absolute;top:1px;left:1px;width:10px;height:10px;border-radius:50%;background:var(--muted)}
+.switch[aria-checked="true"] i{background:var(--accent);border-color:var(--accent)}
+.switch[aria-checked="true"] i::after{left:13px;background:var(--accent-ink)}
+.editor{overflow:auto;position:relative}
+.cm{font:13px/20px var(--mono);font-variant-ligatures:none;padding:8px 0;min-width:max-content}
+.cm:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.cm-row{display:flex}
+.cm-ln{width:52px;text-align:right;padding-right:14px;color:var(--faint);user-select:none;flex:none;font-variant-numeric:tabular-nums}
+.cm-line{white-space:pre;flex:1;padding-right:16px}
+.cm-active{background:var(--raised)} .cm-active .cm-ln{color:var(--text)}
+.cm-error{background:var(--err-soft);box-shadow:inset 3px 0 0 var(--err)} .cm-error .cm-ln{color:var(--err)}
+.t-k{color:var(--t-k)} .t-s{color:var(--t-s)} .t-n{color:var(--t-n)} .t-c{color:var(--t-c)}
+.splitter{background:var(--side);border-top:1px solid var(--line);border-bottom:1px solid var(--line);cursor:row-resize}
+
+/* Panel inferior */
+.panel{display:grid;grid-template-rows:32px 34px 1fr;min-height:0;background:var(--surface)}
+.ptabs{display:flex;align-items:flex-end;padding:0 10px;gap:2px;background:var(--surface)}
+.ptabs [role="tablist"]{display:flex;gap:2px}
+.ptab{height:30px;padding:0 12px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--muted);display:flex;align-items:center;gap:6px}
+.ptab:hover{color:var(--text)}
+.ptab[aria-selected="true"]{color:var(--text);border-bottom-color:var(--accent)}
+.rbar{display:flex;align-items:center;gap:8px;padding:0 10px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--raised)}
+.rbar .meta{color:var(--muted);font-variant-numeric:tabular-nums}
+.rbar .meta b{color:var(--text);font-weight:500}
+.rbar .sp{flex:1}
+.filter{display:flex;align-items:center;gap:6px;height:24px;width:190px;padding:0 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--muted)}
+.filter input{border:0;background:transparent;font:inherit;color:var(--text);outline:none;min-width:0;width:100%}
+.filter input::placeholder{color:var(--faint)}
+.filter:focus-within{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.pbody{overflow:auto;min-height:0}
+.grid{border-collapse:separate;border-spacing:0;width:100%;font-variant-numeric:tabular-nums}
+.grid th,.grid td{padding:0 12px;height:26px;white-space:nowrap;text-align:left;border-bottom:1px solid var(--line);border-right:1px solid color-mix(in srgb,var(--line) 55%,transparent)}
+.grid thead th{position:sticky;top:0;z-index:1;background:var(--raised);height:30px;font-weight:500;border-bottom:1px solid var(--line-strong)}
+.grid .col{display:inline-flex;align-items:center;gap:6px}
+.grid .col .ic{width:13px;height:13px;color:var(--muted)}
+.grid .num{text-align:right}.grid thead .num .col{flex-direction:row-reverse}
+.grid .rn{width:44px;text-align:right;color:var(--faint);font-weight:400;background:var(--raised)}
+.grid tbody tr:hover td{background:var(--accent-soft)}
+.grid td.null{color:var(--faint);font:11px var(--mono)}
+.grid td.sel{outline:2px solid var(--accent);outline-offset:-2px;background:var(--accent-soft)}
+.kv{display:grid;grid-template-columns:150px 1fr;gap:6px 16px;padding:14px 18px;max-width:640px}
+.kv dt{color:var(--muted)} .kv dd{margin:0}
+.empty{display:grid;gap:10px;justify-items:start;padding:28px 24px;color:var(--muted);max-width:540px}
+.empty strong{color:var(--text);font-weight:500;font-size:14px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.msg{display:grid;grid-template-columns:20px 1fr auto;gap:2px 10px;padding:14px 18px;align-items:start}
+.msg.err{background:var(--err-soft)} .msg.err>.ic{color:var(--err)}
+.msg.warn{background:var(--warn-soft)} .msg.warn>.ic{color:var(--warn)}
+.msg>.ic{margin-top:2px}
+.msg h3{margin:0;font-size:13px;font-weight:600}
+.msg p{margin:0;grid-column:2;color:var(--muted)}
+.msg pre{grid-column:2;margin:6px 0 0;font:12px/18px var(--mono);color:var(--text)}
+
+.welcome{display:grid;place-content:center;gap:12px;height:100%;color:var(--muted);text-align:left;padding:24px}
+.welcome h2{margin:0;color:var(--text);font-size:18px;font-weight:600}
+.welcome dl{display:grid;grid-template-columns:auto auto;gap:6px 18px;margin:6px 0 0;font-size:12px}
+.welcome dt{color:var(--text)} .welcome dd{margin:0}
+
+.status-wrap{background:var(--side);border-top:1px solid var(--line)}
+.status{display:flex;align-items:stretch;height:100%;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+.status .seg{display:flex;align-items:center;gap:6px;padding:0 10px;white-space:nowrap;border:0;background:transparent;font:inherit;color:inherit}
+.status button.seg:hover{background:var(--sunken);color:var(--text)}
+.status .sp{flex:1}
+.status .seg b{color:var(--text);font-weight:500}
+.status .tx{background:var(--warn-soft);color:var(--warn)} .status .tx b{color:var(--warn)}
+@media (prefers-reduced-motion:no-preference){.abtn,.node,.act,.ptab{transition:background-color .12s,color .12s}}
+@media (max-width:1280px){.titlebar{grid-template-columns:auto 1fr auto}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="titlebar">
+    <h1 class="sr-only">SQLTools, editor Oracle</h1>
+    <div class="brand"><svg class="ic"><use href="#i-database"/></svg>SQLTools</div>
+    <div class="palette-field" id="palette-field"></div>
+    <div class="tright" id="tright"></div>
+  </header>
+
+  <div class="work">
+    <nav class="activity" aria-label="Vistas" id="activity"></nav>
+    <aside class="side" id="side" aria-label="Panel lateral"></aside>
+    <main class="col" id="col"></main>
+  </div>
+
+  <footer class="status-wrap"><div class="status" id="status" role="status"></div></footer>
+</div>
+
+<script src="../shared/icons.js"></script>
+<script src="../shared/mock.js"></script>
+<script>
+const I=(n,c)=>window.icon(n,c); const $=(id)=>document.getElementById(id);
+const E=MOCK.esc;
+const GROUPS=[["TABLE","Tablas"],["VIEW","Vistas"],["PACKAGE","Paquetes"],["PROCEDURE","Procedimientos"],["FUNCTION","Funciones"],["TRIGGER","Triggers"],["SEQUENCE","Secuencias"],["TYPE","Tipos"],["SYNONYM","Sinónimos"]];
+const TYPE_GLYPH={NUMBER:"hash",VARCHAR2:"text-aa",DATE:"calendar-blank"};
+
+function titlebar(on, palette){
+  $("palette-field").innerHTML = palette
+    ? `${I("magnifying-glass","ic-in")}<input id="pq" role="combobox" aria-expanded="true" aria-controls="pl" aria-label="Buscar comando, objeto o archivo" value="${MOCK.PALETTE_QUERY}" autocomplete="off"><div class="drop"><h2>Comandos</h2><ul id="pl" role="listbox" aria-label="Resultados de la búsqueda">${MOCK.paletteRows(MOCK.PALETTE_QUERY).replace(/<span class="pal-label">/g,`${I("command")}<span class="pal-label">`)}</ul><div class="drop-foot"><span><kbd>↑</kbd> <kbd>↓</kbd> moverse</span><span><kbd>Enter</kbd> ejecutar</span><span><kbd>Esc</kbd> cerrar</span><span>Escribí <kbd>@</kbd> para objetos</span></div></div>`
+    : `<button class="palette-btn" id="open-palette">${I("magnifying-glass")}<span>Buscar comando, objeto o archivo…</span><kbd>Ctrl+Shift+P</kbd></button>`;
+  $("tright").innerHTML = `<button class="chip" id="chip"><span class="dot ${on?"ok":""}"></span>${on?`<span class="sr-only">Conexión: </span>${MOCK.conn.user}@${MOCK.conn.alias}<span class="env">DESA</span>`:"Sin conexión"}${I("caret-down")}</button><button class="ib" id="theme" aria-label="Cambiar tema" title="Tema">${I("circle-half")}</button><select class="lang" aria-label="Idioma"><option>Español</option><option>English</option></select>`;
+  $("theme").onclick=()=>document.querySelector("[data-theme-btn]").click();
+  const op=$("open-palette"); if(op) op.onclick=()=>document.querySelector('[data-state="paleta"]').click();
+}
+function activity(view){
+  const items=[["objetos","database","Objetos"],["conexiones","plugs-connected","Conexiones"],["historial","clock-counter-clockwise","Historial"],["estadisticas","chart-bar","Estadísticas"]];
+  $("activity").innerHTML = items.map(([k,ic,l])=>`<button class="act" aria-pressed="${k===view}" aria-label="${l}" title="${l}">${I(ic)}</button>`).join("")+`<span class="grow"></span><button class="act" aria-label="Atajos de teclado" title="Atajos de teclado (F1)">${I("keyboard")}</button><button class="act" aria-label="Ajustes" title="Ajustes">${I("gear")}</button>`;
+}
+function tree(expanded, selected){
+  const groups = GROUPS.map(([t,l])=>{
+    const open = t===expanded;
+    const items = open ? MOCK.OBJECTS.filter(o=>o[1]===t).map(([n])=>`<li role="treeitem" aria-selected="${n===selected}" tabindex="${n===selected?0:-1}"><div class="node leaf${n===selected?" is-selected":""}">${I(MOCK.TYPE_ICON[t],"n-ic")}<span class="n-name">${E(n)}</span></div></li>`).join("") : "";
+    return `<li role="treeitem" aria-expanded="${open}" tabindex="-1"><div class="node group">${I("caret-right","chev")}${I(MOCK.TYPE_ICON[t],"n-ic")}<span class="n-name">${l}</span><span class="n-count">${MOCK.n0.format(MOCK.COUNTS[t])}</span></div>${open?`<ul role="group">${items}</ul>`:""}</li>`;
+  }).join("");
+  return `<ul class="tree" role="tree" aria-label="Objetos de ANAMNESIS"><li role="treeitem" aria-expanded="true" tabindex="-1"><div class="node group">${I("caret-right","chev")}${I("database","n-ic")}<span class="n-name">${MOCK.conn.alias}</span><span class="env">DESA</span></div><ul role="group"><li role="treeitem" aria-expanded="true" tabindex="-1"><div class="node group">${I("caret-right","chev")}${I("stack","n-ic")}<span class="n-name">ANAMNESIS</span></div><ul role="group">${groups}</ul></li></ul></li></ul>`;
+}
+function side(state){
+  if(state==="sin-conexion"){
+    $("side").innerHTML = `<div class="side-head"><h2>Conexiones</h2><button class="ib" aria-label="Nueva conexión" title="Nueva conexión">${I("plus")}</button></div><div class="cons"><div class="con"><b>desa02</b><span class="env">DESA</span><span>anamnesis · Oracle 12c</span><span></span><div class="row"><button class="btn primary">${I("plugs-connected")}Conectar</button><button class="btn">Editar</button></div></div><div class="con"><b>prod-replica</b><span class="env prod">PROD</span><span>consulta · Oracle 19c</span><span></span><div class="row"><button class="btn">${I("plugs-connected")}Conectar</button><button class="btn">Editar</button></div></div><div class="con"><b>local-xe</b><span class="env off">LOCAL</span><span>system · Oracle XE 21c</span><span></span><div class="row"><button class="btn">${I("plugs-connected")}Conectar</button><button class="btn">Editar</button></div></div></div>`;
+    return;
+  }
+  const pkg = state==="paquete";
+  $("side").innerHTML = `<div class="side-head"><h2>Objetos</h2><button class="ib" aria-label="Filtrar por tipo" title="Filtrar por tipo">${I("funnel")}</button><button class="ib" aria-label="Actualizar objetos" title="Actualizar">${I("arrow-clockwise")}</button></div><label class="side-search">${I("magnifying-glass")}<span class="sr-only">Filtrar objetos</span><input placeholder="Filtrar en ANAMNESIS" aria-label="Filtrar objetos"></label>${tree(pkg?"PACKAGE":"TABLE", pkg?"AS_PDF3_MOD":"CLIENTE")}`;
+}
+function docTabs(items, active){
+  return `<div class="tabs"><ul aria-label="Documentos abiertos">`+items.map((t,i)=>`<li class="tab${i===active?" is-active":""}"><button class="tab-btn"${i===active?' aria-current="true"':""}>${I(t.icon)}<span class="t">${E(t.title)}</span>${t.dirty?'<span class="dirty" role="img" aria-label="Sin guardar"></span>':""}</button>${t.dirty?"":`<button class="x" aria-label="Cerrar ${E(t.title)}">${I("x")}</button>`}</li>`).join("")+`</ul></div>`;
+}
+function crumbs(parts){ return `<nav class="crumbs" aria-label="Ubicación">${parts.map((p,i)=>(i?I("caret-right"):"")+(i===parts.length-1?`<b>${E(p)}</b>`:`<span>${E(p)}</span>`)).join("")}</nav>`; }
+function actions(on, tx){
+  return `<div class="actions" role="toolbar" aria-label="Acciones del editor"><button class="abtn run"${on?"":" disabled"} title="Ejecutar (F5)">${I("play")}Ejecutar <kbd>F5</kbd></button><button class="abtn"${on?"":" disabled"} aria-label="Ejecutar sentencia actual" title="Ejecutar sentencia (Ctrl+Enter)">${I("rows")}<span>Sentencia</span></button><button class="abtn" disabled aria-label="Cancelar ejecución" title="Cancelar">${I("stop")}</button><span class="sep"></span><button class="abtn" aria-label="Formatear SQL" title="Formatear (Ctrl+K, E)">${I("text-align-left")}</button><button class="abtn"${on?"":" disabled"} aria-label="Plan de ejecución" title="Plan de ejecución (F10)">${I("tree-structure")}</button><span class="sep"></span><button class="abtn"${tx?"":" disabled"} aria-label="${tx?"Confirmar (commit): 3 cambios pendientes":"Confirmar (commit)"}" title="Confirmar">${I("check")}${tx?'<span class="badge">3</span>':""}</button><button class="abtn"${tx?"":" disabled"} aria-label="Deshacer (rollback)" title="Deshacer">${I("arrow-counter-clockwise")}</button><span style="flex:1"></span><button class="switch" role="switch" aria-checked="false"><i></i>Autocommit</button><button class="switch" role="switch" aria-checked="false"><i></i>Solo lectura</button></div>`;
+}
+function cell(v,j){ const c=MOCK.GRID.cols[j]; if(v===null) return `<td class="${c.num?"num ":""}null">NULL</td>`; if(c.num&&c.type.includes(",")) return `<td class="num">${MOCK.n2.format(v)}</td>`; if(c.num) return `<td class="num">${j===0||j===5?v:MOCK.n0.format(v)}</td>`; return `<td>${E(v)}</td>`; }
+function gridB(){
+  const head=MOCK.GRID.cols.map(c=>{const base=c.type.split("(")[0];return `<th scope="col" class="${c.num?"num":""}" title="${c.type}"><span class="col">${I(TYPE_GLYPH[base]||"text-aa")}${c.name}<span class="sr-only"> (${c.type})</span></span></th>`}).join("");
+  const body=MOCK.GRID.rows.map((r,i)=>`<tr><th scope="row" class="rn">${i+1}</th>${r.map((v,j)=>{let h=cell(v,j); if(i===2&&j===1) h=h.replace("<td>",'<td class="sel">'); return h;}).join("")}</tr>`).join("");
+  return `<table class="grid" aria-label="Resultados de la consulta"><thead><tr><th class="rn" scope="col"><span class="sr-only">Fila</span>#</th>${head}</tr></thead><tbody>${body}</tbody></table>`;
+}
+function panel(active, meta, bodyHTML, withBar=true){
+  const names=["Resultados","Historial","Plan de ejecución","Objeto","Estadísticas","Salida"];
+  return `<section class="panel" aria-label="Panel de resultados"><div class="ptabs"><div role="tablist" aria-label="Paneles de resultados">${names.map(n=>`<button class="ptab" role="tab" aria-selected="${n===active}">${n}</button>`).join("")}</div></div><div class="rbar"><span class="meta">${meta}</span><span class="sp"></span><label class="filter">${I("funnel")}<span class="sr-only">Filtrar filas</span><input placeholder="Filtrar filas" aria-label="Filtrar filas"></label><button class="btn">${I("copy")}Copiar</button><button class="btn">${I("download-simple")}Exportar CSV</button></div><div class="pbody" tabindex="0" role="region" aria-label="Contenido del panel">${bodyHTML}</div></section>`;
+}
+function statusBar(o){
+  $("status").innerHTML = `<button class="seg"><span class="dot ${o.dot}"></span><b>${o.on?`<span class="sr-only">Conexión </span>${MOCK.conn.alias}`:"Sin conexión"}</b></button>`+(o.msg?`<span class="seg">${o.msg}</span>`:"")+`<span class="sp"></span>`+(o.tx?`<span class="seg tx"><b>${o.tx}</b></span>`:"")+`<span class="seg">${o.pos||"Ln 5, Col 28"}</span><span class="seg">UTF-8</span><span class="seg">LF</span><span class="seg">Oracle 12.1</span>`;
+}
+
+function render(state){
+  const on=state!=="sin-conexion"; const tx=state==="transaccion";
+  titlebar(on, state==="paleta");
+  activity(on?"objetos":"conexiones");
+  side(state);
+
+  let docs, active=0, lines, opts={}, crumb;
+  if(state==="paquete"){ docs=[{icon:"file-sql",title:"SQL"},{icon:"package",title:"AS_PDF3_MOD (PACKAGE)"},{icon:"package",title:"AS_PDF3_MOD (PACKAGE BODY)"}]; active=1; lines=MOCK.PKG_SPEC; opts={activeLine:1}; crumb=["desa02","ANAMNESIS","Paquetes","AS_PDF3_MOD · especificación"];
+  } else if(state==="error"){ docs=[{icon:"file-sql",title:"consulta_clientes.sql"}]; lines=MOCK.SQL_ERROR; opts={errorLine:MOCK.ERROR.line}; crumb=["desa02","ANAMNESIS","consulta_clientes.sql"];
+  } else if(tx){ docs=[{icon:"file-sql",title:"SQL",dirty:true}]; lines=MOCK.SQL_TX; opts={activeLine:3}; crumb=["desa02","ANAMNESIS","Script sin título"];
+  } else { docs=[{icon:"file-sql",title:"SQL"}]; lines=MOCK.SQL_QUERY; opts={activeLine:5}; crumb=[on?"desa02":"Sin conexión","ANAMNESIS","Script sin título"]; }
+
+  let pan, st;
+  const connLabel=`${MOCK.conn.user}@${MOCK.conn.alias}`;
+  if(state==="sin-conexion"){
+    pan=panel("Resultados","Sin resultados",`<div class="empty"><strong>Todavía no hay resultados</strong><span>Elegí una conexión en el panel lateral y ejecutá con F5. Podés editar archivos .sql sin conexión.</span></div>`);
+    st={on:false,dot:"",msg:"Elegí una conexión guardada para empezar"};
+  } else if(state==="error"){
+    pan=panel("Resultados","<b>Error</b> · 1 sentencia · 52 ms",`<div class="msg err" role="alert">${I("warning-circle")}<h3>${MOCK.ERROR.code}: ${MOCK.ERROR.text}</h3><button class="btn" style="grid-column:3;grid-row:1">${I("caret-right")}Ir a la línea ${MOCK.ERROR.line}</button><p>Sentencia 1 · línea 3, columna 8 · “SUCURSALES” no existe en el esquema ANAMNESIS</p><pre>${E(MOCK.ERROR.detail)}</pre></div>`);
+    st={on:true,dot:"err",msg:"Error en la ejecución",pos:"Ln 3, Col 8"};
+  } else if(tx){
+    pan=panel("Resultados","<b>3 filas actualizadas</b> · 41 ms",`<div class="msg warn" role="status">${I("info")}<h3>Transacción abierta con 3 cambios en CLIENTE</h3><span style="grid-column:3;grid-row:1;display:flex;gap:8px"><button class="btn primary">${I("check")}Confirmar</button><button class="btn">${I("arrow-counter-clockwise")}Deshacer</button></span><p>Se pierden si cerrás la conexión sin confirmar.</p></div>`);
+    st={on:true,dot:"warn",msg:"3 filas actualizadas · 41 ms",tx:"Transacción pendiente (3)",pos:"Ln 3, Col 44"};
+  } else if(state==="paquete"){
+    pan=panel("Objeto","<b>AS_PDF3_MOD</b> · Paquete · VÁLIDO",`<dl class="kv"><dt>Objeto</dt><dd>ANAMNESIS.AS_PDF3_MOD</dd><dt>Tipo</dt><dd>Paquete · especificación y cuerpo</dd><dt>Última modificación</dt><dd>12/08/2026 16:41</dd><dt>Líneas</dt><dd>16 en la especificación · 20 en el cuerpo</dd><dt></dt><dd class="row"><button class="btn">${I("file-text")}Cargar DDL</button><button class="btn">${I("file-sql")}Con DBMS_METADATA</button></dd></dl>`);
+    st={on:true,dot:"ok",msg:"DDL cargado en 2 pestañas: especificación y cuerpo",pos:"Ln 1, Col 1"};
+  } else {
+    pan=panel("Resultados",`<b>14 filas</b> · 6 columnas · 38 ms`,gridB());
+    st={on:true,dot:"ok",msg:"Consulta completada"};
+  }
+  $("col").innerHTML = docTabs(docs,active)+crumbs(crumb)+actions(on,tx)+`<div class="editor">${MOCK.editorHTML(lines,opts)}</div><div class="splitter" role="separator" aria-orientation="horizontal" aria-label="Divisor entre editor y resultados" aria-valuenow="58" aria-valuemin="20" aria-valuemax="85" tabindex="0"></div>`+pan;
+  statusBar(st);
+}
+MOCK.init({theme:"dark",title:"B · Banco de trabajo",states:[["resultados","Resultados"],["paquete","Paquete: spec y body"],["sin-conexion","Sin conexión"],["paleta","Paleta de comandos"],["error","Error de ejecución"],["transaccion","Transacción pendiente"]],render});
+</script>
+</body>
+</html>

@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="es" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SQLTools — Propuesta C: Editor primero</title>
+<link rel="stylesheet" href="../shared/fonts.css">
+<style>
+/* Tokens. Monocromo + un acento ámbar (marca la acción y lo que requiere atención). */
+:root{
+  --bg:#f4f4f5; --surface:#ffffff; --raised:#fafafa; --sunken:#e8e8ea;
+  --line:#dcdce0; --line-strong:#a6a6ad;
+  --text:#18181b; --muted:#52525b; --faint:#5c5c66;
+  --accent:#f59e0b; --accent-ink:#1c1304; --accent-soft:#fdf0d5; --accent-text:#8a4a00;
+  --ok:#17794a; --err:#b3261e; --err-soft:#fbe4e1;
+  --shadow:0 12px 32px rgba(24,24,27,.22);
+  --font:"IBM Plex Sans","Segoe UI",system-ui,sans-serif; --mono:"JetBrains Mono",Consolas,monospace;
+  --t-k:#9a4a00; --t-s:#2f6b49; --t-n:#355a9e; --t-c:#5c5c66;
+  color-scheme:light;
+}
+[data-theme="dark"]{
+  --bg:#101012; --surface:#17171a; --raised:#1c1c20; --sunken:#0b0b0d;
+  --line:#2a2a30; --line-strong:#47474f;
+  --text:#e8e8ec; --muted:#a1a1ab; --faint:#8f8f9a;
+  --accent:#fbbf24; --accent-ink:#1c1304; --accent-soft:#33280e; --accent-text:#fcd377;
+  --ok:#4cc38a; --err:#f28b82; --err-soft:#3a1d1b;
+  --shadow:0 14px 40px rgba(0,0,0,.65);
+  --t-k:#f0b44c; --t-s:#8fcf9f; --t-n:#8fb1f2; --t-c:#8f8f9a;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font:13px/1.4 var(--font);display:flex;flex-direction:column;min-height:100vh}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+[data-theme="light"] :focus-visible{outline-color:#b45309}
+kbd{font:500 11px var(--mono);color:var(--muted);background:var(--raised);border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+ul{list-style:none;margin:0;padding:0}
+.app{display:grid;grid-template-rows:38px 1fr 24px;height:100vh;min-height:0;position:relative}
+body:not(.shot) .app{height:calc(100vh - 37px)}
+
+/* Barra superior: documentos en línea para ahorrar altura */
+.top{display:flex;align-items:stretch;background:var(--sunken);border-bottom:1px solid var(--line-strong);padding-left:4px}
+.drawer-btn{display:flex;align-items:center;gap:6px;margin:5px 6px 5px 2px;padding:0 10px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--text)}
+.drawer-btn:hover{border-color:var(--line-strong)}
+.drawer-btn[aria-expanded="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-text)}
+.drawer-btn kbd{margin-left:2px}
+.tabs{display:flex;align-items:flex-end;min-width:0;flex:1}
+.tabs ul{display:flex;align-items:flex-end;gap:2px;min-width:0}
+.tab{display:flex;align-items:center;height:30px;border:1px solid transparent;border-bottom:0;border-radius:7px 7px 0 0;color:var(--muted);max-width:270px}
+.tab:hover{color:var(--text);background:color-mix(in srgb,var(--surface) 60%,transparent)}
+.tab.is-active{background:var(--surface);color:var(--text);border-color:var(--line-strong);height:31px;margin-bottom:-1px;box-shadow:inset 0 2px 0 var(--accent)}
+.tab-btn{font:inherit;display:flex;align-items:center;gap:8px;height:100%;padding:0 4px 0 10px;border:0;background:transparent;color:inherit;min-width:0}
+.tab .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tab .x{width:20px;height:20px;margin-right:4px;display:grid;place-items:center;border:0;border-radius:4px;background:transparent;color:var(--faint)}
+.tab .x:hover{background:var(--sunken);color:var(--text)}
+.tab .dirty{width:8px;height:8px;border-radius:50%;background:var(--accent);margin:0 8px 0 4px}
+.plus{align-self:center;width:26px;height:26px;margin-left:2px;display:grid;place-items:center;border:0;background:transparent;border-radius:6px;color:var(--muted)}
+.plus:hover{background:var(--surface);color:var(--text)}
+.tr{display:flex;align-items:center;gap:6px;padding:0 8px}
+.chip{display:inline-flex;align-items:center;gap:8px;height:28px;padding:0 6px 0 10px;border:1px solid var(--line);border-radius:7px;background:var(--surface)}
+.chip:hover,.chip[aria-expanded="true"]{border-color:var(--line-strong)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--faint);flex:none}
+.dot.ok{background:var(--ok)} .dot.warn{background:var(--accent)} .dot.err{background:var(--err)}
+.env{font:600 10px/16px var(--mono);letter-spacing:.04em;padding:0 6px;border-radius:4px;background:var(--sunken);color:var(--muted)}
+.env.prod{background:var(--err-soft);color:var(--err)}
+.ib{display:inline-grid;place-items:center;width:28px;height:28px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--muted)}
+.ib:hover:not(:disabled){background:var(--surface);color:var(--text)}
+
+/* Zona principal */
+.stage{position:relative;display:grid;min-height:0;grid-template-rows:minmax(0,1fr)}
+.stage.dock-bottom{grid-template-rows:minmax(110px,1fr) 6px minmax(160px,.85fr)}
+.stage.dock-right{grid-template-columns:minmax(0,.9fr) 6px minmax(0,1.1fr);grid-template-rows:minmax(0,1fr)}
+.pane-editor{display:grid;grid-template-rows:auto 1fr 32px;min-width:0;min-height:0;background:var(--surface);container-type:inline-size}
+.banner{display:flex;align-items:center;gap:10px;padding:6px 14px;background:var(--accent-soft);color:var(--accent-text);border-bottom:1px solid color-mix(in srgb,var(--accent) 45%,transparent)}
+.banner b{font-weight:600}
+.banner .sp{flex:1}
+.editor{overflow:auto;min-height:0}
+.cm{font:13.5px/21px var(--mono);font-variant-ligatures:none;padding:10px 0;min-width:max-content}
+.cm:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.cm-row{display:flex}
+.cm-ln{width:52px;text-align:right;padding-right:14px;color:var(--faint);user-select:none;flex:none;font-variant-numeric:tabular-nums}
+.cm-line{white-space:pre;flex:1;padding-right:16px}
+.cm-active{background:var(--raised)} .cm-active .cm-ln{color:var(--text)}
+.cm-error{background:var(--err-soft);box-shadow:inset 3px 0 0 var(--err)} .cm-error .cm-ln{color:var(--err)}
+.diag{margin:0 16px 4px 52px;padding:8px 12px;border-left:3px solid var(--err);background:var(--surface);border:1px solid var(--err);border-left-width:3px;border-radius:0 6px 6px 0;font:12px/18px var(--font);display:flex;gap:10px;align-items:flex-start}
+.diag .ic{color:var(--err);margin-top:1px}
+.diag b{display:block;font-weight:600;color:var(--text)}
+.diag span{color:var(--muted)}
+.t-k{color:var(--t-k)} .t-s{color:var(--t-s)} .t-n{color:var(--t-n)} .t-c{color:var(--t-c)}
+.runbar{display:flex;align-items:center;gap:4px;padding:0 10px;border-top:1px solid var(--line);background:var(--raised)}
+.rb{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--text)}
+.rb:hover:not(:disabled){background:var(--sunken)}
+.rb:disabled{color:var(--faint);opacity:.7;cursor:default}
+.rb.run{background:var(--accent);color:var(--accent-ink);font-weight:500}
+.rb.run:hover:not(:disabled){background:var(--accent);filter:brightness(1.06)}
+.rb.run kbd{background:transparent;border-color:color-mix(in srgb,var(--accent-ink) 35%,transparent);color:var(--accent-ink)}
+.rb .badge{background:var(--accent);color:var(--accent-ink);border-radius:8px;padding:0 6px;font:600 11px/16px var(--font)}
+.runbar .sep{width:1px;height:16px;background:var(--line);margin:0 6px}
+.runbar .sp{flex:1}
+.runbar .pos{white-space:nowrap;color:var(--muted);font-variant-numeric:tabular-nums;font-size:12px;padding-left:10px}
+.switch{display:inline-flex;align-items:center;gap:8px;height:24px;padding:0 6px;border:0;background:transparent;color:var(--muted)}
+.switch i{width:26px;height:14px;border-radius:8px;background:var(--sunken);border:1px solid var(--line-strong);position:relative}
+.switch i::after{content:"";position:absolute;top:1px;left:1px;width:10px;height:10px;border-radius:50%;background:var(--muted)}
+
+.splitter{background:var(--sunken);border-top:1px solid var(--line);border-bottom:1px solid var(--line);cursor:row-resize}
+.dock-right .splitter{border:0;border-left:1px solid var(--line);border-right:1px solid var(--line);cursor:col-resize}
+
+/* Dock de resultados */
+.dock{display:grid;grid-template-rows:34px 1fr;min-width:0;min-height:0;background:var(--surface)}
+.dh{display:flex;align-items:center;gap:6px;padding:0 8px 0 4px;border-bottom:1px solid var(--line);background:var(--raised)}
+.dh [role="tablist"]{display:flex;gap:2px}
+.dtab{height:34px;padding:0 10px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--muted)}
+.dtab:hover{color:var(--text)}
+.dtab[aria-selected="true"]{color:var(--text);border-bottom-color:var(--accent);font-weight:500}
+.dh .meta{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums}
+.dh .meta b{color:var(--text);font-weight:500}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden;background:var(--surface)}
+.seg button{width:28px;height:24px;display:grid;place-items:center;border:0;background:transparent;color:var(--muted)}
+.seg button:hover{color:var(--text);background:var(--sunken)}
+.seg button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent-text)}
+.btn{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:6px;border:1px solid var(--line-strong);background:var(--surface);color:var(--text)}
+.btn:hover{background:var(--sunken)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:500}
+.pbody{overflow:auto;min-height:0}
+.grid{border-collapse:separate;border-spacing:0;width:100%;font-variant-numeric:tabular-nums}
+.grid th,.grid td{padding:0 14px;height:27px;white-space:nowrap;text-align:left;border-bottom:1px solid var(--line)}
+.grid thead th{position:sticky;top:0;z-index:1;background:var(--surface);height:30px;font-weight:600;border-bottom:1px solid var(--line-strong);font-size:12px;color:var(--muted)}
+.grid .num{text-align:right}
+.grid .rn{width:44px;text-align:right;color:var(--faint);font-weight:400}
+.grid tbody tr:hover td{background:var(--raised)}
+.grid tbody tr.sel td,.grid tbody tr.sel th{background:var(--accent-soft)}
+.grid td.null{color:var(--faint);font:11px var(--mono)}
+.kv{display:grid;grid-template-columns:150px 1fr;gap:6px 16px;padding:14px 18px;max-width:640px}
+.kv dt{color:var(--muted)} .kv dd{margin:0}
+.empty{display:grid;gap:10px;justify-items:start;padding:26px 22px;color:var(--muted);max-width:540px}
+.empty strong{color:var(--text);font-weight:500;font-size:14px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.msg{display:grid;grid-template-columns:20px 1fr auto;gap:2px 10px;padding:14px 18px;align-items:start}
+.msg.err>.ic{color:var(--err)} .msg.warn>.ic{color:var(--accent-text)}
+.msg>.ic{margin-top:2px}
+.msg h2{margin:0;font-size:13px;font-weight:600}
+.msg p{margin:0;grid-column:2;color:var(--muted)}
+
+/* Cajón de objetos (superpuesto, no reduce el editor) */
+.drawer{position:absolute;z-index:20;left:0;top:0;bottom:0;width:336px;display:flex;flex-direction:column;background:var(--surface);border-right:1px solid var(--line-strong);box-shadow:var(--shadow)}
+.drawer-head{display:flex;align-items:center;gap:6px;padding:10px 10px 6px 14px}
+.drawer-head h2{margin:0;font-size:13px;font-weight:600;flex:1}
+.dsearch{margin:0 12px 8px;display:flex;align-items:center;gap:6px;height:30px;padding:0 8px;border:1px solid var(--line);border-radius:7px;background:var(--raised);color:var(--muted)}
+.dsearch:focus-within{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.dsearch input{border:0;background:transparent;font:inherit;color:var(--text);outline:none;width:100%;min-width:0}
+.dsearch input::placeholder{color:var(--faint)}
+.pills{display:flex;flex-wrap:wrap;gap:4px;padding:0 12px 8px}
+.pill{height:24px;padding:0 10px;border:1px solid var(--line);border-radius:12px;background:transparent;color:var(--muted);font-size:12px}
+.pill:hover{color:var(--text);border-color:var(--line-strong)}
+.pill[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-text)}
+.dmeta{padding:6px 14px;color:var(--muted);font-size:12px;border-top:1px solid var(--line);display:flex;justify-content:space-between}
+.objs{overflow:auto;flex:1;padding:2px 6px 8px}
+.obj{display:flex;align-items:center;gap:8px;height:28px;padding:0 10px;border-radius:6px}
+.obj:hover{background:var(--sunken)}
+.obj.is-selected{background:var(--accent-soft);color:var(--accent-text)}
+.obj-ic{color:var(--muted)} .obj.is-selected .obj-ic{color:var(--accent-text)}
+.obj-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.obj-type{font-size:11px;color:var(--faint)} .obj.is-selected .obj-type{color:var(--accent-text)}
+.popover{position:absolute;z-index:30;right:8px;top:42px;width:340px;background:var(--surface);border:1px solid var(--line-strong);border-radius:10px;box-shadow:var(--shadow);overflow:hidden}
+.popover h2{margin:0;padding:10px 14px 4px;font-size:11px;font-weight:500;color:var(--muted)}
+.conrow{display:grid;grid-template-columns:1fr auto;gap:2px 10px;align-items:center;padding:8px 14px}
+.conrow:hover{background:var(--raised)}
+.conrow b{font-weight:500} .conrow span{color:var(--muted);font-size:12px}
+.pfoot{display:flex;justify-content:space-between;padding:8px 14px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+
+.status-wrap{background:var(--sunken);border-top:1px solid var(--line)}
+.status{display:flex;align-items:center;gap:14px;height:100%;padding:0 12px;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+.status .s{display:flex;align-items:center;gap:6px;white-space:nowrap} .status .sp{flex:1} .status b{color:var(--text);font-weight:500}
+.status .tx{color:var(--accent-text)} .status .tx b{color:var(--accent-text)}
+
+.scrim{position:fixed;inset:0;background:rgba(8,8,10,.5);display:none;justify-content:center;align-items:flex-start;padding-top:12vh;z-index:60}
+.scrim.open{display:flex}
+.palette{width:580px;max-width:92vw;background:var(--surface);border:1px solid var(--line-strong);border-radius:12px;box-shadow:var(--shadow);overflow:hidden}
+.palette .q{display:flex;align-items:center;gap:8px;padding:0 14px;height:48px;border-bottom:1px solid var(--line);color:var(--accent-text)}
+.palette .q input{flex:1;border:0;background:transparent;font:inherit;font-size:15px;color:var(--text);outline:none}
+.pal-group{margin:0;padding:8px 14px 2px;font-size:11px;font-weight:500;color:var(--muted)}
+.pal-row{display:grid;grid-template-columns:20px 1fr auto auto;gap:12px;align-items:center;height:34px;padding:0 14px}
+.pal-row.is-active{background:var(--accent-soft);color:var(--accent-text)}
+.pal-row .ic{color:var(--muted)} .pal-row.is-active .ic{color:var(--accent-text)}
+.pal-id{font:11px var(--mono);color:var(--faint)} .pal-row.is-active .pal-id{color:var(--accent-text)}
+.pal-foot{display:flex;gap:14px;padding:8px 14px;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+@media (prefers-reduced-motion:no-preference){.rb,.tab,.obj,.dtab,.pill{transition:background-color .12s,color .12s,border-color .12s}}
+@media (max-width:1280px){.drawer-btn kbd{display:none}}
+/* Editor angosto (panel a la derecha): la barra de ejecución conserva lo esencial */
+@container (max-width:720px){.runbar .pos{display:none}.runbar .switch{font-size:0;gap:0;padding:0 4px}.rb:not(.run){padding:0 6px}.rb:not(.run) kbd{display:none}}
+.drawer-scrim{position:absolute;inset:0;z-index:15;background:rgba(10,10,14,.28)}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <header class="top" id="top"></header>
+  <main class="stage" id="stage"></main>
+  <footer class="status-wrap"><div class="status" id="status" role="status"></div></footer>
+</div>
+<div class="scrim" id="scrim" role="presentation">
+  <div class="palette" role="dialog" aria-modal="true" aria-label="Ir a comando u objeto">
+    <div class="q"><svg class="ic"><use href="#i-command"/></svg><input aria-label="Ir a comando u objeto" value="cl" autocomplete="off"></div>
+    <h2 class="pal-group">Objetos</h2>
+    <ul role="listbox" aria-label="Objetos coincidentes"><li class="pal-row is-active" role="option" aria-selected="true"><svg class="ic"><use href="#i-table"/></svg><span>CLIENTE</span><span class="pal-id">ANAMNESIS · Tabla</span><kbd>Enter</kbd></li><li class="pal-row" role="option" aria-selected="false"><svg class="ic"><use href="#i-table"/></svg><span>CLIENTE_JN</span><span class="pal-id">ANAMNESIS · Tabla</span><span></span></li></ul>
+    <h2 class="pal-group">Comandos</h2>
+    <ul role="listbox" aria-label="Comandos coincidentes"><li class="pal-row" role="option" aria-selected="false"><svg class="ic"><use href="#i-command"/></svg><span>Cargar DDL del objeto</span><span class="pal-id">Script.LoadDDL</span><kbd>Ctrl+F12</kbd></li><li class="pal-row" role="option" aria-selected="false"><svg class="ic"><use href="#i-command"/></svg><span>Limpiar resultados</span><span class="pal-id">Grid.Clear</span><kbd>Ctrl+L</kbd></li></ul>
+    <div class="pal-foot"><span><kbd>↑</kbd> <kbd>↓</kbd> moverse</span><span><kbd>Enter</kbd> abrir</span><span><kbd>Esc</kbd> cerrar</span><span>Sin prefijo mezcla objetos y comandos</span></div>
+  </div>
+</div>
+
+<script src="../shared/icons.js"></script>
+<script src="../shared/mock.js"></script>
+<script>
+const I=(n,c)=>window.icon(n,c); const $=(id)=>document.getElementById(id); const E=MOCK.esc;
+
+function topbar(items, active, o){
+  $("top").innerHTML = `<h1 class="sr-only">SQLTools, editor Oracle</h1><button class="drawer-btn" aria-expanded="${o.drawer}" aria-controls="drawer" id="drawer-btn">${I("sidebar-simple")}<span>Objetos</span><kbd>Alt+3</kbd></button><div class="tabs"><ul aria-label="Documentos abiertos">`+items.map((t,i)=>`<li class="tab${i===active?" is-active":""}"><button class="tab-btn"${i===active?' aria-current="true"':""}>${I(t.icon)}<span class="t">${E(t.title)}</span>${t.dirty?'<span class="dirty" role="img" aria-label="Sin guardar"></span>':""}</button>${t.dirty?"":`<button class="x" aria-label="Cerrar ${E(t.title)}">${I("x")}</button>`}</li>`).join("")+`</ul><button class="plus" aria-label="Nuevo documento">${I("plus")}</button></div><div class="tr"><button class="chip" id="chip" aria-expanded="${o.pop}" aria-haspopup="dialog"><span class="dot ${o.on?"ok":""}"></span>${o.on?`<span class="sr-only">Conexión: </span>${MOCK.conn.user}@${MOCK.conn.alias}<span class="env">DESA</span>`:"Sin conexión"}${I("caret-down")}</button><button class="ib" id="open-palette" aria-label="Ir a comando u objeto (Ctrl+Shift+P)" title="Ir a… (Ctrl+Shift+P)">${I("magnifying-glass")}</button><button class="ib" id="theme" aria-label="Cambiar tema" title="Tema">${I("circle-half")}</button><button class="ib" aria-label="Más opciones: idioma, ajustes" title="Más opciones">${I("dots-three")}</button></div>`;
+  $("theme").onclick=()=>document.querySelector("[data-theme-btn]").click();
+  $("open-palette").onclick=()=>document.querySelector('[data-state="paleta"]').click();
+}
+function editorC(lines,o){
+  return `<div class="cm" role="textbox" aria-multiline="true" aria-label="Editor SQL" tabindex="0">`+lines.map((l,i)=>{const n=i+1; const cls=o.errorLine===n?" cm-error":o.activeLine===n?" cm-active":""; let h=`<div class="cm-row${cls}"><span class="cm-ln" aria-hidden="true">${n}</span><span class="cm-line">${MOCK.highlight(l)||"&nbsp;"}</span></div>`; if(o.errorLine===n) h+=`<div class="diag" role="alert">${I("warning-circle")}<div><b>${MOCK.ERROR.code}: ${MOCK.ERROR.text}</b><span>“SUCURSALES” no existe en el esquema ANAMNESIS · línea 3, columna 8</span></div></div>`; return h;}).join("")+`</div>`;
+}
+function runbar(on,tx,pos){
+  return `<div class="runbar" role="toolbar" aria-label="Ejecución"><button class="rb run"${on?"":" disabled"} title="Ejecutar (F5)">${I("play")}Ejecutar <kbd>F5</kbd></button><button class="rb"${on?"":" disabled"} aria-label="Ejecutar sentencia actual" title="Ejecutar sentencia (Ctrl+Enter)">${I("rows")}Sentencia</button><button class="rb" disabled aria-label="Cancelar ejecución" title="Cancelar">${I("stop")}</button><span class="sep"></span><button class="rb" aria-label="Formatear SQL" title="Formatear (Ctrl+K, E)">${I("text-align-left")}</button><button class="rb"${on?"":" disabled"} aria-label="Plan de ejecución" title="Plan (F10)">${I("tree-structure")}</button><span class="sep"></span><button class="rb"${tx?"":" disabled"} aria-label="${tx?"Confirmar (commit): 3 cambios pendientes":"Confirmar (commit)"}" title="Confirmar">${I("check")}${tx?'<span class="badge">3</span>':""}</button><button class="rb"${tx?"":" disabled"} aria-label="Deshacer (rollback)" title="Deshacer">${I("arrow-counter-clockwise")}</button><span class="sp"></span><button class="switch" role="switch" aria-checked="false" title="Autocommit"><i></i>Autocommit</button><span class="pos">${pos}</span></div>`;
+}
+function gridC(){
+  const head=MOCK.GRID.cols.map(c=>`<th scope="col" class="${c.num?"num":""}" title="${c.type}">${c.name}<span class="sr-only"> (${c.type})</span></th>`).join("");
+  const body=MOCK.GRID.rows.map((r,i)=>`<tr${i===2?' class="sel" aria-selected="true"':""}><th scope="row" class="rn">${i+1}</th>${r.map((v,j)=>{const c=MOCK.GRID.cols[j]; if(v===null) return `<td class="${c.num?"num ":""}null">NULL</td>`; if(c.num&&c.type.includes(",")) return `<td class="num">${MOCK.n2.format(v)}</td>`; if(c.num) return `<td class="num">${j===0||j===5?v:MOCK.n0.format(v)}</td>`; return `<td>${E(v)}</td>`;}).join("")}</tr>`).join("");
+  return `<table class="grid" aria-label="Resultados de la consulta"><thead><tr><th class="rn" scope="col"><span class="sr-only">Fila</span>#</th>${head}</tr></thead><tbody>${body}</tbody></table>`;
+}
+function dock(active, meta, body, layout){
+  const names=["Resultados","Historial","Plan","Objeto","Estadísticas","Salida"];
+  return `<section class="dock" aria-label="Panel de resultados"><div class="dh"><div role="tablist" aria-label="Paneles de resultados">${names.map(n=>`<button class="dtab" role="tab" aria-selected="${n===active}">${n}</button>`).join("")}</div><span class="meta">${meta}</span><div class="seg" role="group" aria-label="Ubicación del panel"><button aria-pressed="${layout==="bottom"}" aria-label="Panel abajo" title="Panel abajo">${I("rows")}</button><button aria-pressed="${layout==="right"}" aria-label="Panel a la derecha" title="Panel a la derecha">${I("columns")}</button><button aria-pressed="false" aria-label="Ocultar panel" title="Ocultar panel (Ctrl+J)">${I("arrows-in-line-vertical")}</button></div><button class="btn">${I("download-simple")}Exportar CSV</button></div><div class="pbody" tabindex="0" role="region" aria-label="Contenido del panel">${body}</div></section>`;
+}
+function drawer(pkg){
+  const t=pkg?"PACKAGE":"TABLE";
+  const pills=[["","Todos"],["TABLE","Tablas"],["VIEW","Vistas"],["PACKAGE","Paquetes"],["PROCEDURE","Procedimientos"],["FUNCTION","Funciones"],["TRIGGER","Triggers"],["SEQUENCE","Secuencias"],["TYPE","Tipos"],["SYNONYM","Sinónimos"]];
+  return `<aside class="drawer" id="drawer" aria-label="Explorador de objetos"><div class="drawer-head"><h2>Objetos · ANAMNESIS</h2><button class="ib" aria-label="Actualizar objetos" title="Actualizar">${I("arrow-clockwise")}</button><button class="ib" aria-label="Cerrar explorador" title="Cerrar (Esc)">${I("x")}</button></div><label class="dsearch">${I("magnifying-glass")}<span class="sr-only">Filtrar objetos</span><input placeholder="Filtrar objetos" aria-label="Filtrar objetos"></label><div class="pills" role="group" aria-label="Tipo de objeto">${pills.map(([v,l])=>`<button class="pill" aria-pressed="${v===t}">${l}</button>`).join("")}</div><div class="dmeta"><span>${MOCK.TYPE_LABEL[t]}</span><span>${MOCK.n0.format(MOCK.COUNTS[t])} objetos</span></div><ul class="objs" role="listbox" aria-label="Objetos">${MOCK.objectRows(pkg?"AS_PDF3_MOD":"CLIENTE",t)}</ul></aside>`;
+}
+function popover(){
+  const rows=[["desa02","DESA","anamnesis · Oracle 12c",""],["prod-replica","PROD","consulta · Oracle 19c","prod"],["local-xe","LOCAL","system · Oracle XE 21c",""]];
+  return `<div class="popover" role="dialog" aria-label="Elegir conexión"><h2>Conexiones guardadas</h2>${rows.map(([n,e,d,c],i)=>`<div class="conrow"><b>${n} <span class="env ${c}">${e}</span></b><button class="btn${i===0?" primary":""}">${I("plugs-connected")}Conectar</button><span>${d}</span></div>`).join("")}<div class="pfoot"><span>3 conexiones</span><span>${I("plus")} Nueva conexión…</span></div></div>`;
+}
+function statusBar(o){
+  $("status").innerHTML=`<span class="s"><span class="dot ${o.dot}"></span><b>${o.state}</b>${o.on?` · ${MOCK.conn.user}@${MOCK.conn.alias} · Oracle 12c`:""}</span>${o.msg?`<span class="s">${o.msg}</span>`:""}<span class="sp"></span>${o.tx?`<span class="s tx"><span class="dot warn"></span><b>${o.tx}</b></span>`:""}<span class="s">UTF-8</span><span class="s">LF</span>`;
+}
+
+function render(state){
+  const on=state!=="sin-conexion", tx=state==="transaccion", right=state==="dock-derecha", pkg=state==="paquete";
+  let docs=[{icon:"file-sql",title:"SQL"}], active=0, lines=MOCK.SQL_QUERY, opts={activeLine:5}, pos="Ln 5, Col 28";
+  if(pkg){docs=[{icon:"file-sql",title:"SQL"},{icon:"package",title:"AS_PDF3_MOD (PACKAGE)"},{icon:"package",title:"AS_PDF3_MOD (PACKAGE BODY)"}];active=1;lines=MOCK.PKG_SPEC;opts={activeLine:1};pos="Ln 1, Col 1";}
+  if(state==="error"){docs=[{icon:"file-sql",title:"consulta_clientes.sql"}];lines=MOCK.SQL_ERROR;opts={errorLine:MOCK.ERROR.line};pos="Ln 3, Col 8";}
+  if(tx){docs=[{icon:"file-sql",title:"SQL",dirty:true}];lines=MOCK.SQL_TX;opts={activeLine:3};pos="Ln 3, Col 44";}
+  topbar(docs,active,{on,drawer:pkg,pop:state==="sin-conexion"});
+  $("scrim").classList.toggle("open",state==="paleta");
+
+  let body, meta, activeTab="Resultados", st;
+  if(!on){ body=`<div class="empty"><strong>Todavía no hay resultados</strong><span>Conectate desde el selector de arriba para ejecutar con F5. También podés editar archivos .sql sin conexión.</span></div>`; meta="Sin resultados"; st={dot:"",state:"Sin conexión",msg:"Elegí una conexión guardada para empezar"}; }
+  else if(state==="error"){ body=`<div class="msg err" role="alert">${I("warning-circle")}<h2>${MOCK.ERROR.code}: ${MOCK.ERROR.text}</h2><button class="btn" style="grid-column:3;grid-row:1">${I("caret-right")}Ir a la línea ${MOCK.ERROR.line}</button><p>El detalle también aparece debajo de la línea 3 en el editor.</p></div>`; meta="<b>Error</b> · 52 ms"; st={dot:"err",state:"Error en la ejecución",on:true,msg:"1 sentencia · 52 ms"}; }
+  else if(tx){ body=`<div class="msg warn" role="status">${I("info")}<h2>3 filas actualizadas en CLIENTE</h2><span style="grid-column:3;grid-row:1;display:flex;gap:8px"><button class="btn primary">${I("check")}Confirmar</button><button class="btn">${I("arrow-counter-clockwise")}Deshacer</button></span><p>La transacción sigue abierta. Se pierde si cerrás la conexión sin confirmar.</p></div>`; meta="<b>3 filas</b> · 41 ms"; st={dot:"warn",state:"Conectado",on:true,msg:"3 filas actualizadas · 41 ms",tx:"Transacción pendiente (3)"}; }
+  else if(pkg){ activeTab="Objeto"; body=`<dl class="kv"><dt>Objeto</dt><dd>ANAMNESIS.AS_PDF3_MOD</dd><dt>Tipo</dt><dd>Paquete · especificación y cuerpo</dd><dt>Última modificación</dt><dd>12/08/2026 16:41</dd><dt>Líneas</dt><dd>16 en la especificación · 20 en el cuerpo</dd><dt></dt><dd class="row"><button class="btn">${I("file-text")}Cargar DDL</button><button class="btn">${I("file-sql")}Con DBMS_METADATA</button></dd></dl>`; meta="<b>AS_PDF3_MOD</b> · VÁLIDO"; st={dot:"ok",state:"Conectado",on:true,msg:"DDL cargado en 2 pestañas: especificación y cuerpo"}; }
+  else { body=gridC(); meta="<b>14 filas</b> · 38 ms"; st={dot:"ok",state:"Conectado",on:true,msg:"Consulta completada"}; }
+
+  const layout = right ? "right" : "bottom";
+  const banner = tx ? `<div class="banner" role="status">${I("info")}<span><b>Transacción pendiente</b> · 3 cambios sin confirmar en CLIENTE</span><span class="sp"></span><button class="btn primary">${I("check")}Confirmar</button><button class="btn">Deshacer</button></div>` : "";
+  const editorPane = `<div class="pane-editor">${banner||"<span></span>"}<div class="editor">${editorC(lines,opts)}</div>${runbar(on,tx,pos)}</div>`;
+  const dk = dock(activeTab, meta, body, layout);
+  $("stage").className = "stage dock-" + layout;
+  $("stage").innerHTML = (right
+      ? editorPane + `<div class="splitter" role="separator" aria-orientation="vertical" aria-label="Divisor entre editor y resultados" aria-valuenow="45" aria-valuemin="20" aria-valuemax="80" tabindex="0"></div>` + dk
+      : editorPane + `<div class="splitter" role="separator" aria-orientation="horizontal" aria-label="Divisor entre editor y resultados" aria-valuenow="58" aria-valuemin="20" aria-valuemax="85" tabindex="0"></div>` + dk)
+    + (pkg ? `<div class="drawer-scrim" aria-hidden="true"></div>` + drawer(true) : "") + (state==="sin-conexion" ? popover() : "");
+  statusBar(st);
+}
+MOCK.init({title:"C · Editor primero",states:[["resultados","Resultados"],["dock-derecha","Resultados a la derecha"],["paquete","Paquete: spec y body"],["sin-conexion","Sin conexión"],["paleta","Ir a… (objetos y comandos)"],["error","Error de ejecución"],["transaccion","Transacción pendiente"]],render});
+</script>
+</body>
+</html>
