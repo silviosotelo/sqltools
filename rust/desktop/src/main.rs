@@ -307,6 +307,22 @@ async fn rollback(state: State<'_, Arc<AppState>>, id: String) -> Result<(), Str
 }
 
 #[tauri::command]
+async fn transaction_pending(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+) -> Result<bool, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let session = state.session(&connection_id)?;
+        // Same lock as commit/rollback: never compete with a running statement.
+        let _guard = session.lock_execution();
+        catalog::transaction_pending(&session, state.query_options(&connection_id))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 fn history(state: State<'_, Arc<AppState>>) -> Vec<HistoryEntry> {
     state.history()
 }
@@ -912,6 +928,7 @@ fn main() {
             history,
             list_table_names,
             list_objects,
+            transaction_pending,
             count_objects,
             list_columns,
             load_ddl,

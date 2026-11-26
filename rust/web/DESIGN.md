@@ -69,3 +69,18 @@ ratio in either theme.
 - Radius stays 0–10 px, borders 1 px, no gradients.
 - Minimum window size is 1024×640; nothing may clip or scroll the page at that size.
 - Environment badges (F4) use `--env-<colour>-bg` / `--env-<colour>-fg`, each pair ≥ 4.5:1 in both themes.
+
+## Structure (workbench)
+
+- **Frame:** `TitleBar` (brand, command palette combobox, connection chip, theme, language) / `ActionStrip` (run, cancel, format, plan, commit, rollback, read-only, connect, overflow menu, breadcrumbs) / `ActivityBar` + side view / editor tabs + editor / bottom tabs / `StatusBar`.
+- **Side views** (`sideView`): Objects (`ObjectTree`), Connections (`ConnectionsView`), History (`HistoryView`), Stats (`StatsView`). Shortcuts and Settings are plain actions under the activity bar.
+- **Bottom tabs:** Results, Plan, Object, Output (`ResultsPanel`).
+- **Object tree:** counts at connect, one lazy `list_objects` per group on expand, virtualised rows of 26 px, WAI-ARIA tree driven by `aria-activedescendant` (the active row is always mounted), `aria-level/setsize/posinset` computed over the filtered tree. Pure logic and its tests live in `src/tree/`.
+- **Environment badge:** free label (1..12 characters) + one of 6 palette colors (`neutral, cyan, green, amber, red, violet`), purely visual. `--env-<color>-bg/-fg` tokens (6 x 2 themes, every pair >= 4.5:1, enforced by `environment.test.ts`). One component, `EnvBadge`, used in the chip, the connection list, the objects panel and the status bar.
+- **Transaction flag:** `dbms_transaction.local_transaction_id` is asked only when no statement runs (after a run, commit or rollback). It is a flag, never a counter; `FOR UPDATE` is a false positive, `READ ONLY` is not shown and DDL commits implicitly. Unknown on error.
+- **Palette:** `role=combobox` + `role=listbox`; `Ctrl+Shift+P` focuses it, arrows move, `Enter` runs, `Esc` closes and returns focus to the editor; the query is emptied on close.
+- **Minimum window:** 1024 x 640, no clipped controls and no page scroll (checked by `e2e/phase-f1.mjs`).
+
+## Verification (e2e, against the installed app)
+
+`rust/web/e2e/`: `flow.mjs` (regression flow against a golden), `axe-cdp.mjs` (8 views x 2 themes, must be 0), `keyboard-walk.mjs`, `commands-check.mjs` (283/226/213 digest), `tree.mjs`, `env.mjs`, `phase-f1/f2/f5.mjs`, `shots-final.mjs`. Launch with `launch-app.ps1` (detached), install with `install-local.ps1`.

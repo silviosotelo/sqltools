@@ -43,6 +43,7 @@ const pairs: Array<[string, string, number]> = [
   ["--success", "--surface", 4.5],
   ["--success", "--side", 4.5],
   ["--warn", "--warn-soft", 4.5],
+  ["--warn", "--side", 4.5], // pending-transaction indicator in the status bar
   ["--danger", "--surface", 4.5],
   ["--danger", "--err-soft", 4.5],
   ["--t-k", "--surface", 4.5],

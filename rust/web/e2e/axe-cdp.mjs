@@ -56,6 +56,36 @@ const VIEWS = {
     },
     expect: `Boolean(document.querySelector('.conn-list') && document.querySelector('.env-swatches') && document.querySelector('.env-preview .env-badge'))`,
   },
+  history: {
+    steps: async (cdp) => {
+      await cdp.click('.activity .act[aria-label="Historial"]');
+      await cdp.wait(500);
+    },
+    expect: `document.querySelectorAll('.history-row').length > 0`,
+  },
+  stats: {
+    steps: async (cdp) => {
+      await ensureConnected(cdp);
+      await cdp.click('.activity .act[aria-label="Estadísticas"]');
+      await cdp.waitFor(`document.querySelectorAll('.stats-scroll tbody tr').length > 0`, 15000);
+    },
+    expect: `document.querySelectorAll('.stats-scroll tbody tr').length > 0`,
+  },
+  menu: {
+    steps: async (cdp) => {
+      await cdp.click('.actionstrip button[aria-label="Más acciones"]');
+      await cdp.wait(300);
+    },
+    expect: `document.querySelectorAll('[role=menu] [role=menuitem]').length >= 4`,
+  },
+  palette: {
+    steps: async (cdp) => {
+      await cdp.key("Escape", "Escape", 27);
+      await cdp.click(".palette-btn");
+      await cdp.wait(500);
+    },
+    expect: `document.querySelectorAll('[role=listbox] [role=option]').length > 10`,
+  },
 };
 
 const names = viewsArg ?? Object.keys(VIEWS);

@@ -62,6 +62,8 @@ export const api = {
   cancel: (id: string) => invoke<void>("cancel", { id }),
   commit: (id: string) => invoke<void>("commit", { id }),
   rollback: (id: string) => invoke<void>("rollback", { id }),
+  transactionPending: (connectionId: string) =>
+    invoke<boolean>("transaction_pending", { connectionId }),
   history: () => invoke<HistoryEntry[]>("history"),
   listTableNames: (connectionId: string) =>
     invoke<string[]>("list_table_names", { connectionId }),

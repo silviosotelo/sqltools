@@ -1,6 +1,6 @@
 import type { Value } from "./types";
 
-export type Panel = "results" | "history" | "plan" | "object" | "stats" | "output";
+export type Panel = "results" | "plan" | "object" | "output";
 export type ObjectTab = "columns" | "constraints" | "indexes" | "triggers" | "grants";
 
 // Virtualised grid: fixed row height, only the visible window (plus overscan) is rendered.

@@ -22,13 +22,13 @@ const summary = {
 // The palette opens from the title bar button...
 await cdp.reload();
 await cdp.click(".palette-btn");
-summary.paletteFromButton = Boolean(await cdp.waitFor(`Boolean(document.querySelector('.palette input'))`, 3000));
+summary.paletteFromButton = Boolean(await cdp.waitFor(`Boolean(document.querySelector('[role=\"combobox\"]'))`, 3000));
 await cdp.key("Escape", "Escape", 27);
 await cdp.wait(300);
 // ... and from the accelerator.
 await cdp.evaluate(`document.querySelector('.cm-content')?.focus()`);
 await cdp.key("P", "KeyP", 80, 2 | 8);
-summary.paletteFromShortcut = Boolean(await cdp.waitFor(`Boolean(document.querySelector('.palette input'))`, 3000));
+summary.paletteFromShortcut = Boolean(await cdp.waitFor(`Boolean(document.querySelector('[role=\"combobox\"]'))`, 3000));
 cdp.close();
 
 console.log(JSON.stringify(summary, null, 2));

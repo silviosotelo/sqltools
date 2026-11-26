@@ -640,3 +640,54 @@ fn count_objects_matches_list_objects_per_type() {
     state.disconnect(&config.id).unwrap();
     let _ = fs::remove_file(&path);
 }
+
+#[test]
+#[ignore = "requires OS keyring and a real Oracle connection"]
+fn transaction_pending_follows_update_commit_rollback() {
+    use sqlt_app::catalog;
+    let user = std::env::var("SQLT_USER").expect("SQLT_USER");
+    let password = std::env::var("SQLT_PASS").expect("SQLT_PASS");
+    let alias = std::env::var("SQLT_ALIAS").expect("SQLT_ALIAS");
+    let path = std::env::temp_dir().join(format!("sqlt-txn-{}.json", std::process::id()));
+    let _ = fs::remove_file(&path);
+    let mut store = ConnectionStore::new(path.clone());
+    let mut config = ConnectionConfig::new("Txn", &user);
+    config.alias = Some(alias);
+    config.tns_admin = std::env::var("SQLT_TNS_ADMIN").ok();
+    config.oci_dir = std::env::var("SQLT_OCI_DIR").ok();
+    store.upsert(config.clone()).unwrap();
+    store.set_password(&config.id, &password).unwrap();
+    let state = AppState::with_store(store);
+    state.connect(&config.id).expect("connect");
+    let session = state.session(&config.id).expect("session");
+    let options = state.query_options(&config.id);
+
+    // `FOR UPDATE` opens a transaction without touching any data (no DDL, no DML on the database).
+    let open = |sql: &str| {
+        session
+            .query_with(sql, &[], options)
+            .expect("select for update")
+            .next_batch(1)
+            .expect("fetch");
+    };
+    assert!(!catalog::transaction_pending(&session, options).unwrap());
+    open("select 1 from dual for update");
+    assert!(
+        catalog::transaction_pending(&session, options).unwrap(),
+        "after for update"
+    );
+    session.commit().unwrap();
+    assert!(
+        !catalog::transaction_pending(&session, options).unwrap(),
+        "after commit"
+    );
+    open("select 1 from dual for update");
+    assert!(catalog::transaction_pending(&session, options).unwrap());
+    session.rollback().unwrap();
+    assert!(
+        !catalog::transaction_pending(&session, options).unwrap(),
+        "after rollback"
+    );
+    state.disconnect(&config.id).unwrap();
+    let _ = fs::remove_file(&path);
+}

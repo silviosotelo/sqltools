@@ -1,5 +1,6 @@
 import { Icon } from "../icons";
 import { useTranslation } from "../i18n";
+import { CommandPalette, type PaletteProps } from "./CommandPalette";
 import { EnvBadge } from "./EnvBadge";
 
 export type ThemeMode = "light" | "dark" | "system";
@@ -14,7 +15,7 @@ export function TitleBar({
   onTheme,
   language,
   onLanguage,
-  onPalette,
+  palette,
   onChip,
   environment,
 }: {
@@ -27,7 +28,7 @@ export function TitleBar({
   onTheme: () => void;
   language: "es" | "en";
   onLanguage: (language: "es" | "en") => void;
-  onPalette: () => void;
+  palette: PaletteProps;
   onChip: () => void;
   environment?: { label: string; color: string } | null;
 }) {
@@ -42,11 +43,7 @@ export function TitleBar({
         <strong>{t("app.title")}</strong>
         <span className="brand-sub">{t("app.subtitle")}</span>
       </div>
-      <button className="palette-btn" onClick={onPalette}>
-        <Icon name="search" />
-        <span>{t("searchCommands")}</span>
-        <kbd>Ctrl+Shift+P</kbd>
-      </button>
+      <CommandPalette {...palette} />
       <div className="titlebar-right">
         <button
           className="chip"

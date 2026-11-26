@@ -7,10 +7,8 @@ import type {
   ColumnMeta,
   ConstraintInfo,
   GrantInfo,
-  HistoryEntry,
   IndexInfo,
   ObjectInfo,
-  StatEntry,
   TriggerInfo,
   Value,
 } from "../types";
@@ -29,13 +27,8 @@ export interface ResultsPanelProps {
   dataPanelRef: RefObject<HTMLElement | null>;
   exportCsv: () => void | Promise<void>;
   setStatus: Dispatch<SetStateAction<string>>;
-  setSql: (sql: string) => void;
   setActiveCell: Dispatch<SetStateAction<{ column: string; value: string } | null>>;
   setCellView: Dispatch<SetStateAction<{ column: string; value: string } | null>>;
-  historyEntries: HistoryEntry[];
-  showHistory: () => void | Promise<void>;
-  showStats: () => void | Promise<void>;
-  stats: StatEntry[];
   plan: string;
   output: string[];
   selectedObject: ObjectInfo | null;
@@ -49,9 +42,9 @@ export interface ResultsPanelProps {
   grants: GrantInfo[];
 }
 
-/** The bottom panel: tab bar plus the content of the active tab (results grid, history, plan, object, stats, output). */
+/** The bottom panel: tab bar plus the content of the active tab (results grid, history, plan, object, output). */
 export function ResultsPanel({
-  panel, setPanel, columns, rows, scrollTop, setScrollTop, setRows, setColumns, running, isConnected, dataPanelRef, exportCsv, setStatus, setSql, setActiveCell, setCellView, historyEntries, showHistory, showStats, stats, plan, output, selectedObject, objectTab, loadDetail, loadDdlFor, objectColumns, constraints, indexes, triggers, grants,
+  panel, setPanel, columns, rows, scrollTop, setScrollTop, setRows, setColumns, running, isConnected, dataPanelRef, exportCsv, setStatus, setActiveCell, setCellView, plan, output, selectedObject, objectTab, loadDetail, loadDdlFor, objectColumns, constraints, indexes, triggers, grants,
 }: ResultsPanelProps) {
   const { t } = useTranslation();
   const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
@@ -67,12 +60,6 @@ export function ResultsPanel({
             {t("results")}
           </button>
           <button
-            className={panel === "history" ? "active" : ""}
-            onClick={() => void showHistory()}
-          >
-            {t("history")}
-          </button>
-          <button
             className={panel === "plan" ? "active" : ""}
             onClick={() => setPanel("plan")}
           >
@@ -83,12 +70,6 @@ export function ResultsPanel({
             onClick={() => setPanel("object")}
           >
             {t("object")}
-          </button>
-          <button
-            className={panel === "stats" ? "active" : ""}
-            onClick={() => void showStats()}
-          >
-            {t("stats")}
           </button>
           <button
             className={panel === "output" ? "active" : ""}
@@ -193,28 +174,6 @@ export function ResultsPanel({
               </tbody>
             </table>
             )}
-          </div>
-        )}
-
-        {panel === "history" && (
-          <div className="history">
-            {historyEntries.map((entry, index) => (
-              <button
-                key={index}
-                className="history-row"
-                onClick={() => setSql(entry.sql)}
-              >
-                <span>
-                  {new Date(entry.startedAt * 1000).toLocaleString()}
-                </span>
-                <code>{entry.sql}</code>
-                <span>
-                  {entry.rows} {entry.rows === 1 ? t("row") : t("rows")} ·{" "}
-                  {entry.elapsedMs} ms
-                  {entry.error ? ` · ${entry.error}` : ""}
-                </span>
-              </button>
-            ))}
           </div>
         )}
 
@@ -377,25 +336,6 @@ export function ResultsPanel({
           ) : (
             <pre className="plan output">{output.join("\n")}</pre>
           ))}
-
-        {panel === "stats" && (
-          <table className="grid">
-            <thead>
-              <tr>
-                <th>{t("stats")}</th>
-                <th>Value</th>
-              </tr>
-            </thead>
-            <tbody>
-              {stats.map(([name, value]) => (
-                <tr key={name}>
-                  <td>{name}</td>
-                  <td>{value}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
       </section>
     </>
   );

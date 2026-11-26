@@ -27,7 +27,7 @@ for (let i = 0; i < max; i++) {
     const wrapCs = wrap ? getComputedStyle(wrap) : null;
     const viaWrap = wrapCs ? ((wrapCs.outlineStyle !== 'none' && parseFloat(wrapCs.outlineWidth) > 0) || wrapCs.boxShadow !== 'none') : false;
     const name = a.getAttribute('aria-label') || (a.labels && a.labels[0] && a.labels[0].innerText.trim()) || a.getAttribute('title') || a.getAttribute('placeholder') || (a.innerText || '').trim().slice(0, 30) || a.tagName;
-    const area = a.closest('.titlebar') ? 'titlebar' : a.closest('.topbar') ? 'toolbar' : a.closest('.activity') ? 'activity' : a.closest('.objects-panel') ? 'side' : a.closest('.editor-shell') ? 'editor' : a.closest('.statusbar') ? 'status' : 'panel';
+    const area = a.closest('.titlebar') ? 'titlebar' : a.closest('.actionstrip') ? 'toolbar' : a.closest('.activity') ? 'activity' : a.closest('.objects-panel') ? 'side' : a.closest('.editor-shell') ? 'editor' : a.closest('.statusbar') ? 'status' : 'panel';
     return { name: name.replace(/\\s+/g, ' '), tag: a.tagName.toLowerCase(), area, visible: r.width > 0 && r.height > 0, inViewport: r.right <= window.innerWidth + 0.5 && r.bottom <= window.innerHeight + 0.5, indicator: Boolean(own || viaWrap) };
   })())`);
   const stop = info && JSON.parse(info);

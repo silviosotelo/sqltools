@@ -19,6 +19,7 @@ export function StatusBar({
   cursor,
   server,
   environment,
+  transactionPending,
 }: {
   dot: StatusDot;
   /** `user@alias`, or empty when there is no connection. */
@@ -29,6 +30,8 @@ export function StatusBar({
   /** Full server banner (shown shortened, full text as tooltip). */
   server: string;
   environment?: { label: string; color: string } | null;
+  /** null = unknown. */
+  transactionPending?: boolean | null;
 }) {
   const { t } = useTranslation();
   return (
@@ -43,6 +46,11 @@ export function StatusBar({
         <span className="seg msg" role="status" data-e2e="status-message">
           {message}
         </span>
+        {transactionPending === true && (
+          <span className="seg txn" data-e2e="txn-pending">
+            {t("transactionOpen")}
+          </span>
+        )}
         <span className="sp" />
         {cursor && (
           <span className="seg">

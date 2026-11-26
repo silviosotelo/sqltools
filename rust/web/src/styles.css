@@ -663,10 +663,10 @@ tr.spacer td {
 
 .history-row {
   display: grid;
-  grid-template-columns: 150px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 6px;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 2px;
+  padding: 4px 6px;
   border: 1px solid var(--line-soft);
   border-radius: 2px;
   background: var(--surface-alt);
@@ -1376,4 +1376,228 @@ kbd {
 .conn-view .section-body {
   max-height: none;
   overflow: visible;
+}
+
+.side-fill {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.side-fill .history,
+.stats-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.history-row span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.palette-anchor {
+  position: relative;
+  flex: 1 1 220px;
+  min-width: 0;
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+.palette-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.palette-field input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+}
+
+.palette-field:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.palette-pop {
+  position: absolute;
+  z-index: 30;
+  top: 32px;
+  left: 0;
+  right: 0;
+  max-height: 340px;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--control-border);
+  border-radius: 7px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.palette-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 26px;
+  padding: 0 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.palette-option > span:first-child {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-option .keys {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.palette-option em {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.palette-option.active,
+.palette-option:hover {
+  background: var(--accent-soft);
+}
+
+.palette-empty {
+  padding: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.actionstrip {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 32px;
+  padding: 0 8px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.actionstrip .check-inline {
+  font-size: 11px;
+}
+
+.tb.marked {
+  position: relative;
+}
+
+.tb.marked::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warn);
+}
+
+.more-wrap {
+  position: relative;
+}
+
+.more-menu {
+  position: absolute;
+  z-index: 30;
+  top: 26px;
+  left: 0;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.more-menu button {
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.more-menu button:hover:not(:disabled),
+.more-menu button:focus-visible {
+  background: var(--accent-soft);
+}
+
+.more-menu button:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+
+.breadcrumbs {
+  flex: 1;
+  min-width: 0;
+  margin-left: 12px;
+  overflow: hidden;
+}
+
+.breadcrumbs ol {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.breadcrumbs li {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.breadcrumbs .crumb {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.breadcrumbs li:last-child {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.crumb-sep {
+  display: inline-flex;
+  margin: 0 4px;
+}
+
+.statusbar .seg.txn {
+  color: var(--warn);
+  font-weight: 600;
 }

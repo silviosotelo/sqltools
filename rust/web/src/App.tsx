@@ -11,7 +11,10 @@ import { EditorTabs } from "./components/EditorTabs";
 import { ConnectionsView, type ConnectionDraft } from "./components/ConnectionsView";
 import { safeColor, validateEnvironment } from "./environment";
 import { ObjectTree } from "./components/ObjectTree";
+import { ActionStrip } from "./components/ActionStrip";
 import { EnvBadge } from "./components/EnvBadge";
+import { HistoryView } from "./components/HistoryView";
+import { StatsView } from "./components/StatsView";
 import { useObjectTree } from "./tree/useObjectTree";
 import { objectId, type TreeGroup } from "./tree/treeModel";
 import { ResultsPanel } from "./components/ResultsPanel";
@@ -309,6 +312,9 @@ export default function App() {
   } | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [showToolbar, setShowToolbar] = useState(true);
+  // null = unknown (never queried, or the last query failed).
+  const [transactionPending, setTransactionPending] = useState<boolean | null>(null);
+  const [transactionTick, setTransactionTick] = useState(0);
   const objectsFilterRef = useRef<HTMLInputElement | null>(null);
   const dataPanelRef = useRef<HTMLElement | null>(null);
   const profileDetailsRef = useRef<HTMLDetailsElement | null>(null);
@@ -365,7 +371,6 @@ export default function App() {
   );
   const [showStatus, setShowStatus] = useState(true);
   const [sideView, setSideView] = useState<SideView>("objects");
-  const showConnections = sideView === "connections";
   // Bumped every time the user opens the connections view: a save or connect that finishes later
   // may only close the view if the user has not left and come back since it started.
   const connectionsVisit = useRef(0);
@@ -473,8 +478,31 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState("");
   const [paletteIndex, setPaletteIndex] = useState(0);
+  useEffect(() => {
+    if (!paletteOpen) {
+      setPaletteQuery("");
+      setPaletteIndex(0);
+    }
+  }, [paletteOpen]);
 
   const isConnected = Boolean(selected && connected[selected]);
+  // Oracle is asked only when no statement is running (it would wait for the same session lock), after a run
+  // ends and after commit/rollback. A failed query leaves the state unknown instead of guessing.
+  useEffect(() => {
+    if (!isConnected) {
+      setTransactionPending(null);
+      return;
+    }
+    if (running) return;
+    let current = true;
+    api
+      .transactionPending(selected)
+      .then((pending) => current && setTransactionPending(pending))
+      .catch(() => current && setTransactionPending(null));
+    return () => {
+      current = false;
+    };
+  }, [isConnected, running, selected, transactionTick]);
   const environment = connections.find((config) => config.id === selected)?.environment ?? null;
   const treeGroups: TreeGroup[] = useMemo(
     () =>
@@ -933,6 +961,7 @@ export default function App() {
     if (!selected) return;
     try {
       await api.commit(selected);
+      setTransactionTick((tick) => tick + 1);
       setStatus(t("commit"));
     } catch (error) {
       setStatus(String(error));
@@ -943,6 +972,7 @@ export default function App() {
     if (!selected) return;
     try {
       await api.rollback(selected);
+      setTransactionTick((tick) => tick + 1);
       setStatus(t("rollback"));
     } catch (error) {
       setStatus(String(error));
@@ -952,7 +982,7 @@ export default function App() {
   const showHistory = async () => {
     try {
       setHistoryEntries(await api.history());
-      setPanel("history");
+      setSideView("history");
     } catch (error) {
       setStatus(String(error));
     }
@@ -978,7 +1008,7 @@ export default function App() {
     }
     try {
       setStats(await api.sessionStats(selected));
-      setPanel("stats");
+      setSideView("stats");
     } catch (error) {
       setStatus(String(error));
     }
@@ -2326,8 +2356,13 @@ export default function App() {
           : 0,
       );
     } else if (event.key === "Enter") {
+      event.preventDefault();
       const command = filteredCommands[paletteIndex];
       if (command) executeCommand(command.name);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      setPaletteOpen(false);
+      editorRef.current?.focus();
     }
   };
   const exportCsv = async () => {
@@ -2368,6 +2403,16 @@ export default function App() {
         }))
     : [];
 
+  const connectionLabel = connections.find((config) => config.id === selected)?.label ?? "";
+  const ddlKey = /^ddl:([^.]*)\.(.*)\.([^.]+)$/.exec(activeDoc.key ?? "");
+  const breadcrumb: string[] = [
+    isConnected ? connectionLabel || draft.user : t("noConnection"),
+    ...(isConnected ? [schema.trim() || draft.user.toUpperCase()] : []),
+    ...(ddlKey
+      ? [ddlKey[3], ddlKey[2]]
+      : [activeDoc.path ? (activeDoc.path.split(/[\\/]/).pop() ?? activeDoc.path) : t("untitledScript")]),
+  ];
+
   return (
     <div className="app">
       <pre className="print-script" ref={printScriptRef} aria-hidden="true" />
@@ -2389,202 +2434,52 @@ export default function App() {
         }
         language={language}
         onLanguage={setLanguage}
-        onPalette={() => setPaletteOpen(true)}
+        palette={{
+          open: paletteOpen,
+          query: paletteQuery,
+          index: paletteIndex,
+          commands: filteredCommands,
+          formatKeys,
+          onOpen: () => setPaletteOpen(true),
+          onClose: () => setPaletteOpen(false),
+          onQuery: (query) => {
+            setPaletteQuery(query);
+            setPaletteIndex(0);
+          },
+          onKeyDown: onPaletteKey,
+          onRun: executeCommand,
+        }}
         onChip={openConnections}
       />
-      <div
-        className={showToolbar ? "topbar" : "topbar hidden"}
-        role="group"
-        aria-label={t("toolbar")}
-      >
-        <div className="toolbar">
-          <button
-            className="tb"
-            title={t("execute")}
-            aria-label={t("execute")}
-            onClick={() => void run()}
-            disabled={!isConnected || running}
-          >
-            <Icon name="run" />
-          </button>
-          <button
-            className="tb"
-            title={t("cancel")}
-            aria-label={t("cancel")}
-            onClick={() => void cancel()}
-            disabled={!running}
-          >
-            <Icon name="stop" />
-          </button>
-          <button
-            className="tb"
-            title={t("commit")}
-            aria-label={t("commit")}
-            onClick={() => void commit()}
-            disabled={!isConnected || running}
-          >
-            <Icon name="commit" />
-          </button>
-          <button
-            className="tb"
-            title={t("rollback")}
-            aria-label={t("rollback")}
-            onClick={() => void rollback()}
-            disabled={!isConnected || running}
-          >
-            <Icon name="rollback" />
-          </button>
-          <span className="tb-sep" />
-          <button
-            className="tb"
-            title={t("format")}
-            aria-label={t("format")}
-            onClick={() => void formatSql()}
-            disabled={!sql.trim()}
-          >
-            <Icon name="format" />
-          </button>
-          <button
-            className="tb"
-            title={t("history")}
-            aria-label={t("history")}
-            onClick={() => void showHistory()}
-          >
-            <Icon name="history" />
-          </button>
-          <button
-            className="tb"
-            title={t("explain")}
-            aria-label={t("explain")}
-            onClick={() => void explain()}
-            disabled={!isConnected}
-          >
-            <Icon name="plan" />
-          </button>
-          <button
-            className="tb"
-            title={t("stats")}
-            aria-label={t("stats")}
-            onClick={() => void showStats()}
-            disabled={!isConnected}
-          >
-            <Icon name="stats" />
-          </button>
-          <button
-            className="tb"
-            title={t("exportCsv")}
-            aria-label={t("exportCsv")}
-            onClick={() => void exportCsv()}
-            disabled={!columns.length && !isConnected}
-          >
-            <Icon name="export" />
-          </button>
-          <span className="tb-sep" />
-          <button
-            className="tb"
-            title={t("workspaceSave")}
-            aria-label={t("workspaceSave")}
-            onClick={() => void saveWorkspace()}
-          >
-            <Icon name="save" />
-          </button>
-          <button
-            className="tb"
-            title={t("workspaceLoad")}
-            aria-label={t("workspaceLoad")}
-            onClick={() => void loadWorkspace()}
-          >
-            <Icon name="open" />
-          </button>
-          <button
-            className="tb"
-            title={t("commandPalette")}
-            aria-label={t("commandPalette")}
-            onClick={() => setPaletteOpen(true)}
-          >
-            <Icon name="commands" />
-          </button>
-          <span className="toolbar-spacer" />
-          {updateInfo && (
-            <button
-              className="tb"
-              title={`${t("installUpdate")}: ${updateInfo.version}`}
-              aria-label={t("installUpdate")}
-              onClick={() => void installUpdate()}
-              disabled={installing}
-            >
-              <Icon name="update" />
-            </button>
-          )}
-          <button
-            className="tb"
-            title={t("checkUpdates")}
-            aria-label={t("checkUpdates")}
-            onClick={() => void checkUpdates()}
-          >
-            <Icon name="update" />
-          </button>
-        </div>
-
-        <div className="toolbar">
-          <select
-            className="connection-select"
-            value={selected}
-            aria-label={t("connections")}
-            onChange={(event) => selectConnection(event.target.value)}
-          >
-            <option value="">—</option>
-            {connections.map((connection) => (
-              <option key={connection.id} value={connection.id}>
-                {connection.label} ({connection.user})
-              </option>
-            ))}
-          </select>
-          <button
-            className="tb"
-            title={t("connect")}
-            aria-label={t("connect")}
-            onClick={() => void connect()}
-            disabled={!selected || isConnected}
-          >
-            <Icon name="connect" />
-          </button>
-          <button
-            className="tb"
-            title={t("disconnect")}
-            aria-label={t("disconnect")}
-            onClick={() => void disconnect()}
-            disabled={!isConnected}
-          >
-            <Icon name="disconnect" />
-          </button>
-          <label className="check-inline">
-            <input
-              type="checkbox"
-              checked={draft.readOnly}
-              onChange={(event) => update("readOnly", event.target.checked)}
-            />
-            {t("readOnly")}
-          </label>
-          <button
-            className="tb"
-            title={t("refresh")}
-            aria-label={t("refresh")}
-            onClick={() => void refreshObjectCache()}
-            disabled={!isConnected}
-          >
-            <Icon name="refresh" />
-          </button>
-          <button
-            className={showConnections ? "tb active" : "tb"}
-            title={t("connections")}
-            aria-label={t("connections")}
-            onClick={() => (showConnections ? setSideView("objects") : openConnections())}
-          >
-            <Icon name="settings" />
-          </button>
-        </div>
-      </div>
+      {showToolbar && (
+        <ActionStrip
+          isConnected={isConnected}
+          hasSelection={Boolean(selected)}
+          running={running}
+          hasSql={Boolean(sql.trim())}
+          readOnly={draft.readOnly}
+          transactionPending={transactionPending}
+          onReadOnly={(value) => update("readOnly", value)}
+          onRun={() => void run()}
+          onCancel={() => void cancel()}
+          onFormat={() => void formatSql()}
+          onExplain={() => void explain()}
+          onCommit={() => void commit()}
+          onRollback={() => void rollback()}
+          onConnectToggle={() => void (isConnected ? disconnect() : connect())}
+          moreAlert={Boolean(updateInfo)}
+          more={[
+            { id: "ws-save", label: t("workspaceSave"), onClick: () => void saveWorkspace() },
+            { id: "ws-load", label: t("workspaceLoad"), onClick: () => void loadWorkspace() },
+            { id: "cache", label: t("refresh"), onClick: () => void refreshObjectCache(), disabled: !isConnected },
+            ...(updateInfo
+              ? [{ id: "install", label: `${t("installUpdate")}: ${updateInfo.version}`, onClick: () => void installUpdate(), disabled: installing }]
+              : []),
+            { id: "check", label: t("checkUpdates"), onClick: () => void checkUpdates() },
+          ]}
+          breadcrumb={breadcrumb}
+        />
+      )}
       {!showToolbar && (
         <button
           className="tb toolbar-restore"
@@ -2688,6 +2583,12 @@ export default function App() {
               onImportLegacy={() => void importLegacy()}
             />
           )}
+
+          {sideView === "history" && (
+            <HistoryView entries={historyEntries} onPick={setSql} />
+          )}
+
+          {sideView === "stats" && <StatsView stats={stats} />}
 
           <details className="side-section" ref={profileDetailsRef}>
             <summary>{t("formatterProfiles")}</summary>
@@ -2804,14 +2705,9 @@ export default function App() {
             dataPanelRef={dataPanelRef}
             exportCsv={exportCsv}
             setStatus={setStatus}
-            setSql={setSql}
-            setActiveCell={setActiveCell}
+              setActiveCell={setActiveCell}
             setCellView={setCellView}
-            historyEntries={historyEntries}
-            showHistory={showHistory}
-            showStats={showStats}
-            stats={stats}
-            plan={plan}
+                    plan={plan}
             output={output}
             selectedObject={selectedObject}
               objectTab={objectTab}
@@ -2836,6 +2732,7 @@ export default function App() {
               : ""
           }
           environment={isConnected ? environment : null}
+          transactionPending={transactionPending}
           message={status}
           eol={fileEol}
           cursor={cursor}
@@ -2843,38 +2740,6 @@ export default function App() {
         />
       )}
 
-      {paletteOpen && (
-        <div
-          className="palette-backdrop"
-          onClick={() => setPaletteOpen(false)}
-        >
-          <div className="palette" onClick={(event) => event.stopPropagation()}>
-            <input
-              autoFocus
-              value={paletteQuery}
-              placeholder={t("searchCommands")}
-              onChange={(event) => {
-                setPaletteQuery(event.target.value);
-                setPaletteIndex(0);
-              }}
-              onKeyDown={onPaletteKey}
-            />
-            <div className="palette-list">
-              {filteredCommands.map((command, index) => (
-                <button
-                  key={command.id}
-                  className={index === paletteIndex ? "active" : ""}
-                  onClick={() => executeCommand(command.name)}
-                >
-                  <span>{command.name}</span>
-                  <span className="keys">{formatKeys(command.keys)}</span>
-                  {!command.implemented && <em>{t("notImplemented")}</em>}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
       {cellView && (
         <div className="palette-backdrop" onClick={() => setCellView(null)}>
           <div className="palette" onClick={(event) => event.stopPropagation()}>

@@ -125,6 +125,22 @@ pub fn count_objects(
         .collect())
 }
 
+/// Whether the session has an open transaction, as Oracle reports it (`local_transaction_id` is null
+/// without one). Caveats: `SELECT ... FOR UPDATE` counts as a transaction, `SET TRANSACTION READ ONLY`
+/// is not shown, and DDL commits implicitly. Oracle gives no statement counter, so this is only a flag.
+pub fn transaction_pending(session: &Session, options: QueryOptions) -> Result<bool, String> {
+    let rows = fetch_rows(
+        session,
+        "select dbms_transaction.local_transaction_id from dual",
+        &[],
+        options,
+    )?;
+    Ok(rows
+        .first()
+        .and_then(|row| row.first())
+        .is_some_and(|value| value.display().is_some()))
+}
+
 pub fn list_columns(
     session: &Session,
     schema: Option<&str>,

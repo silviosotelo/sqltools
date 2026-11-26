@@ -428,3 +428,31 @@ Evidencia (app instalada 26/11/2026 11:46, firmada autofirmada): `flow --compare
 **Revisión externa (codex):** 2 bloqueos (reimportar borra la insignia → corregido; el test Unicode "falla" → era un artefacto de codificación del diff, el test pasa) y 1 menor (teclado del radiogroup → implementado y probado por CDP; `null` explícito queda cubierto por `legacy_json_without_environment_loads` + round-trip).
 
 **Evidencia (app instalada 26/11/2026, firmada autofirmada):** `e2e/env.mjs` **ENV CHECKS OK (12)**: conexión vieja sin entorno conecta y sin insignia; guardar `  DESA  ` + cian → `DESA:cyan` en la lista, el chip, la barra de estado y el panel de objetos; la contraseña sobrevive a la edición (conecta); 13 caracteres se rechazan con mensaje; flechas mueven color y foco con un solo tab-stop; restaurado sin entorno. `axe-cdp.mjs`: **0 violaciones, 4 vistas × 2 temas** (incluye Conexiones con entorno cargado). `phase-f1` OK (19), `keyboard-walk` OK, `commands-check` OK, `tree` OK (11), `flow` IDENTICAL a `golden-f3`. cargo fmt/clippy `-D warnings`/check desktop/test (19 ok; 6 tests nuevos de `store`) en 0; `npm run build` 0; vitest **79 passed**. Capturas 1366×768 y 1024×640 claro/oscuro: `docs/screenshots/workbench-f4-connections-*.png` (sin desbordes).
+
+### F5 — cerrada (2026-11-26)
+
+**Qué cambió:** Historial y Estadísticas pasan a vistas laterales (`HistoryView`, `StatsView`; mismos datos de `api.history()` / `api.sessionStats()`) y las pestañas inferiores quedan en **Resultados, Plan, Objeto, Salida**; la paleta deja de ser un modal y se ancla en la barra de título (`CommandPalette`: `combobox` + `listbox`, `aria-activedescendant`, `Esc` cierra, vacía la consulta y devuelve el foco al editor); la barra de 21 botones se reemplaza por `ActionStrip` (Ejecutar F5, Cancelar | Formatear, Plan | Commit, Rollback | Solo lectura | Conectar/Desconectar | menú "Más acciones") y `Breadcrumbs` (conexión > esquema > tipo > objeto, o "Script sin título"); `View.Toolbar` alterna la tira; `transaction_pending` (Rust `catalog::transaction_pending` + comando bajo el mismo lock de ejecución que commit/rollback + `api.transactionPending`) y el indicador "Transacción abierta" en la barra de estado, con Commit/Rollback marcados. Sin contador (Oracle no lo da); desconocido ante un error.
+
+**Dónde quedó cada control de la barra vieja (lista de control, verificada por `phase-f5.mjs`):** Ejecutar, Cancelar, Commit, Rollback, Formatear, Plan, Solo lectura, Conectar/Desconectar → tira; Historial, Estadísticas, Conexiones (engranaje y selector) → barra de actividad y vista Conexiones; Exportar CSV → panel de resultados; Guardar/Abrir workspace, Actualizar (caché de autocompletado), Buscar/Instalar actualización → menú "Más acciones"; Comandos → paleta de la barra de título. Nada se perdió.
+
+**Hallazgos propios corregidos en la fase:** la paleta conservaba la consulta anterior al reabrirse (ahora se vacía al cerrar); `axe` detectó `scrollable-region-focusable` y `landmark-unique` en Estadísticas y `aria-controls` hacia un id inexistente con el menú cerrado.
+
+**Evidencia (app instalada 26/11/2026 12:5x, firmada autofirmada):**
+
+| Comando | Resultado |
+|---|---|
+| `node e2e/phase-f5.mjs` | `F5 CHECKS OK (32)`: pestañas inferiores; los controles de la barra vieja; menú (foco, `Esc`); paleta como combobox; **11 comandos de familias distintas con efecto observado** (`Edit.FormatSQL` por teclado, `File.New`, `File.Close`, `View.History`, `View.ObjectTree`, `View.Properties`, `View.Toolbar` ×2, `View.StatusBar` ×2, `Edit.DupLineOrSelection`, `Edit.DeleteLine`, `Edit.Find`); Historial lista `select 7 from dual` con `1 fila`; Estadísticas con filas; `select 1 from dual for update` → "Transacción abierta" → Rollback → sin indicador; un `select` común no lo deja |
+| `node e2e/axe-cdp.mjs` | **`AXE OK: 0 violations in 8 view(s) x 2 themes`** (shell, results, objects, connections, history, stats, menú abierto, paleta abierta) |
+| `phase-f1` / `phase-f2` / `tree` / `env` | OK (19 / 3 / 11 / 12) |
+| `keyboard-walk` claro y oscuro | OK (26 paradas) |
+| `commands-check --compare` | OK (283 / 226 / 213, mismo digest) |
+| `flow --compare golden-f3.json` | IDENTICAL |
+| `cargo fmt` / `clippy -D warnings` / `check -p sqlt-desktop` / `test` | 0 / 0 / 0 / 0 (19 ok) |
+| `npm run build` / `npm test` | 0 / **81 passed** |
+| Capturas 1366×768 claro y oscuro (Objetos con paquete abierto, Conexiones, Historial, Estadísticas, paleta) y 1024×640 | `docs/screenshots/workbench-*.png`, sin desbordes |
+
+**NO VERIFICADO:** (1) los tests Rust `#[ignore]` (`count_objects_matches_list_objects_per_type`, `transaction_pending_follows_update_commit_rollback`) compilan pero no se ejecutaron: falta `SQLT_PASS` en el entorno; sus equivalentes se comprobaron por CDP contra la base real (contador = hijos; `FOR UPDATE` → indicador → Rollback → sin indicador). (2) NVDA / lector de pantalla real. (3) `codex` sin cupo hasta las 15:42; la revisión de F5 la hizo el `advisor` interno (ver abajo).
+
+**Cierre del goal — estado de las cinco fases:** F1 `e9ce19e`+`fix`, F2 `17eefc8`, F3 `ec0712f`, F4 `c0d5556`, F5 este commit. Cada una con binario instalado y probado por CDP, compuerta completa y revisión externa (F2 por golden idéntico).
+
+**Revisión externa de F5: NO REALIZADA.** codex (hasta las 15:42) y el dvisor interno sin cupo; no se simula aprobación. Autorrevisión: la consulta de transacción se descarta por cleanup del efecto si unning vuelve a true; las opciones de la paleta usan onMouseDown.preventDefault (el click por CDP las ejecuta sin cerrarse por blur).

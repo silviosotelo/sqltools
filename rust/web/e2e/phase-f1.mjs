@@ -24,7 +24,7 @@ check("cursor position after Up + Home", /Ln 2, Col 1/.test(afterMove), afterMov
 await cdp.setViewport(1024, 640);
 await cdp.wait(500);
 const toolbar = JSON.parse(await cdp.evaluate(`JSON.stringify((() => {
-  const buttons = Array.from(document.querySelectorAll('.topbar button, .titlebar button, .titlebar select, .activity button'));
+  const buttons = Array.from(document.querySelectorAll('.actionstrip button, .titlebar button, .titlebar select, .activity button'));
   const w = window.innerWidth, h = window.innerHeight;
   const clipped = buttons.filter(b => { const r = b.getBoundingClientRect(); return r.width > 0 && (r.right > w + 0.5 || r.bottom > h + 0.5 || r.left < -0.5); })
     .map(b => (b.getAttribute('aria-label') || b.title || b.innerText || b.tagName).slice(0, 30));
@@ -80,7 +80,7 @@ const structure = JSON.parse(await cdp.evaluate(`JSON.stringify({ heading: Boole
 check("Connections has a heading and no collapsible summary", structure.heading && !structure.summaries.includes("Conexiones"), structure);
 // d) Only the two view toggles expose aria-pressed; History and Stats are plain actions.
 const pressedAttrs = JSON.parse(await cdp.evaluate(`JSON.stringify(Array.from(document.querySelectorAll('.activity .act')).map(b => [b.getAttribute('aria-label'), b.hasAttribute('aria-pressed')]))`));
-check("History and Stats buttons are not toggles", pressedAttrs.filter(([l]) => /Historial|Estad/.test(l)).every(([, has]) => !has), pressedAttrs);
+check("the four views are toggles; shortcuts and settings are plain actions", pressedAttrs.filter(([l]) => /Objetos|Conexiones|Historial|Estad/.test(l)).every(([, has]) => has) && pressedAttrs.filter(([l]) => /Atajos|Ajustes/.test(l)).every(([, has]) => !has), pressedAttrs);
 // e) The status bar announces only its message, not the cursor position.
 const live = JSON.parse(await cdp.evaluate(`JSON.stringify({ roleStatus: document.querySelectorAll('.statusbar [role="status"]').length, statusContainsCursor: /Ln \\d/.test(document.querySelector('.statusbar [role="status"]')?.innerText ?? '') })`));
 check("only the status message is a live region", live.roleStatus === 1 && !live.statusContainsCursor, live);
