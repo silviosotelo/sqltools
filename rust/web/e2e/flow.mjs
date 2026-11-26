@@ -79,8 +79,11 @@ if (save) { fs.writeFileSync(save, snapshot); console.log("saved", save); }
 const compare = opt("--compare");
 if (compare) {
   const golden = JSON.parse(fs.readFileSync(compare, "utf8"));
+  // Volatile or whitespace-only differences do not count: elapsed ms and line breaks in innerText.
+  const norm = (v) =>
+    typeof v === "string" ? v.replace(/\s+/g, " ").replace(/\d+ ms/g, "N ms").trim() : v;
   const diffs = Object.keys({ ...golden, ...out })
-    .filter((k) => !ignore.includes(k) && JSON.stringify(golden[k]) !== JSON.stringify(out[k]))
+    .filter((k) => !ignore.includes(k) && JSON.stringify(norm(golden[k])) !== JSON.stringify(norm(out[k])))
     .map((k) => `${k}: golden=${JSON.stringify(golden[k])} now=${JSON.stringify(out[k])}`);
   if (diffs.length) { console.error("DIFFERENT:\n  " + diffs.join("\n  ")); process.exit(1); }
   console.log("IDENTICAL to", compare);

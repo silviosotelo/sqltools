@@ -335,3 +335,29 @@ Se consulta al terminar una ejecución y tras commit/rollback (nunca durante una
 - `node rust/web/e2e/axe-cdp.mjs` (UI actual) → **41 grupos de violaciones** (light: shell 7, results 7, objects 8; dark: shell 6, results 6, objects 7); reglas: `aria-input-field-name`, `aria-required-attr`, `aria-required-parent`, `color-contrast`, `label-title-only`, `nested-interactive`, `page-has-heading-one`, `scrollable-region-focusable`. Detalle en `rust/web/e2e/axe-baseline.txt`.
 - **Hallazgos de entorno** (para no repetirlos): (a) la herramienta de shell mata los procesos hijos cuando la llamada termina con código ≠ 0 → la app se lanza **desacoplada** con `rust/web/e2e/launch-app.ps1` (WMI) y los scripts imprimen sus mensajes informativos por stdout; (b) `Ctrl+F12` sobre una tabla puede tardar mucho por el MetaDictionary (`AAA_ELIMINADO`: 17,7 s, `A11`: 0,25 s), por eso el flujo usa el objeto fijo `A11` y espera hasta 60 s; (c) el visor de imágenes cachea por ruta.
 - **Hallazgo de producto fuera de alcance (se reporta, no se arregla):** la carga de DDL de tablas vía MetaDictionary puede tardar ~18 s en tablas grandes.
+
+### F1 — cerrada (2026-11-26)
+
+**Qué cambió:** tokens de B (con `--control-border`, `--side`, `--faint`, sintaxis `--t-*`) y `DESIGN.md` reescrito; IBM Plex Sans y JetBrains Mono (subconjunto `latin`, 5 woff2) y licencias en `rust/web/public/licenses/` (viajan en `dist`) + `rust/THIRD_PARTY_NOTICES.md`; `icons.tsx` sobre Phosphor con `IconName` tipado (un nombre sin ícono no compila); `Editor.tsx` con tema 100 % por tokens, `aria-label` y `onCursor`; marco nuevo `TitleBar` / `ActivityBar` / `StatusBar` (en `components/`) con `sideView`; un único `<header>` de aplicación; barra de herramientas conservada (restilada) hasta F5 como `role="toolbar"`; pestañas de documentos como `<ul>` con botones hermanos; `tauri.conf.json` con `minWidth` 1024 y `minHeight` 640.
+
+**Desviaciones respecto del plan:** (1) el rótulo de conexión duplicado de la barra de pestañas se eliminó (la `TitleBar` ya lo muestra); (2) `@types/node` pasó a devDependency porque el `tsc` del build revisa los tests; (3) `npm` falla en esta red por el proxy con inspección SSL: se usa `NODE_OPTIONS=--use-system-ca`; (4) se agregó `e2e/launch-app.ps1`, `e2e/install-local.ps1`, `e2e/shots.mjs`, `e2e/phase-f1.mjs` y `e2e/commands-check.mjs` como herramientas reutilizables de las próximas fases.
+
+**Binario probado:** `%LOCALAPPDATA%\SQLTools\sqlt-desktop.exe`, 17.152.928 bytes, escrito 26/11/2026 11:26, firmado `CN=SQLTools Self-Signed`, construido desde el árbol de trabajo de este commit.
+
+**Evidencia (salida real):**
+
+| Comando | Resultado |
+|---|---|
+| `cargo fmt --all -- --check` | exit 0 |
+| `cargo clippy --workspace --exclude sqlt-desktop --all-targets -- -D warnings` | exit 0 |
+| `cargo check -p sqlt-desktop` | exit 0 |
+| `cargo test --workspace --exclude sqlt-desktop` | exit 0, 19 `test result: ok` |
+| `npm --prefix rust/web run build` (incluye `tsc --noEmit`) | exit 0 |
+| `npm --prefix rust/web test` | **56 passed** (`tokens.test.ts`: contraste de 27 pares × 2 temas; estaba en **rojo con los valores anteriores**: `--muted`/`--surface-sunken` 4,26, `--success` 3,44, `--accent` < 3, `--danger` oscuro) |
+| `node e2e/flow.mjs --compare e2e/golden-before.json --ignore objectRows` (app instalada) | `IDENTICAL` (conecta, carga el DDL de `A11` en su pestaña, ejecuta, `1\|X`) |
+| `node e2e/axe-cdp.mjs` (instalada) | **`AXE OK: 0 violations in 3 view(s) x 2 themes`** (línea base de la UI anterior: 41 grupos) |
+| `node e2e/phase-f1.mjs` (instalada) | `F1 CHECKS OK (11)`: `Ln 3, Col 12` al escribir y `Ln 2, Col 1` tras ↑ + Inicio; 27 controles sin recortes y sin scroll de página a **1024×640**; el editor usa `--surface`/`--text` y la fuente mono en claro y oscuro; Plex Sans y JetBrains Mono cargadas |
+| `node e2e/commands-check.mjs --save e2e/golden-commands.json` | `total 283, named 226, implemented 213, withShortcut 193`, digest `535249…e2d5`; la paleta abre desde el botón de la barra de título y con `Ctrl+Shift+P` |
+| Capturas 1366×768 y 1024×700, claro y oscuro (sin desbordes: `docW == winW`, `docH == winH`) | `docs/screenshots/workbench-f1-*.png` |
+
+**Hallazgos de la revisión de la propia fase:** los controles de edición (`Ctrl+Shift+P`, `Ctrl+F12`) y el flujo de conexión no cambiaron de comportamiento; la barra de 21 botones sigue hasta F5 (por diseño del plan).

@@ -4,6 +4,9 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Editor, type EditorHandle } from "./Editor";
 import { api } from "./api";
 import { Icon } from "./icons";
+import { TitleBar, type ThemeMode } from "./components/TitleBar";
+import { ActivityBar, type SideView } from "./components/ActivityBar";
+import { StatusBar } from "./components/StatusBar";
 import { useTranslation } from "./i18n";
 import type {
   ColumnInfo,
@@ -107,7 +110,6 @@ const comboFromEvent = (event: KeyboardEvent) => {
 const formatKeys = (keys: string[]) =>
   keys.map((key) => key.split(",").join(" then ")).join(" / ");
 
-type ThemeMode = "light" | "dark" | "system";
 
 type Draft = {  id: string;
   label: string;
@@ -374,7 +376,19 @@ export default function App() {
     null,
   );
   const [showStatus, setShowStatus] = useState(true);
-  const [showConnections, setShowConnections] = useState(false);
+  const [sideView, setSideView] = useState<SideView>("objects");
+  const showConnections = sideView === "connections";
+  const setShowConnections = (
+    value: boolean | ((current: boolean) => boolean),
+  ) =>
+    setSideView((view) => {
+      const next =
+        typeof value === "function" ? value(view === "connections") : value;
+      return next ? "connections" : view === "connections" ? "objects" : view;
+    });
+  const [cursor, setCursor] = useState<{ line: number; col: number } | null>(
+    null,
+  );
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [installing, setInstalling] = useState(false);
   const [haltOnError, setHaltOnErrorState] = useState(() => {
@@ -631,6 +645,12 @@ export default function App() {
   const editorRef = useRef<EditorHandle | null>(null);
   const printScriptRef = useRef<HTMLPreElement | null>(null);
   const commandRunner = useRef<(name: string) => void>(() => {});
+
+  const handleSideView = (view: SideView) => {
+    if (view === "history") void showHistory();
+    else if (view === "stats") void showStats();
+    else setSideView(view);
+  };
 
   const loadColumnsFor = async (table: string) => {
     const parts = table.replace(/"/g, "").split(".");
@@ -2327,14 +2347,32 @@ export default function App() {
   return (
     <div className="app">
       <pre className="print-script" ref={printScriptRef} aria-hidden="true" />
-      <header className={showToolbar ? "topbar" : "topbar hidden"}>
+      <header className="app-header">
+      <TitleBar
+        isConnected={isConnected}
+        connLabel={`${draft.user}${draft.alias ? `@${draft.alias}` : ""}`}
+        connTitle={isConnected ? (connected[selected] ?? "") : t("noConnection")}
+        theme={themeMode}
+        onTheme={() =>
+          setThemeMode(
+            themeMode === "light"
+              ? "dark"
+              : themeMode === "dark"
+                ? "system"
+                : "light",
+          )
+        }
+        language={language}
+        onLanguage={setLanguage}
+        onPalette={() => setPaletteOpen(true)}
+        onChip={() => setSideView("connections")}
+      />
+      <div
+        className={showToolbar ? "topbar" : "topbar hidden"}
+        role="toolbar"
+        aria-label={t("toolbar")}
+      >
         <div className="toolbar">
-          <div className="brand-inline">
-            <Icon name="database" size={18} />
-            <strong>{t("app.title")}</strong>
-            <span className="brand-sub">{t("app.subtitle")}</span>
-          </div>
-          <span className="tb-sep" />
           <button
             className="tb"
             title={t("execute")}
@@ -2520,45 +2558,8 @@ export default function App() {
           >
             <Icon name="settings" />
           </button>
-          <span className="toolbar-spacer" />
-          <select
-            className="language-select"
-            value={language}
-            aria-label={t("app.language")}
-            onChange={(event) =>
-              setLanguage(event.target.value as "es" | "en")
-            }
-          >
-            <option value="es">Español</option>
-            <option value="en">English</option>
-          </select>
-          <button
-            className="tb"
-            title={t("theme")}
-            onClick={() =>
-              setThemeMode(
-                themeMode === "light"
-                  ? "dark"
-                  : themeMode === "dark"
-                    ? "system"
-                    : "light",
-              )
-            }
-          >
-            {themeMode === "light" ? "☀" : themeMode === "dark" ? "☾" : "◐"}
-          </button>
-          <span
-            className={isConnected ? "connection-chip on" : "connection-chip"}
-            title={isConnected ? connected[selected] : t("noConnection")}
-          >
-            {isConnected
-              ? `${t("connected")}: ${draft.user}${
-                  draft.alias ? `@${draft.alias}` : ""
-                }`
-              : t("noConnection")}
-          </span>
         </div>
-      </header>
+      </div>
       {!showToolbar && (
         <button
           className="tb toolbar-restore"
@@ -2569,13 +2570,26 @@ export default function App() {
         </button>
       )}
 
+      </header>
       <div className="body">
+        <ActivityBar
+          view={sideView}
+          onView={handleSideView}
+          onShortcuts={() => setHelpOpen(true)}
+          onSettings={() => {
+            setSettingsSection("app");
+            setSettingsOpen(true);
+          }}
+        />
         <aside className="objects-panel">
+          {sideView === "objects" && (
+            <>
           <div className="panel-title">{t("objects")}</div>
           <div className="object-filter">
             <input
               value={schema}
               placeholder={t("schema")}
+              aria-label={t("schema")}
               title={t("schema")}
               onChange={(event) => setSchema(event.target.value)}
             />
@@ -2583,6 +2597,7 @@ export default function App() {
               ref={objectsFilterRef}
               value={objectFilter}
               placeholder={t("filter")}
+              aria-label={t("filter")}
               title={t("filter")}
               onChange={(event) => setObjectFilter(event.target.value)}
             />
@@ -2610,7 +2625,12 @@ export default function App() {
               </button>
             ))}
           </div>
-          <div className="object-scroll">
+          <div
+            className="object-scroll"
+            tabIndex={0}
+            role="region"
+            aria-label={t("objects")}
+          >
             <table className="object-table">
               <thead>
                 <tr>
@@ -2642,12 +2662,11 @@ export default function App() {
               </tbody>
             </table>
           </div>
+            </>
+          )}
 
-          <details
-            className="side-section"
-            open={showConnections}
-            onToggle={(event) => setShowConnections(event.currentTarget.open)}
-          >
+          {sideView === "connections" && (
+          <details className="side-section" open>
             <summary>{t("connections")}</summary>
             <div className="section-body">
               <label className="field-row">
@@ -2752,6 +2771,7 @@ export default function App() {
               </div>
             </div>
           </details>
+          )}
 
           <details className="side-section" ref={profileDetailsRef}>
             <summary>{t("formatterProfiles")}</summary>
@@ -2793,44 +2813,41 @@ export default function App() {
             style={{ flex: `0 0 ${splitPercent}%` }}
           >
             <div className="editor-tabbar">
-              {docs.map((doc) => (
-                <div
-                  key={doc.id}
-                  className={
-                    doc.id === activeDoc.id ? "editor-tab active" : "editor-tab"
-                  }
-                  title={doc.path || doc.title}
-                  role="tab"
-                  aria-selected={doc.id === activeDoc.id}
-                  onClick={() => {
-                    setActiveDocId(doc.id);
-                    editorRef.current?.focus();
-                  }}
-                >
-                  <span className="tab-title">
-                    {doc.sql !== doc.cleanSql || doc.eol !== doc.cleanEol
-                      ? "*"
-                      : ""}
-                    {doc.title}
-                  </span>
-                  <button
-                    className="tab-close"
-                    title={t("close")}
-                    aria-label={t("close")}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      closeDoc(doc.id);
-                    }}
+              <ul className="editor-tab-list" aria-label={t("openFiles")}>
+                {docs.map((doc) => (
+                  <li
+                    key={doc.id}
+                    className={
+                      doc.id === activeDoc.id ? "editor-tab active" : "editor-tab"
+                    }
+                    title={doc.path || doc.title}
                   >
-                    ×
-                  </button>
-                </div>
-              ))}
-              <span className="tabbar-conn">
-                {isConnected
-                  ? `${draft.user}${draft.alias ? `@${draft.alias}` : ""}`
-                  : t("noConnection")}
-              </span>
+                    <button
+                      className="tab-btn"
+                      aria-current={doc.id === activeDoc.id ? "true" : undefined}
+                      onClick={() => {
+                        setActiveDocId(doc.id);
+                        editorRef.current?.focus();
+                      }}
+                    >
+                      <span className="tab-title">
+                        {doc.sql !== doc.cleanSql || doc.eol !== doc.cleanEol
+                          ? "*"
+                          : ""}
+                        {doc.title}
+                      </span>
+                    </button>
+                    <button
+                      className="tab-close"
+                      title={t("close")}
+                      aria-label={`${t("close")}: ${doc.title}`}
+                      onClick={() => closeDoc(doc.id)}
+                    >
+                      <Icon name="close" size={12} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
             </div>
             <Editor
               ref={editorRef}
@@ -2839,6 +2856,8 @@ export default function App() {
               loadColumns={loadColumnsFor}
               onChange={setSql}
               onExecute={(text, offset) => void run(text, offset)}
+              onCursor={setCursor}
+              label={t("editor")}
               theme={darkTheme ? "dark" : "light"}
             />
           </div>
@@ -2847,6 +2866,10 @@ export default function App() {
             className={splitterActive ? "splitter active" : "splitter"}
             role="separator"
             aria-orientation="horizontal"
+            aria-label={t("splitter")}
+            aria-valuenow={Math.round(splitPercent)}
+            aria-valuemin={20}
+            aria-valuemax={85}
             tabIndex={0}
             title={t("splitter")}
             ref={splitterRef}
@@ -3214,16 +3237,23 @@ export default function App() {
             )}
           </section>
 
-          {showStatus && (
-            <footer className="status-bar">
-              <span>{status}</span>
-              <span className="status-right">
-                {isConnected ? t("connected") : t("noConnection")}
-              </span>
-            </footer>
-          )}
         </main>
       </div>
+
+      {showStatus && (
+        <StatusBar
+          dot={isConnected ? "ok" : ""}
+          connLabel={
+            isConnected
+              ? `${draft.user}${draft.alias ? `@${draft.alias}` : ""}`
+              : ""
+          }
+          message={status}
+          eol={fileEol}
+          cursor={cursor}
+          server={isConnected ? (connected[selected] ?? "") : ""}
+        />
+      )}
 
       {paletteOpen && (
         <div

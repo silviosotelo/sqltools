@@ -45,3 +45,5 @@ build-arm64/
 
 # Secretos locales de desarrollo (nunca se commitean)
 .env.local
+
+rust/web/e2e/axe-report.json

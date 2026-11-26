@@ -87,6 +87,10 @@ type Props = {
   loadColumns: (table: string) => Promise<string[]>;
   onChange: (value: string) => void;
   onExecute: (sql: string, offset: number | null) => void;
+  /** Accessible name of the editing surface. */
+  label?: string;
+  /** Cursor position (1-based line; column = characters from the start of the line, 1-based, a tab counts as 1). */
+  onCursor?: (position: { line: number; col: number }) => void;
   /** Follows the app theme; CodeMirror keeps its own dark palette. */
   theme?: "light" | "dark";
 };
@@ -272,64 +276,63 @@ const indentGuides = ViewPlugin.fromClass(
   { decorations: (plugin) => plugin.decorations },
 );
 
-const darkHighlightStyle = HighlightStyle.define([
-  { tag: tags.comment, color: "#6b7280", fontStyle: "italic" },
-  { tag: tags.keyword, color: "#c792ea" },
-  { tag: [tags.string, tags.inserted], color: "#c3e88d" },
-  { tag: [tags.number, tags.bool, tags.atom, tags.null], color: "#f78c6c" },
-  { tag: [tags.function(tags.variableName), tags.labelName], color: "#82aaff" },
-  { tag: [tags.typeName, tags.className, tags.namespace], color: "#ffcb6b" },
+// One syntax and chrome theme for both app themes: every colour is a CSS token, so the editor
+// follows `styles.css` (light and dark) instead of carrying its own hex values.
+const tokenHighlightStyle = HighlightStyle.define([
+  { tag: tags.comment, color: "var(--t-c)" },
+  { tag: tags.keyword, color: "var(--t-k)" },
+  { tag: [tags.string, tags.inserted], color: "var(--t-s)" },
+  { tag: [tags.number, tags.bool, tags.atom, tags.null], color: "var(--t-n)" },
+  { tag: [tags.function(tags.variableName), tags.labelName], color: "var(--accent-text)" },
+  { tag: [tags.typeName, tags.className, tags.namespace], color: "var(--t-n)" },
   {
     tag: [tags.operator, tags.operatorKeyword, tags.punctuation, tags.separator],
-    color: "#89ddff",
+    color: "var(--muted)",
   },
-  {
-    tag: [tags.variableName, tags.propertyName, tags.attributeName],
-    color: "#dfe1e5",
-  },
-  { tag: tags.invalid, color: "#ff5370" },
+  { tag: [tags.variableName, tags.propertyName, tags.attributeName], color: "var(--text)" },
+  { tag: tags.invalid, color: "var(--danger)" },
 ]);
 
-const darkEditorTheme = EditorView.theme(
-  {
-    "&": { color: "#dfe1e5", backgroundColor: "#2b2d30" },
-    ".cm-content": { caretColor: "#dfe1e5" },
-    ".cm-cursor, .cm-dropCursor": { borderLeftColor: "#dfe1e5" },
-    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
-      backgroundColor: "#2e4b73",
+const tokenEditorTheme = (dark: boolean) =>
+  EditorView.theme(
+    {
+      "&": { color: "var(--text)", backgroundColor: "var(--surface)" },
+      ".cm-content, .cm-gutters": { fontFamily: "var(--mono)", fontSize: "13px" },
+      ".cm-content": { caretColor: "var(--text)" },
+      ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--text)" },
+      "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
+        backgroundColor: "var(--accent-soft)",
+      },
+      ".cm-activeLine": { backgroundColor: "var(--surface-alt)" },
+      ".cm-activeLineGutter": { backgroundColor: "var(--surface-alt)", color: "var(--text)" },
+      ".cm-gutters": {
+        backgroundColor: "var(--surface)",
+        color: "var(--faint)",
+        border: "none",
+      },
+      ".cm-foldPlaceholder": {
+        backgroundColor: "var(--surface-sunken)",
+        color: "var(--muted)",
+        border: "none",
+      },
+      ".cm-tooltip": {
+        backgroundColor: "var(--surface-alt)",
+        border: "1px solid var(--line-strong)",
+        color: "var(--text)",
+      },
+      ".cm-tooltip-autocomplete > ul > li[aria-selected]": {
+        backgroundColor: "var(--accent-soft)",
+        color: "var(--accent-text)",
+      },
+      ".cm-searchMatch": { backgroundColor: "var(--warn-soft)" },
     },
-    ".cm-activeLine": { backgroundColor: "#2f3236" },
-    ".cm-activeLineGutter": { backgroundColor: "#2f3236" },
-    ".cm-gutters": {
-      backgroundColor: "#26282b",
-      color: "#9aa0a6",
-      borderRight: "1px solid #3a3d41",
-    },
-    ".cm-foldPlaceholder": {
-      backgroundColor: "#3a3d41",
-      color: "#dfe1e5",
-      border: "none",
-    },
-    ".cm-lineNumbers .cm-gutterElement": { color: "#6b7280" },
-    ".cm-tooltip": {
-      backgroundColor: "#2b2d30",
-      border: "1px solid #4a4e54",
-      color: "#dfe1e5",
-    },
-    ".cm-tooltip-autocomplete > ul > li[aria-selected]": {
-      backgroundColor: "#2e4b73",
-      color: "#fff",
-    },
-    ".cm-searchMatch": { backgroundColor: "#4a4e54" },
-  },
-  { dark: true },
-);
+    { dark },
+  );
 
-/** Dark adds its own palette; light keeps `defaultHighlightStyle`. */
-const themeExtensions = (theme: "light" | "dark") =>
-  theme === "dark"
-    ? [darkEditorTheme, syntaxHighlighting(darkHighlightStyle)]
-    : [];
+const themeExtensions = (theme: "light" | "dark") => [
+  tokenEditorTheme(theme === "dark"),
+  syntaxHighlighting(tokenHighlightStyle),
+];
 
 const editorSetup = [
   lineNumbers(),
@@ -557,6 +560,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
   loadColumns,
   onChange,
   onExecute,
+  onCursor,
+  label = "SQL",
   theme: themeMode = "light",
 }: Props, ref) {
   const host = useRef<HTMLDivElement | null>(null);
@@ -578,8 +583,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
     enabled: true,
     compartment: new Compartment(),
   });
-  const callbacks = useRef({ onChange, onExecute, tables, loadColumns });
-  callbacks.current = { onChange, onExecute, tables, loadColumns };
+  const callbacks = useRef({ onChange, onExecute, onCursor, label, tables, loadColumns });
+  callbacks.current = { onChange, onExecute, onCursor, label, tables, loadColumns };
   theme.current.mode = themeMode;
 
   useEffect(() => {
@@ -1321,9 +1326,15 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
               },
             },
           ]),
+          EditorView.contentAttributes.of({ "aria-label": callbacks.current.label, "aria-multiline": "true" }),
           EditorView.updateListener.of((update: ViewUpdate) => {
             if (update.docChanged) {
               callbacks.current.onChange(update.state.doc.toString());
+            }
+            if (update.docChanged || update.selectionSet) {
+              const head = update.state.selection.main.head;
+              const line = update.state.doc.lineAt(head);
+              callbacks.current.onCursor?.({ line: line.number, col: head - line.from + 1 });
             }
           }),
         ],
@@ -1331,6 +1342,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
       parent: host.current,
     });
     view.current = editor;
+    callbacks.current.onCursor?.({ line: 1, col: 1 });
     return () => {
       editor.destroy();
       view.current = null;

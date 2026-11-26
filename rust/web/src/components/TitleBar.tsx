@@ -1,0 +1,84 @@
+import { Icon } from "../icons";
+import { useTranslation } from "../i18n";
+
+export type ThemeMode = "light" | "dark" | "system";
+
+const THEME_ICON = { light: "sun", dark: "moon", system: "themeAuto" } as const;
+
+export function TitleBar({
+  isConnected,
+  connLabel,
+  connTitle,
+  theme,
+  onTheme,
+  language,
+  onLanguage,
+  onPalette,
+  onChip,
+}: {
+  isConnected: boolean;
+  /** `user@alias` of the active connection. */
+  connLabel: string;
+  /** Tooltip with the server banner. */
+  connTitle: string;
+  theme: ThemeMode;
+  onTheme: () => void;
+  language: "es" | "en";
+  onLanguage: (language: "es" | "en") => void;
+  onPalette: () => void;
+  onChip: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="titlebar">
+      <h1 className="sr-only">
+        {t("app.title")}, {t("app.subtitle")}
+      </h1>
+      <div className="brand">
+        <Icon name="database" size={18} />
+        <strong>{t("app.title")}</strong>
+        <span className="brand-sub">{t("app.subtitle")}</span>
+      </div>
+      <button className="palette-btn" onClick={onPalette}>
+        <Icon name="search" />
+        <span>{t("searchCommands")}</span>
+        <kbd>Ctrl+Shift+P</kbd>
+      </button>
+      <div className="titlebar-right">
+        <button
+          className="chip"
+          data-e2e="conn-chip"
+          title={connTitle}
+          onClick={onChip}
+        >
+          <span className={isConnected ? "dot ok" : "dot"} />
+          {isConnected ? (
+            <>
+              <span className="sr-only">{t("connected")}: </span>
+              {connLabel}
+            </>
+          ) : (
+            t("noConnection")
+          )}
+        </button>
+        <button
+          className="tb"
+          title={t("theme")}
+          aria-label={t("theme")}
+          onClick={onTheme}
+        >
+          <Icon name={THEME_ICON[theme]} />
+        </button>
+        <select
+          className="language-select"
+          value={language}
+          aria-label={t("app.language")}
+          onChange={(event) => onLanguage(event.target.value as "es" | "en")}
+        >
+          <option value="es">Español</option>
+          <option value="en">English</option>
+        </select>
+      </div>
+    </div>
+  );
+}

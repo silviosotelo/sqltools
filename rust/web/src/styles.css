@@ -1,49 +1,75 @@
 :root {
-  font-family: "Segoe UI", Tahoma, "Helvetica Neue", sans-serif;
-  font-size: 12px;
+  --font: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", Consolas, "Courier New", monospace;
+  font-family: var(--font);
+  font-size: 13px;
   color: var(--text);
   background: var(--bg);
   color-scheme: light;
-  --bg: #f0f0f0;
-  --surface: #fff;
-  --surface-alt: #f7f7f7;
-  --surface-sunken: #e6e6e6;
-  --line: #c8c8c8;
-  --line-soft: #d8d8d8;
-  --line-strong: #a0a0a0;
-  --text: #1a1a1a;
-  --text-strong: #000;
-  --muted: #6b6b6b;
-  --accent: #7aa7d8;
-  --accent-soft: #cfe3fb;
-  --accent-wash: #eef5ff;
-  --accent-strong: #33445c;
-  --success: #2e9e45;
-  --danger: #a33;
+  --bg: #f3f4f7;
+  --side: #eceef2;
+  --surface: #ffffff;
+  --surface-alt: #f7f8fa;
+  --surface-sunken: #e3e6eb;
+  --line: #d9dde4;
+  --line-soft: #d9dde4;
+  --line-strong: #a9b0bc;
+  --control-border: #8a93a2;
+  --text: #1a1e26;
+  --text-strong: #0b0e13;
+  --muted: #4d5666;
+  --faint: #586272;
+  --accent: #0a7285;
+  --accent-ink: #ffffff;
+  --accent-soft: #d5eef3;
+  --accent-wash: #d5eef3;
+  --accent-text: #075565;
+  --accent-strong: #075565;
+  --success: #17794a;
+  --warn: #8f5200;
+  --warn-soft: #fbeccb;
+  --danger: #b3261e;
+  --err-soft: #fbe4e1;
   --shadow-soft: #0003;
   --shadow: #0004;
+  --t-k: #0a6a80;
+  --t-s: #8a4b00;
+  --t-n: #0f7a5a;
+  --t-c: #586272;
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
-  --bg: #1e1f22;
-  --surface: #2b2d30;
-  --surface-alt: #26282b;
-  --surface-sunken: #222427;
-  --line: #3a3d41;
-  --line-soft: #33363a;
-  --line-strong: #4a4e54;
-  --text: #dfe1e5;
-  --text-strong: #fff;
-  --muted: #9aa0a6;
-  --accent: #4a7fc1;
-  --accent-soft: #2e4b73;
-  --accent-wash: #24344a;
-  --accent-strong: #8fb2d8;
-  --success: #4cc26a;
-  --danger: #e06c75;
+  --bg: #0e1013;
+  --side: #12151a;
+  --surface: #171a20;
+  --surface-alt: #1c2027;
+  --surface-sunken: #0b0d10;
+  --line: #252a32;
+  --line-soft: #252a32;
+  --line-strong: #3e4551;
+  --control-border: #6b7482;
+  --text: #dde1e8;
+  --text-strong: #f5f7fa;
+  --muted: #98a2b2;
+  --faint: #8791a1;
+  --accent: #3cc4dc;
+  --accent-ink: #04222a;
+  --accent-soft: #12333b;
+  --accent-wash: #12333b;
+  --accent-text: #8fe0ef;
+  --accent-strong: #8fe0ef;
+  --success: #4cc38a;
+  --warn: #e3a93e;
+  --warn-soft: #35290f;
+  --danger: #f28b82;
+  --err-soft: #3a1d1b;
   --shadow-soft: #0008;
   --shadow: #000a;
+  --t-k: #59c9de;
+  --t-s: #e9b46a;
+  --t-n: #7ad8b4;
+  --t-c: #8791a1;
 }
 
 * {
@@ -92,24 +118,6 @@ select {
   border-top: 1px solid var(--surface-sunken);
 }
 
-.brand-inline {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 0 8px 0 3px;
-  color: var(--accent-strong);
-}
-
-.brand-inline strong {
-  font-size: 13px;
-  letter-spacing: 0.2px;
-}
-
-.brand-sub {
-  color: var(--muted);
-  font-size: 11px;
-}
-
 .tb {
   width: 25px;
   height: 23px;
@@ -154,7 +162,7 @@ select {
   height: 23px;
   min-width: 170px;
   padding: 0 5px;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--control-border);
   border-radius: 2px;
   background: var(--surface);
 }
@@ -171,37 +179,6 @@ select {
   margin: 0 6px;
   white-space: nowrap;
   font-size: 11px;
-}
-
-.connection-chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-width: 170px;
-  height: 23px;
-  padding: 0 10px;
-  border: 1px solid var(--line-strong);
-  border-radius: 2px;
-  background: var(--surface);
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.connection-chip::before {
-  content: "";
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--line-strong);
-}
-
-.connection-chip.on {
-  color: var(--success);
-}
-
-.connection-chip.on::before {
-  background: var(--success);
 }
 
 /* ---- Split ---- */
@@ -247,7 +224,7 @@ select {
   min-width: 0;
   height: 23px;
   padding: 0 6px;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--control-border);
   border-radius: 2px;
   background: var(--surface);
 }
@@ -378,7 +355,7 @@ select {
   min-width: 0;
   height: 23px;
   padding: 0 5px;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--control-border);
   border-radius: 2px;
   background: var(--surface);
 }
@@ -393,7 +370,7 @@ select {
 .plain {
   height: 24px;
   padding: 0 10px;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--control-border);
   border-radius: 2px;
   background: var(--surface-alt);
   color: var(--text);
@@ -452,14 +429,6 @@ select {
   font-size: 11px;
   cursor: pointer;
   max-width: 260px;
-}
-
-.tabbar-conn {
-  margin-left: auto;
-  padding: 0 8px 2px;
-  color: var(--muted);
-  font-size: 11px;
-  white-space: nowrap;
 }
 
 .editor-tab:not(.active) {
@@ -700,7 +669,7 @@ tr.spacer td {
 .object-tabs button {
   height: 24px;
   padding: 0 10px;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--control-border);
   border-radius: 2px;
   background: var(--surface-alt);
   font-size: 11px;
@@ -711,23 +680,6 @@ tr.spacer td {
   background: var(--accent-soft);
   border-color: var(--accent);
   font-weight: 600;
-}
-
-.status-bar {
-  flex: none;
-  height: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 8px;
-  background: var(--surface-sunken);
-  border-top: 1px solid var(--line-strong);
-  font-size: 11px;
-}
-
-.status-bar .status-right {
-  color: var(--muted);
 }
 
 /* ---- Overlays ---- */
@@ -759,7 +711,7 @@ tr.spacer td {
   height: 27px;
   margin: 6px;
   padding: 0 7px;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--control-border);
   border-radius: 2px;
 }
 
@@ -983,4 +935,269 @@ tr.spacer td {
   right: 8px;
   top: 4px;
   z-index: 20;
+}
+
+/* ---- Workbench frame (proposal B): title bar, activity bar, status bar ---- */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+kbd {
+  font: 500 11px var(--mono);
+  color: var(--muted);
+  background: var(--surface-alt);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.titlebar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 40px;
+  padding: 0 10px;
+  background: var(--side);
+  border-bottom: 1px solid var(--line);
+}
+
+.brand {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent-text);
+}
+
+.brand strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.brand-sub {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.palette-btn {
+  flex: 1 1 220px;
+  min-width: 0;
+  max-width: 520px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--control-border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  text-align: left;
+}
+
+.palette-btn span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-btn:hover {
+  color: var(--text);
+}
+
+.titlebar-right {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.titlebar .language-select {
+  height: 28px;
+  min-width: 96px;
+  margin: 0;
+  border-radius: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--control-border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+
+.dot.ok {
+  background: var(--success);
+}
+
+.dot.warn {
+  background: var(--warn);
+}
+
+.dot.err {
+  background: var(--danger);
+}
+
+.activity {
+  flex: none;
+  width: 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0;
+  background: var(--side);
+  border-right: 1px solid var(--line);
+}
+
+.act-grow {
+  flex: 1;
+}
+
+.act {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.act:hover {
+  background: var(--surface-sunken);
+  color: var(--text);
+}
+
+.act[aria-pressed="true"] {
+  color: var(--text);
+}
+
+.act[aria-pressed="true"]::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+
+.statusbar {
+  flex: none;
+  height: 26px;
+  background: var(--side);
+  border-top: 1px solid var(--line);
+}
+
+.statusbar .status {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.statusbar .seg {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+.statusbar .seg b {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.statusbar .seg.msg {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.statusbar .sp {
+  flex: 1;
+}
+
+/* Narrow windows (the app's minimum is 1024 px wide). */
+@media (max-width: 1100px) {
+  .brand-sub,
+  .palette-btn kbd {
+    display: none;
+  }
+
+  .panel-bar .hint {
+    display: none;
+  }
+}
+
+.tabs button,
+.panel-bar .tabs button {
+  white-space: nowrap;
+}
+
+/* Editor tabs: <ul> of <li> with a select button and a sibling close button (no nested interactive). */
+.editor-tab-list {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.editor-tab .tab-btn {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.app-header {
+  flex: none;
 }
