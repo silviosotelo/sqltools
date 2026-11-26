@@ -1,7 +1,8 @@
 # Plan: paridad funcional con PL/SQL Developer 17
 
-Fecha: 2026-11-26. Estado: propuesto (planificado por el subagente `advisor`, con los datos de
+Fecha: 2026-11-26. Estado: aprobado. Planificado por el subagente `advisor`; los datos de pre-vuelo los verificó el agente principal; las decisiones abiertas las resolvió el dueño: secuencia estricta (sin cerrar una fase no empieza la siguiente), retirar comandos solo si PL/SQL Developer no los implementa, y planificar el AI Assistant (P10).
 pre-vuelo verificados por el agente principal).
+Goal: `docs/superpowers/goals/2026-11-26-parity-plsql-developer-goal.md`.
 
 Inventario de partida: `docs/parity/plsql-developer-17.md` (23 capacidades dentro de las 20 áreas del
 proveedor: 4 completas, 9 parciales, 10 faltantes).
@@ -44,6 +45,9 @@ Ordenado por valor diario para un desarrollador PL/SQL dividido por costo y ries
 | **P7** | #7 Reports + #13 File Browser + #23 invalid objects / import básico | P2 | Medio | Bajo |
 | **P8** | #9 Projects + #6 Command Window UI | P2 | Medio | Medio |
 | **P9** | #18 Formas DDL (tablas, sequences) + #15 Scheduler | P1 | Medio | Medio-alto |
+| **P10** | #3 AI Assistant agnóstico de proveedor | P3 (usa el mismo contexto de editor) | Alto para el usuario final | Medio: integración, claves y costo |
+
+**Secuencia estricta:** una fase no empieza hasta que la anterior cierre la compuerta del goal. El orden de la tabla es el orden de ejecución.
 
 **Por qué el Profiler antes que el Debugger:** los dos necesitan lo mismo —ejecutar una unidad PL/SQL con
 binds IN/OUT y recoger resultados de la sesión—. El Profiler construye esa base con menos riesgo
@@ -61,6 +65,7 @@ formas DDL dependen del árbol** (selección múltiple y menú contextual), que 
 | Archivos | `crates/sqlt-app/src/catalog.rs` (+3 consultas), `commands.rs` (+6 comandos `Object.*`), `web/src/tree/`, `ObjectTree.tsx` (menú), `i18n.tsx` |
 | Verificación Oracle | Crear un procedimiento roto → INVALID en el árbol → Recompile → error de `ALL_ERRORS` → corregir → VALID; deshabilitar un trigger de prueba y confirmar por `all_triggers`; con *Solo lectura* activo el cambio se rechaza con mensaje claro |
 | Verificación CDP | `e2e/phase-p1.mjs` con el patrón de `phase-f5.mjs` (devuelve `Boolean`, nunca nodos), axe 0, dos resoluciones |
+| Auditoría de los 13 comandos | Antes de tocar el registry: observar los menús de PL/SQL Developer 17 en pantalla (comportamiento observable, sin extraer cadenas del binario) y anotar, uno por uno, si existe: `Edit.JumpNext`, `Edit.JumpPrevious`, `Test` y los once `Window.*`. Se retiran del registry solo los ausentes; los presentes quedan listados y justificados |
 
 ## P2 — SQL Window editable + QBE (detalle)
 
@@ -104,14 +109,22 @@ formas DDL dependen del árbol** (selección múltiple y menú contextual), que 
 |---|---|
 | #8 Diagrams | editor de grafos SVG es un proyecto aparte, de valor puntual |
 | #20 Query Builder | mismo costo; el QBE del grid (P2) cubre la necesidad diaria |
-| #3 AI Assistant | decisión de producto separada (claves, proveedores); si se hace, provider-agnostic y al final |
 | #10 Test Manager completo | el script runner existente cubre el 80 %; un "correr set de scripts y reportar" entra barato en P7 |
-| Comandos MDI (`Window.*`) | propuesta: **retirarlos del registry** (no dejarlos como no-ops), actualizando el golden, con decisión del dueño |
+| Comandos MDI (`Window.*`) | se auditan en P1 contra los menús de PL/SQL Developer; se retiran solo los que no existan allí |
 | `File.Print*` | se deja el stub actual; baja frecuencia |
 | Import ODBC / texto | nicho de migración, no de desarrollo diario |
 
-## Decisiones abiertas del dueño
+## P10 — AI Assistant (detalle)
 
-1. ¿Se arranca por P1 (árbol) o por P2 (grid editable)? Las dos son correctas; P2 toca datos reales.
-2. ¿Se retiran los 13 comandos sin implementar del registry o se dejan listados?
-3. ¿El AI Assistant queda fuera, o se planifica al final como proveedor agnóstico?
+| Item | Detalle |
+|---|---|
+| Alcance mínimo | Cliente agnóstico de proveedor (endpoint compatible OpenAI por configuración), funciones predefinidas sobre la selección o el documento (crear, completar, corregir, explicar, comentar, revisar, optimizar) y funciones propias del usuario con su prompt. La clave se guarda en el keyring del sistema, nunca en el JSON ni en un archivo de texto. Sin telemetría. Cancelable y con timeout |
+| Archivos | `sqlt-app/src/ai.rs` (nuevo: cliente, funciones, validación), comando Tauri `ai_run`, `web/src/components/AiPanel.tsx`, `commands.rs` (`Tools.AiRun`), `i18n.tsx` |
+| Verificación | Tests con un servidor HTTP local que simula el proveedor (no gasta cuota ni necesita clave); una llamada real solo si el dueño aporta una clave, y si no se declara NO VERIFICADO |
+| Riesgo | Costo y privacidad del código enviado: la UI advierte que el texto sale de la máquina y nunca se envía nada sin acción explícita |
+
+## Decisiones tomadas por el dueño
+
+1. **Orden:** P1 a P10 en secuencia estricta; no se avanza sin cerrar la fase anterior.
+2. **Comandos sin implementar:** se retiran del registry solo los que PL/SQL Developer no implemente, con la auditoría de P1 como evidencia. Los que existan en PL/SQL Developer se quedan listados.
+3. **AI Assistant:** se planifica como P10, agnóstico de proveedor.
