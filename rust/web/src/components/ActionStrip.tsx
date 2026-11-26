@@ -66,7 +66,7 @@ export function ActionStrip(props: ActionStripProps) {
   const { isConnected, running } = props;
 
   useEffect(() => {
-    if (menuOpen) menu.current?.querySelector<HTMLElement>("[role=menuitem]:not(:disabled)")?.focus();
+    if (menuOpen) menu.current?.querySelector<HTMLElement>("[role=menuitem]:not([aria-disabled='true'])")?.focus();
   }, [menuOpen]);
 
   const close = (restoreFocus: boolean) => {
@@ -75,7 +75,7 @@ export function ActionStrip(props: ActionStripProps) {
   };
 
   const onMenuKey = (event: React.KeyboardEvent) => {
-    const items = Array.from(menu.current?.querySelectorAll<HTMLElement>("[role=menuitem]:not(:disabled)") ?? []);
+    const items = Array.from(menu.current?.querySelectorAll<HTMLElement>("[role=menuitem]") ?? []);
     const at = items.indexOf(document.activeElement as HTMLElement);
     if (event.key === "Escape") {
       event.preventDefault();
@@ -146,10 +146,18 @@ export function ActionStrip(props: ActionStripProps) {
               <button
                 key={item.id}
                 role="menuitem"
-                disabled={item.disabled}
+                tabIndex={-1}
+                aria-disabled={item.disabled || undefined}
                 onClick={() => {
+                  if (item.disabled) return;
                   close(false);
                   item.onClick();
+                  // Same rule as the palette: never leave the focus on <body> when the menu unmounts.
+                  window.setTimeout(() => {
+                    if (!document.activeElement || document.activeElement === document.body) {
+                      trigger.current?.focus();
+                    }
+                  }, 0);
                 }}
               >
                 {item.label}

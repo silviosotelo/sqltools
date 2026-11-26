@@ -504,3 +504,21 @@ LIVE CHECK OK
 ```
 
 Los tipos que el explorador no muestra (`PACKAGE BODY`, `INDEX`, `LOB`) aparecen en el conteo pero no como grupos del árbol, que es lo previsto. (El total de `PACKAGE` pasó de 382 a 383 entre corridas: el conteo y el listado siguen coincidiendo entre sí, que es lo que se verifica.)
+
+#### F5 — segunda revisión (codex gpt-6.2-sol, 18:53) y correcciones
+
+Con el cupo restablecido, `codex` revisó la rama `rust` en solo lectura y respondió **"BLOQUEA F5"** con cuatro bloqueos y tres menores. Un bloqueo resultó ser el camino por el que ya había pasado la revisión anterior; los otros tres eran nuevos y reales.
+
+| Hallazgo | Corrección | Prueba |
+|---|---|---|
+| **Bloqueo:** el indicador podía mostrar la transacción de otra sesión (el último valor quedaba visible al cambiar de conexión, y una reconexión fallida lo dejaba puesto) | el valor se guarda con el id de su conexión y solo se muestra si coincide con la seleccionada; una reconexión fallida marca la conexión como desconectada (la sesión vieja ya estaba cerrada) | `phase-f5` (indicador tras conectar, tras `FOR UPDATE`, tras commit/rollback, tras reconectar) |
+| **Bloqueo:** la consulta del indicador podía competir por el lock de ejecución (retrasando F5 y quedando en vuelo ante Cancelar) | `transaction_pending` usa `try_lock_execution`: si la sesión está ocupada devuelve `null` ("preguntar luego"), nunca espera; el frontend conserva el valor anterior en vez de inventar "sin transacción" | compila y corre; `phase-f5` en verde; el caso "ocupado" no se puede provocar de forma determinista desde CDP (declarado) |
+| **Bloqueo:** los atajos globales se comían la edición dentro de la paleta (`Ctrl+A`, `Ctrl+V` ejecutaban comandos del editor y cerraban la paleta) | el mapa de atajos y el acelerador no actúan mientras la paleta está abierta | `phase-f5`: `Ctrl+A` dentro de la paleta selecciona el texto (`format`) y la paleta sigue abierta |
+| **Bloqueo:** ejecutar una opción podía dejar el foco en `<body>` (p. ej. `View.StatusBar` desde la paleta, o un ítem del menú) | tras ejecutar, si la acción no tomó el foco, vuelve al editor (paleta) o al botón "Más acciones" (menú) | `phase-f5`: comando de vista desde la paleta → el foco no queda en `BODY` |
+| Menor: los ítems del menú estaban en el orden de tabulación | `tabIndex=-1` en los `menuitem`, `aria-disabled` para los deshabilitados (siguen navegables con flechas) y `Tab` cierra el menú | `phase-f5`: todos los ítems con `tabindex=-1`; `Fin` llega al último y `Tab` cierra |
+| Menor: avisar "sin coincidencias" fuera del `listbox` | el mensaje es una región `role=status` hermana del listbox, que solo existe cuando hay opciones | `phase-f5`: con consulta sin resultados no hay `listbox` y el aviso tiene `role=status` |
+| Menor: el indicador aparecía fuera de una región viva | la barra de estado tiene una región `role=status` permanente para el indicador (vacía cuando no hay transacción) | `phase-f1`: las dos regiones vivas son el mensaje y el indicador; el cursor no está en ninguna |
+
+Al ajustar el popup de la paleta, `axe` marcó `scrollable-region-focusable`: la región desplazable necesita contenido alcanzable. Se dejó el popup enfocable (los ítems siguen sin ser paradas de Tab y salir del input cierra la paleta).
+
+**Evidencia final (app instalada, firmada autofirmada):** `phase-f5` **39 checks OK** (2 corridas consecutivas), `axe` **0 violaciones en 8 vistas × 2 temas**, `phase-f1` 19, `phase-f2` 3, `tree` 11, `env` 12, `keyboard-walk` 26 paradas en claro y oscuro, `commands-check` OK (mismo digest), `flow` IDENTICAL, `cargo fmt/clippy/check -p sqlt-desktop/test` en 0 (19 ok), `npm build` 0, vitest **81 passed**, `examples/live_check` contra Oracle en verde.

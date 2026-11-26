@@ -58,7 +58,7 @@ export function CommandPalette({
           autoFocus
           role="combobox"
           aria-expanded="true"
-          aria-controls="palette-listbox"
+          aria-controls={commands.length ? "palette-listbox" : undefined}
           aria-autocomplete="list"
           aria-activedescendant={active ? optionId(active.id) : undefined}
           aria-label={t("searchCommands")}
@@ -69,8 +69,11 @@ export function CommandPalette({
           onBlur={onClose}
         />
       </div>
-      <div className="palette-pop" id="palette-listbox" role="listbox" aria-label={t("commandPalette")} ref={list}>
-        {commands.length === 0 && <div className="palette-empty">{t("noMatches")}</div>}
+      {/* The popup scrolls, and axe requires a scrollable region to be reachable; the options themselves are
+          not tab stops (focus stays in the input), and tabbing out of the input closes the palette. */}
+      <div className="palette-pop" ref={list} tabIndex={0}>
+        {commands.length > 0 && (
+        <div id="palette-listbox" role="listbox" aria-label={t("commandPalette")}>
         {commands.map((command, i) => (
           <div
             key={command.id}
@@ -86,6 +89,13 @@ export function CommandPalette({
             {!command.implemented && <em>{t("notImplemented")}</em>}
           </div>
         ))}
+        </div>
+        )}
+        {commands.length === 0 && (
+          <div className="palette-empty" role="status">
+            {t("noMatches")}
+          </div>
+        )}
       </div>
     </div>
   );

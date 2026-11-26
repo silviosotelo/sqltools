@@ -4,6 +4,7 @@ const cdp = await connect();
 const checks = {};
 const check = (n, ok, d) => { checks[n] = { ok: Boolean(ok), ...(d === undefined ? {} : { d }) }; };
 const J = async (expr) => JSON.parse(await cdp.evaluate(`JSON.stringify(${expr})`));
+const txnText = () => cdp.evaluate(`document.querySelector("[data-e2e='txn-status']")?.innerText.trim() ?? ""`);
 const pressed = () => cdp.evaluate(`Array.from(document.querySelectorAll('.activity .act[aria-pressed="true"]')).map(b => b.getAttribute('aria-label')).join(',')`);
 const tabCount = () => cdp.evaluate(`document.querySelectorAll('.editor-tab').length`);
 const lineCount = () => cdp.evaluate(`document.querySelectorAll('.cm-line').length`);
@@ -75,6 +76,18 @@ await cdp.key("Escape", "Escape", 27);
 await cdp.wait(200);
 check("Escape closes the menu and returns focus to its button", (await cdp.evaluate(`document.querySelectorAll('[role=menu]').length`)) === 0 && (await cdp.evaluate(`document.activeElement?.getAttribute('aria-label')`)) === "Más acciones");
 check("every control of the old toolbar has a home", lost.length === 0, lost);
+// Menu keyboard model: items are not tab stops, disabled ones stay arrow-navigable, Tab leaves the menu.
+await cdp.click('.actionstrip button[aria-label="Más acciones"]');
+await cdp.wait(300);
+const menuA11y = await J(`(() => { const items = Array.from(document.querySelectorAll('[role=menuitem]')); return { tabs: items.map(i => i.getAttribute('tabindex')), disabled: items.filter(i => i.getAttribute('aria-disabled') === 'true').map(i => i.innerText.trim()) }; })()`);
+check("menu items are not tab stops and disabled ones use aria-disabled", menuA11y.tabs.every((v) => v === "-1") && menuA11y.disabled.length >= 0, menuA11y);
+await cdp.key("End", "End", 35);
+const lastItem = await cdp.evaluate(`document.activeElement?.getAttribute('role')`);
+await cdp.key("Tab", "Tab", 9);
+await cdp.wait(250);
+check("End reaches the last menu item and Tab closes the menu", lastItem === "menuitem" && (await cdp.count('[role=menu]')) === 0, { lastItem });
+
+
 
 const crumbsOff = await J(`Array.from(document.querySelectorAll('.breadcrumbs li')).map(l => l.innerText.trim())`);
 check("breadcrumbs without a connection: Sin conexión > Script sin título", crumbsOff.join("|") === "Sin conexión|Script sin título", crumbsOff);
@@ -88,6 +101,26 @@ check("combobox: expanded, controls a listbox, active option exists, has focus",
 await cdp.key("Escape", "Escape", 27);
 await cdp.wait(300);
 check("Esc closes the palette, empties the query and returns focus to the editor", (await cdp.count('[role=combobox]')) === 0 && (await cdp.evaluate(`document.activeElement?.closest('.cm-editor') !== null`)));
+
+// 2b) The palette owns the keyboard while it is open: Ctrl+A must select its text, not run the
+// editor's SelectAll (which would close the palette and act on the document).
+await cdp.evaluate(`document.querySelector('.cm-content')?.focus()`);
+await cdp.key("P", "KeyP", 80, 2 | 8);
+await cdp.waitFor(`Boolean(document.querySelector('[role="combobox"]'))`, 3000);
+await cdp.send("Input.insertText", { text: "format" });
+await cdp.wait(300);
+await cdp.key("a", "KeyA", 65, 2);
+await cdp.wait(400);
+const stillOpen = (await cdp.count('[role=combobox]')) === 1;
+const selectedText = await cdp.evaluate(`(() => { const i = document.querySelector('[role=combobox]'); return i.value.slice(i.selectionStart, i.selectionEnd); })()`);
+check("Ctrl+A inside the palette selects its text and does not run an editor command", stillOpen && selectedText === "format", { stillOpen, selectedText });
+const noMatch = await cdp.evaluate(`Boolean(document.querySelector('[role=listbox]'))`); // with text there are options
+await cdp.send("Input.insertText", { text: "zzzz" });
+await cdp.wait(300);
+const emptyState = await J(`(() => { const s = document.querySelector('.palette-empty'); return { text: s?.innerText.trim() ?? null, role: s?.getAttribute('role') ?? null, insideListbox: Boolean(s?.closest('[role=listbox]')), listbox: Boolean(document.querySelector('[role=listbox]')) }; })()`);
+check("no matches is announced from a status region outside the listbox", emptyState.text === "Sin coincidencias" && emptyState.role === "status" && !emptyState.insideListbox && !emptyState.listbox, { noMatchWithText: noMatch, ...emptyState });
+await cdp.key("Escape", "Escape", 27);
+await cdp.wait(300);
 
 await setEditor("select a,b from t where x=1");
 const before = await editorText();
@@ -110,6 +143,15 @@ await palette("View.Toolbar");
 check("View.Toolbar hides the action strip", (await cdp.count(".actionstrip")) === 0);
 await palette("View.Toolbar");
 check("View.Toolbar shows it again", (await cdp.count(".actionstrip")) === 1);
+// Running a command from the palette must not leave the focus on <body>.
+const focusAfterPalette = async (name) => {
+  await palette(name);
+  await cdp.wait(250);
+  return cdp.evaluate(`(() => { const a = document.activeElement; return (!a || a === document.body) ? 'BODY' : (a.closest('.cm-editor') ? 'editor' : a.tagName); })()`);
+};
+check("running a view command from the palette keeps the focus out of <body>", (await focusAfterPalette("View.StatusBar")) !== "BODY");
+await palette("View.StatusBar");
+
 await palette("View.StatusBar");
 const statusHidden = (await cdp.count(".statusbar")) === 0;
 await palette("View.StatusBar");
@@ -133,7 +175,7 @@ await cdp.wait(1500);
 check("the toggle reads Desconectar while connected", await cdp.evaluate(`Boolean(document.querySelector('.actionstrip button[aria-label="Desconectar"]'))`));
 const crumbsOn = await J(`Array.from(document.querySelectorAll('.breadcrumbs li')).map(l => l.innerText.trim())`);
 check("breadcrumbs connected: connection > schema > Script sin título", crumbsOn.length === 3 && crumbsOn[0].length > 0 && crumbsOn[0] !== "Sin conexión" && crumbsOn[2] === "Script sin título", crumbsOn);
-check("no transaction flag right after connecting", (await cdp.count("[data-e2e='txn-pending']")) === 0);
+check("no transaction flag right after connecting", (await txnText()) === "");
 await setEditor("select 7 from dual");
 await cdp.key("F5", "F5", 116);
 await cdp.waitFor(`document.querySelectorAll('.grid tbody tr').length > 0`, 15000);
@@ -173,25 +215,25 @@ await cdp.wait(500);
 
 await setEditor("select 1 from dual for update");
 await cdp.key("F5", "F5", 116);
-await cdp.waitFor(`Boolean(document.querySelector("[data-e2e='txn-pending']"))`, 15000);
-check("an open transaction is shown in the status bar", await cdp.evaluate(`document.querySelector("[data-e2e='txn-pending']")?.innerText`) === "Transacción abierta");
+await cdp.waitFor(`Boolean(document.querySelector("[data-e2e='txn-status']")?.innerText.trim())`, 15000);
+check("an open transaction is shown in the status bar", (await txnText()) === "Transacción abierta");
 check("Commit and Rollback are marked while it is open", (await cdp.count(".actionstrip .tb.marked")) >= 2);
 await cdp.clickTitle("Rollback");
-await cdp.waitFor(`!document.querySelector("[data-e2e='txn-pending']")`, 15000);
-check("Rollback clears the flag", (await cdp.count("[data-e2e='txn-pending']")) === 0);
+await cdp.waitFor(`!document.querySelector("[data-e2e='txn-status']")?.innerText.trim()`, 15000);
+check("Rollback clears the flag", (await txnText()) === "");
 // Reconnecting opens a new session: the old transaction (and its flag) is gone even if the user does not
 // commit or roll back first.
 await setEditor("select 3 from dual for update");
 await cdp.key("F5", "F5", 116);
-await cdp.waitFor(`Boolean(document.querySelector("[data-e2e='txn-pending']"))`, 15000);
+await cdp.waitFor(`Boolean(document.querySelector("[data-e2e='txn-status']")?.innerText.trim())`, 15000);
 await palette("Session.Reconnect");
-await cdp.waitFor(`!document.querySelector("[data-e2e='txn-pending']")`, 20000);
-check("reconnecting clears the flag of the old session", (await cdp.count("[data-e2e='txn-pending']")) === 0);
+await cdp.waitFor(`!document.querySelector("[data-e2e='txn-status']")?.innerText.trim()`, 20000);
+check("reconnecting clears the flag of the old session", (await txnText()) === "");
 
 await setEditor("select 2 from dual");
 await cdp.key("F5", "F5", 116);
 await cdp.wait(1500);
-check("a plain select leaves no flag", (await cdp.count("[data-e2e='txn-pending']")) === 0);
+check("a plain select leaves no flag", (await txnText()) === "");
 cdp.close();
 console.log(JSON.stringify(checks, null, 1));
 const bad = Object.entries(checks).filter(([, v]) => !v.ok).map(([k]) => k);

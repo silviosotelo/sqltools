@@ -1601,3 +1601,9 @@ kbd {
   color: var(--warn);
   font-weight: 600;
 }
+
+/* Empty until there is a transaction: it stays in the layout so the live region always exists. */
+.statusbar .seg.txn:empty {
+  padding: 0;
+  margin: 0;
+}

@@ -46,11 +46,9 @@ export function StatusBar({
         <span className="seg msg" role="status" data-e2e="status-message">
           {message}
         </span>
-        {transactionPending === true && (
-          <span className="seg txn" data-e2e="txn-pending">
-            {t("transactionOpen")}
-          </span>
-        )}
+        <span className="seg txn" role="status" aria-live="polite" data-e2e="txn-status">
+          {transactionPending === true ? t("transactionOpen") : ""}
+        </span>
         <span className="sp" />
         {cursor && (
           <span className="seg">

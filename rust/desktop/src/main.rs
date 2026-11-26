@@ -310,13 +310,16 @@ async fn rollback(state: State<'_, Arc<AppState>>, id: String) -> Result<(), Str
 async fn transaction_pending(
     state: State<'_, Arc<AppState>>,
     connection_id: String,
-) -> Result<bool, String> {
+) -> Result<Option<bool>, String> {
     let state = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let session = state.session(&connection_id)?;
-        // Same lock as commit/rollback: never compete with a running statement.
-        let _guard = session.lock_execution();
-        catalog::transaction_pending(&session, state.query_options(&connection_id))
+        // Never wait for the execution lock: a poll must not delay F5, and it must not still be in flight
+        // when the user cancels. `None` means "busy, ask again later", never "no transaction".
+        let Some(_guard) = session.try_lock_execution() else {
+            return Ok::<Option<bool>, String>(None);
+        };
+        catalog::transaction_pending(&session, state.query_options(&connection_id)).map(Some)
     })
     .await
     .map_err(|e| e.to_string())?

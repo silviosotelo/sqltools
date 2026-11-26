@@ -82,8 +82,10 @@ check("Connections has a heading and no collapsible summary", structure.heading 
 const pressedAttrs = JSON.parse(await cdp.evaluate(`JSON.stringify(Array.from(document.querySelectorAll('.activity .act')).map(b => [b.getAttribute('aria-label'), b.hasAttribute('aria-pressed')]))`));
 check("the four views are toggles; shortcuts and settings are plain actions", pressedAttrs.filter(([l]) => /Objetos|Conexiones|Historial|Estad/.test(l)).every(([, has]) => has) && pressedAttrs.filter(([l]) => /Atajos|Ajustes/.test(l)).every(([, has]) => !has), pressedAttrs);
 // e) The status bar announces only its message, not the cursor position.
-const live = JSON.parse(await cdp.evaluate(`JSON.stringify({ roleStatus: document.querySelectorAll('.statusbar [role="status"]').length, statusContainsCursor: /Ln \\d/.test(document.querySelector('.statusbar [role="status"]')?.innerText ?? '') })`));
-check("only the status message is a live region", live.roleStatus === 1 && !live.statusContainsCursor, live);
+const live = JSON.parse(await cdp.evaluate(`JSON.stringify({ roleStatus: document.querySelectorAll('.statusbar [role="status"]').length, statusContainsCursor: Array.from(document.querySelectorAll('.statusbar [role="status"]')).some(n => /Ln \\d/.test(n.innerText)) })`));
+// Two live regions: the status message and the transaction indicator. The cursor position is text you can
+// read, never an atomic announcement.
+check("the live regions are the status message and the transaction flag, without the cursor", live.roleStatus === 2 && !live.statusContainsCursor, live);
 await cdp.click('.activity .act[aria-label="Objetos"]');
 
 // 3c) The editor shows a focus ring when it receives focus.

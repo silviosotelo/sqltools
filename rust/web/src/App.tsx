@@ -313,7 +313,9 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [showToolbar, setShowToolbar] = useState(true);
   // null = unknown (never queried, or the last query failed).
-  const [transactionPending, setTransactionPending] = useState<boolean | null>(null);
+  // The flag belongs to one session: keeping the id next to the value stops a stale flag from being
+  // shown after the user switches connection.
+  const [transactionFlag, setTransactionFlag] = useState<{ id: string; pending: boolean } | null>(null);
   const [transactionTick, setTransactionTick] = useState(0);
   const objectsFilterRef = useRef<HTMLInputElement | null>(null);
   const dataPanelRef = useRef<HTMLElement | null>(null);
@@ -495,20 +497,25 @@ export default function App() {
   // Oracle is asked only when no statement is running (it would wait for the same session lock), after a run
   // ends and after commit/rollback. A failed query leaves the state unknown instead of guessing.
   useEffect(() => {
-    if (!isConnected) {
-      setTransactionPending(null);
+    if (!isConnected || running) {
+      setTransactionFlag(null);
       return;
     }
-    if (running) return;
     let current = true;
+    const id = selected;
     api
-      .transactionPending(selected)
-      .then((pending) => current && setTransactionPending(pending))
-      .catch(() => current && setTransactionPending(null));
+      .transactionPending(id)
+      .then((pending) => {
+        // null = the session was busy; keep the previous value instead of inventing "no transaction".
+        if (!current || pending === null) return;
+        setTransactionFlag({ id, pending });
+      })
+      .catch(() => current && setTransactionFlag(null));
     return () => {
       current = false;
     };
   }, [isConnected, running, selected, transactionTick]);
+  const transactionPending = transactionFlag?.id === selected ? transactionFlag.pending : null;
   const environment = connections.find((config) => config.id === selected)?.environment ?? null;
   const treeGroups: TreeGroup[] = useMemo(
     () =>
@@ -594,6 +601,9 @@ export default function App() {
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
+      // With the palette open its input owns the keyboard: Ctrl+A, Ctrl+V and typing are editing keys, not
+      // commands. (The palette's own handler deals with arrows, Enter and Escape.)
+      if (paletteOpenRef.current) return;
       if (event.key === "Escape" && pending) {
         event.preventDefault();
         clearPending();
@@ -685,7 +695,11 @@ export default function App() {
       if (event.key === "Escape" && paletteOpenRef.current) {
         setPaletteOpen(false);
         editorRef.current?.focus();
+        return;
       }
+      // While the palette is open every other keystroke belongs to its input (Ctrl+A, Ctrl+V, typing...),
+      // not to the editor command map.
+      if (paletteOpenRef.current) return;
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -1350,6 +1364,12 @@ export default function App() {
       setTables(await api.listTableNames(selected));
       setStatus(`${t("connected")}: ${version}`);
     } catch (error) {
+      // The old session was already closed: do not keep claiming it is connected.
+      setConnected((current) => {
+        const next = { ...current };
+        delete next[selected];
+        return next;
+      });
       setStatus(String(error));
     }
   };
@@ -2345,6 +2365,13 @@ export default function App() {
       default:
         setStatus(`${t("notImplemented")}: ${name || "internal"}`);
     }
+    // The palette unmounts with its input: if the command itself did not take the focus (a dialog, a
+    // field), it goes back to the editor instead of being lost on <body>.
+    window.setTimeout(() => {
+      if (!document.activeElement || document.activeElement === document.body) {
+        editorRef.current?.focus();
+      }
+    }, 0);
   };
 
   // The shortcut binder reads the latest dispatcher without re-subscribing.
