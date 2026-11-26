@@ -476,3 +476,31 @@ Veredicto: **REFUTADO**, con 2 bloqueos y 3 menores. Los dos bloqueos se verific
 **Desviación declarada:** cuando el DDL se carga con el campo *Esquema* vacío, la clave del documento no guarda el dueño, así que el breadcrumb muestra `tipo > objeto` sin esquema. Poner el dueño exigiría cambiar el modelo de pestañas de documentos, que el goal prohíbe tocar.
 
 **Evidencia (app instalada 26/11/2026, firmada autofirmada):** `phase-f5` **34 checks OK** (3 corridas consecutivas), `axe` **0 violaciones en 8 vistas × 2 temas**, `phase-f1` 19, `phase-f2` 3, `tree` 11, `env` 12, `keyboard-walk` 26 paradas en claro y oscuro, `commands-check` OK con el mismo digest, `flow` IDENTICAL, `cargo fmt/clippy/check/test` en 0 (19 ok), `npm build` 0, vitest **81 passed**.
+
+#### F5 — verificación de Oracle ejecutada (2026-11-26)
+
+Los dos tests Rust marcados `#[ignore]` ya **no quedan pendientes**: sus comprobaciones se corrieron contra `anamnesis@desa02` reutilizando la conexión guardada por la app (`crates/sqlt-app/examples/live_check.rs`), de modo que la contraseña la entrega el keyring del sistema y no se lee, imprime ni escribe en ningún archivo. El ejemplo queda en el repo porque permite repetir la verificación sin credenciales; CI no lo ejecuta (`cargo test` no corre ejemplos).
+
+Salida real:
+
+```
+connected: Oracle Database 12c Standard Edition Release 12.1.0.2.0 - 64bit Production
+-- count_objects vs list_objects
+TABLE      count=2721   list=2721
+VIEW       count=360    list=360
+SEQUENCE   count=481    list=481
+PROCEDURE  count=1111   list=1111
+FUNCTION   count=908    list=908
+PACKAGE    count=383    list=383
+TRIGGER    count=1771   list=1771
+TYPE       count=145    list=145
+SYNONYM    count=1      list=1
+types not shown by the explorer: ["LOB=379", "PACKAGE BODY=372", "INDEX=3895"]
+-- transaction_pending
+FOR UPDATE -> true
+commit      -> false
+rollback    -> false
+LIVE CHECK OK
+```
+
+Los tipos que el explorador no muestra (`PACKAGE BODY`, `INDEX`, `LOB`) aparecen en el conteo pero no como grupos del árbol, que es lo previsto. (El total de `PACKAGE` pasó de 382 a 383 entre corridas: el conteo y el listado siguen coincidiendo entre sí, que es lo que se verifica.)
