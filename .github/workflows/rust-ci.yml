@@ -132,7 +132,7 @@ jobs:
           write_env APPLE_ID "${APPLE_ID:-}"
           write_env APPLE_PASSWORD "${APPLE_PASSWORD:-}"
           write_env APPLE_TEAM_ID "${APPLE_TEAM_ID:-}"
-      - name: Create a self-signed identity (macOS)
+      - name: Self-sign the macOS bundle (ad-hoc)
         if: runner.os == 'macOS'
         timeout-minutes: 5
         shell: bash
@@ -141,53 +141,15 @@ jobs:
         run: |
           set -euo pipefail
           if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
-            echo "Apple identity configured; skipping the self-signed identity"
+            echo "Apple identity configured; skipping the ad-hoc signature"
             exit 0
           fi
-          CN="SQLTools Self-Signed"
-          cat > "$RUNNER_TEMP/codesign.cnf" <<'EOF'
-          [req]
-          distinguished_name = dn
-          x509_extensions = ext
-          prompt = no
-          [dn]
-          CN = SQLTools Self-Signed
-          [ext]
-          basicConstraints = critical,CA:FALSE
-          keyUsage = critical,digitalSignature
-          extendedKeyUsage = codeSigning
-          EOF
-          # The system LibreSSL writes a PKCS#12 that `security import` accepts;
-          # a Homebrew OpenSSL 3 earlier on PATH does not (MAC verification
-          # failed), and an empty password is rejected either way.
-          P12_PASSWORD="sqlt-$RANDOM$RANDOM"
-          /usr/bin/openssl req -x509 -newkey rsa:2048 -days 365 -nodes \
-            -keyout "$RUNNER_TEMP/key.pem" -out "$RUNNER_TEMP/cert.pem" \
-            -config "$RUNNER_TEMP/codesign.cnf"
-          /usr/bin/openssl pkcs12 -export -out "$RUNNER_TEMP/cert.p12" \
-            -inkey "$RUNNER_TEMP/key.pem" -in "$RUNNER_TEMP/cert.pem" \
-            -passout "pass:$P12_PASSWORD"
-          security create-keychain -p "" build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "" build.keychain
-          security import "$RUNNER_TEMP/cert.p12" -k build.keychain -P "$P12_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain > /dev/null
-          # Tauri only sees identities that `security find-identity -v` lists, and
-          # an untrusted self-signed root is not listed. Trusting it for the
-          # login keychain opens an authorization dialog that nobody can answer
-          # on a runner (the step hung for 40 minutes), so trust it through
-          # sudo in the System keychain, which is non-interactive here.
-          sudo security add-trusted-cert -d -r trustRoot -p codeSign \
-            -k /Library/Keychains/System.keychain "$RUNNER_TEMP/cert.pem"
-          security find-identity -v -p codesigning build.keychain
-          if security find-identity -v -p codesigning build.keychain | grep -q "$CN"; then
-            echo "APPLE_SIGNING_IDENTITY=$CN" >> "$GITHUB_ENV"
-          else
-            # Still untrusted: fall back to an ad-hoc signature so the bundle is
-            # signed rather than failing the build.
-            echo "Self-signed identity is not valid for codesigning; using ad-hoc"
-            echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
-          fi
+          # A self-signed certificate in a temporary keychain made `codesign`
+          # wait forever for a private-key access prompt on the runner (40
+          # minutes, twice). An ad-hoc identity ("-") is what a self-signed
+          # macOS build amounts to (Gatekeeper rejects both), needs no keychain
+          # and is accepted by `codesign --verify`.
+          echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
       - name: Create a self-signed certificate (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -211,6 +173,7 @@ jobs:
           "SQLT_SELF_SIGN=1" >> $env:GITHUB_ENV
           Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert | Select-Object Subject, Thumbprint
       - name: Build bundles
+        timeout-minutes: 30
         shell: bash
         working-directory: rust/desktop
         run: |
