@@ -156,15 +156,20 @@ jobs:
           keyUsage = critical,digitalSignature
           extendedKeyUsage = codeSigning
           EOF
-          openssl req -x509 -newkey rsa:2048 -days 365 -nodes \
+          # The system LibreSSL writes a PKCS#12 that `security import` accepts;
+          # a Homebrew OpenSSL 3 earlier on PATH does not (MAC verification
+          # failed), and an empty password is rejected either way.
+          P12_PASSWORD="sqlt-$RANDOM$RANDOM"
+          /usr/bin/openssl req -x509 -newkey rsa:2048 -days 365 -nodes \
             -keyout "$RUNNER_TEMP/key.pem" -out "$RUNNER_TEMP/cert.pem" \
             -config "$RUNNER_TEMP/codesign.cnf"
-          openssl pkcs12 -export -out "$RUNNER_TEMP/cert.p12" \
-            -inkey "$RUNNER_TEMP/key.pem" -in "$RUNNER_TEMP/cert.pem" -passout pass:
+          /usr/bin/openssl pkcs12 -export -out "$RUNNER_TEMP/cert.p12" \
+            -inkey "$RUNNER_TEMP/key.pem" -in "$RUNNER_TEMP/cert.pem" \
+            -passout "pass:$P12_PASSWORD"
           security create-keychain -p "" build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p "" build.keychain
-          security import "$RUNNER_TEMP/cert.p12" -k build.keychain -P "" -T /usr/bin/codesign
+          security import "$RUNNER_TEMP/cert.p12" -k build.keychain -P "$P12_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain > /dev/null
           # Tauri selects the identity with `security find-identity -v`, which
           # only lists trusted, valid identities.
