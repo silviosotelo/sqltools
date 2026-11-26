@@ -148,6 +148,21 @@ StatusBar(props: { dot: "ok"|"warn"|"err"|""; connLabel: string; message: string
 - [ ] `rust/desktop/tauri.conf.json`: `minWidth` 1024, `minHeight` 640.
 - [ ] Verificar: `flow.mjs --compare golden-before.json` (mismos hechos salvo los que cambian a propósito, anotados), `axe-cdp.mjs` en 0, capturas a 1366×768 y 1024×700 revisadas a ojo.
 
+### T1.6 Accesibilidad heredada (la línea base de axe de la UI actual NO es 0)
+La línea base (`rust/web/e2e/axe-baseline.txt`, 3 vistas × 2 temas) da **41 grupos de violaciones**, 8 reglas. Como F1 exige 0, se arreglan acá (casi todo es marcado/atributos):
+
+| Regla (impacto) | Dónde | Arreglo |
+|---|---|---|
+| `aria-input-field-name` (serious) | `.cm-content` | `EditorView.contentAttributes.of({ "aria-label": t("editor"), "aria-multiline": "true" })` |
+| `aria-required-attr` (critical) | `.splitter` | `aria-valuenow/min/max` sincronizados con `splitPercent` |
+| `aria-required-parent` + `nested-interactive` | pestañas `.editor-tab` (roles `tab` con botón de cerrar adentro) | pestañas como `<ul>` de `<li>` con un botón de selección y otro de cerrar **hermanos** (patrón ya validado en `docs/ui-proposals`) |
+| `label-title-only` | inputs Esquema y Filtro | `aria-label` con `t("schema")`/`t("filter")` |
+| `color-contrast` (`.connection-chip`, `.tabbar-conn`, `.hint`) | tokens `--success`, `--muted` | los valores nuevos de T1.2 (el test de tokens lo exige) |
+| `page-has-heading-one` (moderate) | raíz | `<h1 className="sr-only">` en `TitleBar` |
+| `scrollable-region-focusable` | `.object-scroll` y paneles con scroll | `tabIndex={0}` + `role="region"` + `aria-label` |
+
+- [ ] Aplicar la tabla; `node rust/web/e2e/axe-cdp.mjs` → `AXE OK` antes de cerrar F1.
+
 **Cierre F1:** compuerta global. Evidencia anotada abajo.
 
 ---
@@ -309,4 +324,14 @@ Se consulta al terminar una ejecución y tras commit/rollback (nunca durante una
 
 ## Evidencia por fase
 
-*(Cada fase agrega acá, al cerrarse, los comandos corridos y su salida real, y el commit.)*
+*(Cada fase agrega acá, al cerrarse, los comandos corridos y su salida real, el binario y el commit que recibieron la prueba CDP.)*
+
+### Tarea 0 — cerrada (2026-11-26)
+
+- `npm --prefix rust/web i -D axe-core vitest` → `axe-core ^4.14.1`, `vitest ^5.1.2`. En esta red `npm` falla con `SELF_SIGNED_CERT_IN_CHAIN` (proxy con inspección SSL); se resuelve con `NODE_OPTIONS=--use-system-ca` (la verificación SSL sigue activa).
+- `npm --prefix rust/web test` → `No test files found, exiting with code 0` (`--passWithNoTests` hasta que existan tests).
+- App de la línea base: instalada `%LOCALAPPDATA%\SQLTools\sqlt-desktop.exe` (16.882.592 bytes, 18/11/2026 10:48), código en `rust` al commit `9867f7f`.
+- `node rust/web/e2e/flow.mjs --save rust/web/e2e/golden-before.json` → `connected: true`, `chip: "Conectado: anamnesis@desa02"`, `explorer: "list"`, `ddlLoaded: true` (`CREATE TABLE a11 ( tipo_cto NUMBER NULL,`), `tabs: ["SQL","A11 (TABLE)"]`, `gridRows: 1`, `firstRow: "1|X"`. `objectRows` (≈12.6 k) depende de la base y puede variar: comparar con `--ignore objectRows`.
+- `node rust/web/e2e/axe-cdp.mjs` (UI actual) → **41 grupos de violaciones** (light: shell 7, results 7, objects 8; dark: shell 6, results 6, objects 7); reglas: `aria-input-field-name`, `aria-required-attr`, `aria-required-parent`, `color-contrast`, `label-title-only`, `nested-interactive`, `page-has-heading-one`, `scrollable-region-focusable`. Detalle en `rust/web/e2e/axe-baseline.txt`.
+- **Hallazgos de entorno** (para no repetirlos): (a) la herramienta de shell mata los procesos hijos cuando la llamada termina con código ≠ 0 → la app se lanza **desacoplada** con `rust/web/e2e/launch-app.ps1` (WMI) y los scripts imprimen sus mensajes informativos por stdout; (b) `Ctrl+F12` sobre una tabla puede tardar mucho por el MetaDictionary (`AAA_ELIMINADO`: 17,7 s, `A11`: 0,25 s), por eso el flujo usa el objeto fijo `A11` y espera hasta 60 s; (c) el visor de imágenes cachea por ruta.
+- **Hallazgo de producto fuera de alcance (se reporta, no se arregla):** la carga de DDL de tablas vía MetaDictionary puede tardar ~18 s en tablas grandes.

@@ -15,8 +15,19 @@ const CHIP = "[data-e2e='conn-chip'], .connection-chip";
 const OBJECT_ROWS = ".objects-panel tbody tr";
 const TREE_ITEMS = "[role='treeitem']";
 
+// Fixed target: a small table whose DDL loads fast. Some tables take ~18 s through the MetaDictionary.
+const TARGET = "A11";
+const TAB_TITLES = ".editor-tab .tab-title, [data-e2e='editor-tab']";
+
 const cdp = await connect();
 const out = { flow: "connect-explore-ddl-run" };
+
+// The golden is taken from a freshly launched app: leftover tabs would change the facts.
+const initialTabs = JSON.parse(await cdp.evaluate(`JSON.stringify(Array.from(document.querySelectorAll(${JSON.stringify(TAB_TITLES)})).map(t => t.innerText.trim()))`));
+if (initialTabs.length > 1) {
+  console.error("Restart the app before running the flow (found tabs: " + initialTabs.join(", ") + ")");
+  process.exit(3);
+}
 
 await cdp.clickTitle("Conectar");
 out.connected = Boolean(await cdp.waitFor(`/(Conectado|anamnesis@)/.test(document.querySelector(${JSON.stringify(CHIP)})?.innerText ?? '')`, 20000));
@@ -32,16 +43,22 @@ if (tree) {
   await cdp.clickTitle("Cargar objetos");
   await cdp.waitFor(`document.querySelectorAll(${JSON.stringify(OBJECT_ROWS)}).length > 0`, 20000);
   out.objectRows = await cdp.count(OBJECT_ROWS);
-  await cdp.click(OBJECT_ROWS);
-  await cdp.wait(1500);
+  const idx = await cdp.evaluate(`Array.from(document.querySelectorAll(${JSON.stringify(OBJECT_ROWS)})).findIndex(r => r.children[0]?.innerText.trim() === ${JSON.stringify(TARGET)})`);
+  out.targetFound = idx >= 0;
+  await cdp.evaluate(`document.querySelectorAll(${JSON.stringify(OBJECT_ROWS)})[${idx}]?.click()`);
+  await cdp.wait(1200);
 }
 
 // Load DDL for the selected object with Ctrl+F12.
 await cdp.evaluate(`document.querySelector('.cm-content')?.focus()`);
 await cdp.key("F12", "F12", 123, 2);
-await cdp.waitFor(`/CREATE|create/.test(document.querySelector('.cm-content')?.textContent ?? '')`, 15000);
+out.ddlLoaded = Boolean(await cdp.waitFor(`Array.from(document.querySelectorAll(${JSON.stringify(TAB_TITLES)})).some(t => t.innerText.trim().startsWith(${JSON.stringify(TARGET + " (")}))`, 60000, 100));
 out.ddlStart = (await cdp.evaluate(`(document.querySelector('.cm-content')?.textContent ?? '').replace(/\\s+/g,' ').trim().slice(0, 40)`)) ?? "";
-out.tabs = JSON.parse(await cdp.evaluate(`JSON.stringify(Array.from(document.querySelectorAll('.editor-tab .tab-title, [data-e2e="editor-tab"]')).map(t => t.innerText.trim()))`));
+out.tabs = JSON.parse(await cdp.evaluate(`JSON.stringify(Array.from(document.querySelectorAll(${JSON.stringify(TAB_TITLES)})).map(t => t.innerText.trim()))`));
+
+// Back to the scratch tab so the query does not overwrite the DDL tab.
+await cdp.evaluate(`(document.querySelector('.editor-tab .tab-btn, [data-e2e="editor-tab"]'))?.click()`);
+await cdp.wait(400);
 
 // Run a query and read the grid.
 await cdp.evaluate(`document.querySelector('.cm-content')?.focus()`);
@@ -58,7 +75,7 @@ const snapshot = JSON.stringify(out, null, 2);
 console.log(snapshot);
 
 const save = opt("--save");
-if (save) { fs.writeFileSync(save, snapshot); console.error("saved", save); }
+if (save) { fs.writeFileSync(save, snapshot); console.log("saved", save); }
 const compare = opt("--compare");
 if (compare) {
   const golden = JSON.parse(fs.readFileSync(compare, "utf8"));
@@ -66,5 +83,5 @@ if (compare) {
     .filter((k) => !ignore.includes(k) && JSON.stringify(golden[k]) !== JSON.stringify(out[k]))
     .map((k) => `${k}: golden=${JSON.stringify(golden[k])} now=${JSON.stringify(out[k])}`);
   if (diffs.length) { console.error("DIFFERENT:\n  " + diffs.join("\n  ")); process.exit(1); }
-  console.error("IDENTICAL to", compare);
+  console.log("IDENTICAL to", compare);
 }

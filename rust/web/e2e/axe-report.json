@@ -1,0 +1,387 @@
+[
+ {
+  "theme": "light",
+  "requested": "light",
+  "applied": "light",
+  "view": "shell",
+  "violations": [
+   {
+    "id": "aria-input-field-name",
+    "impact": "serious",
+    "nodes": 1,
+    "sample": [
+     ".cm-content ::   aria-label attribute does not exist or is empty"
+    ]
+   },
+   {
+    "id": "aria-required-attr",
+    "impact": "critical",
+    "nodes": 1,
+    "sample": [
+     ".splitter ::   Required ARIA attribute not present: aria-valuenow"
+    ]
+   },
+   {
+    "id": "aria-required-parent",
+    "impact": "critical",
+    "nodes": 1,
+    "sample": [
+     ".editor-tab ::   Required ARIA parent role not present: tablist"
+    ]
+   },
+   {
+    "id": "color-contrast",
+    "impact": "serious",
+    "nodes": 3,
+    "sample": [
+     ".tabbar-conn ::   Element has insufficient color contrast of 4.26 (foreground color: #6b6b6b, background color: #e6e6e6, font size: 8.3pt (11px), font weight: normal). Expected contrast ratio of 4.5:1",
+     ".hint ::   Element has insufficient color contrast of 4.26 (foreground color: #6b6b6b, background color: #e6e6e6, font size: 8.3pt (11px), font weight: normal). Expected contrast ratio of 4.5:1"
+    ]
+   },
+   {
+    "id": "label-title-only",
+    "impact": "serious",
+    "nodes": 2,
+    "sample": [
+     "input[placeholder=\"Esquema\"] ::   Only title used to generate label for form element",
+     "input[placeholder=\"Filtro\"] ::   Only title used to generate label for form element"
+    ]
+   },
+   {
+    "id": "nested-interactive",
+    "impact": "serious",
+    "nodes": 1,
+    "sample": [
+     ".editor-tab ::   Element has focusable descendants. Move them outside of the element, or remove them."
+    ]
+   },
+   {
+    "id": "page-has-heading-one",
+    "impact": "moderate",
+    "nodes": 1,
+    "sample": [
+     "html ::   Page must have a level-one heading"
+    ]
+   }
+  ]
+ },
+ {
+  "theme": "light",
+  "requested": "light",
+  "applied": "light",
+  "view": "results",
+  "violations": [
+   {
+    "id": "aria-input-field-name",
+    "impact": "serious",
+    "nodes": 1,
+    "sample": [
+     ".cm-content ::   aria-label attribute does not exist or is empty"
+    ]
+   },
+   {
+    "id": "aria-required-attr",
+    "impact": "critical",
+    "nodes": 1,
+    "sample": [
+     ".splitter ::   Required ARIA attribute not present: aria-valuenow"
+    ]
+   },
+   {
+    "id": "aria-required-parent",
+    "impact": "critical",
+    "nodes": 1,
+    "sample": [
+     ".editor-tab ::   Required ARIA parent role not present: tablist"
+    ]
+   },
+   {
+    "id": "color-contrast",
+    "impact": "serious",
+    "nodes": 4,
+    "sample": [
+     ".connection-chip ::   Element has insufficient color contrast of 3.44 (foreground color: #2e9e45, background color: #ffffff, font size: 8.3pt (11px), font weight: normal). Expected contrast ratio of 4.5:1",
+     ".tabbar-conn ::   Element has insufficient color contrast of 4.26 (foreground color: #6b6b6b, background color: #e6e6e6, font size: 8.3pt (11px), font weight: normal). Expected contrast ratio of 4.5:1"
+    ]
+   },
+   {
+    "id": "label-title-only",
+    "impact": "serious",
+    "nodes": 2,
+    "sample": [
+     "input[placeholder=\"Esquema\"] ::   Only title used to generate label for form element",
+     "input[placeholder=\"Filtro\"] ::   Only title used to generate label for form element"
+    ]
+   },
+   {
+    "id": "nested-interactive",
+    "impact": "serious",
+    "nodes": 1,
+    "sample": [
+     ".editor-tab ::   Element has focusable descendants. Move them outside of the element, or remove them."
+    ]
+   },
+   {
+    "id": "page-has-heading-one",
+    "impact": "moderate",
+    "nodes": 1,
+    "sample": [
+     "html ::   Page must have a level-one heading"
+    ]
+   }
+  ]
+ },
+ {
+  "theme": "light",
+  "requested": "light",
+  "applied": "light",
+  "view": "objects",
+  "violations": [
+   {
+    "id": "aria-input-field-name",
+    "impact": "serious",
+    "nodes": 1,
+    "sample": [
+     ".cm-content ::   aria-label attribute does not exist or is empty"
+    ]
+   },
+   {
+    "id": "aria-required-attr",
+    "impact": "critical",
+    "nodes": 1,
+    "sample": [
+     ".splitter ::   Required ARIA attribute not present: aria-valuenow"
+    ]
+   },
+   {
+    "id": "aria-required-parent",
+    "impact": "critical",
+    "nodes": 1,
+    "sample": [
+     ".editor-tab ::   Required ARIA parent role not present: tablist"
+    ]
+   },
+   {
+    "id": "color-contrast",
+    "impact": "serious",
+    "nodes": 4,
+    "sample": [
+     ".connection-chip ::   Element has insufficient color contrast of 3.44 (foreground color: #2e9e45, background color: #ffffff, font size: 8.3pt (11px), font weight: normal). Expected contrast ratio of 4.5:1",
+     ".tabbar-conn ::   Element has insufficient color contrast of 4.26 (foreground color: #6b6b6b, background color: #e6e6e6, font size: 8.3pt (11px), font weight: normal). Expected contrast ratio of 4.5:1"
+    ]
+   },
+   {
+    "id": "label-title-only",
+    "impact": "serious",
+    "nodes": 2,
+    "sample": [
+     "input[placeholder=\"Esquema\"] ::   Only title used to generate label for form element",
+     "input[placeholder=\"Filtro\"] ::   Only title used to generate label for form element"
+    ]
+   },
+   {
+    "id": "nested-interactive",
+    "impact": "serious",
+    "nodes": 1,
+    "sample": [
+     ".editor-tab ::   Element has focusable descendants. Move them outside of the element, or remove them."
+    ]
+   },
+   {
+    "id": "page-has-heading-one",
+    "impact": "moderate",
+    "nodes": 1,
+    "sample": [
+     "html ::   Page must have a level-one heading"
+    ]
+   },
+   {
+    "id": "scrollable-region-focusable",
+    "impact": "serious",
+    "nodes": 1,
+    "sample": [
+     ".object-scroll ::   Element should have focusable content"
+    ]
+   }
+  ]
+ },
+ {
+  "theme": "dark",
+  "requested": "dark",
+  "applied": "dark",
+  "view": "shell",
+  "violations": [
+   {
+    "id": "aria-input-field-name",
+    "impact": "serious",
+    "nodes": 1,
+    "sample": [
+     ".cm-content ::   aria-label attribute does not exist or is empty"
+    ]
+   },
+   {
+    "id": "aria-required-attr",
+    "impact": "critical",
+    "nodes": 1,
+    "sample": [
+     ".splitter ::   Required ARIA attribute not present: aria-valuenow"
+    ]
+   },
+   {
+    "id": "aria-required-parent",
+    "impact": "critical",
+    "nodes": 1,
+    "sample": [
+     ".editor-tab ::   Required ARIA parent role not present: tablist"
+    ]
+   },
+   {
+    "id": "label-title-only",
+    "impact": "serious",
+    "nodes": 2,
+    "sample": [
+     "input[placeholder=\"Esquema\"] ::   Only title used to generate label for form element",
+     "input[placeholder=\"Filtro\"] ::   Only title used to generate label for form element"
+    ]
+   },
+   {
+    "id": "nested-interactive",
+    "impact": "serious",
+    "nodes": 1,
+    "sample": [
+     ".editor-tab ::   Element has focusable descendants. Move them outside of the element, or remove them."
+    ]
+   },
+   {
+    "id": "page-has-heading-one",
+    "impact": "moderate",
+    "nodes": 1,
+    "sample": [
+     "html ::   Page must have a level-one heading"
+    ]
+   }
+  ]
+ },
+ {
+  "theme": "dark",
+  "requested": "dark",
+  "applied": "dark",
+  "view": "results",
+  "violations": [
+   {
+    "id": "aria-input-field-name",
+    "impact": "serious",
+    "nodes": 1,
+    "sample": [
+     ".cm-content ::   aria-label attribute does not exist or is empty"
+    ]
+   },
+   {
+    "id": "aria-required-attr",
+    "impact": "critical",
+    "nodes": 1,
+    "sample": [
+     ".splitter ::   Required ARIA attribute not present: aria-valuenow"
+    ]
+   },
+   {
+    "id": "aria-required-parent",
+    "impact": "critical",
+    "nodes": 1,
+    "sample": [
+     ".editor-tab ::   Required ARIA parent role not present: tablist"
+    ]
+   },
+   {
+    "id": "label-title-only",
+    "impact": "serious",
+    "nodes": 2,
+    "sample": [
+     "input[placeholder=\"Esquema\"] ::   Only title used to generate label for form element",
+     "input[placeholder=\"Filtro\"] ::   Only title used to generate label for form element"
+    ]
+   },
+   {
+    "id": "nested-interactive",
+    "impact": "serious",
+    "nodes": 1,
+    "sample": [
+     ".editor-tab ::   Element has focusable descendants. Move them outside of the element, or remove them."
+    ]
+   },
+   {
+    "id": "page-has-heading-one",
+    "impact": "moderate",
+    "nodes": 1,
+    "sample": [
+     "html ::   Page must have a level-one heading"
+    ]
+   }
+  ]
+ },
+ {
+  "theme": "dark",
+  "requested": "dark",
+  "applied": "dark",
+  "view": "objects",
+  "violations": [
+   {
+    "id": "aria-input-field-name",
+    "impact": "serious",
+    "nodes": 1,
+    "sample": [
+     ".cm-content ::   aria-label attribute does not exist or is empty"
+    ]
+   },
+   {
+    "id": "aria-required-attr",
+    "impact": "critical",
+    "nodes": 1,
+    "sample": [
+     ".splitter ::   Required ARIA attribute not present: aria-valuenow"
+    ]
+   },
+   {
+    "id": "aria-required-parent",
+    "impact": "critical",
+    "nodes": 1,
+    "sample": [
+     ".editor-tab ::   Required ARIA parent role not present: tablist"
+    ]
+   },
+   {
+    "id": "label-title-only",
+    "impact": "serious",
+    "nodes": 2,
+    "sample": [
+     "input[placeholder=\"Esquema\"] ::   Only title used to generate label for form element",
+     "input[placeholder=\"Filtro\"] ::   Only title used to generate label for form element"
+    ]
+   },
+   {
+    "id": "nested-interactive",
+    "impact": "serious",
+    "nodes": 1,
+    "sample": [
+     ".editor-tab ::   Element has focusable descendants. Move them outside of the element, or remove them."
+    ]
+   },
+   {
+    "id": "page-has-heading-one",
+    "impact": "moderate",
+    "nodes": 1,
+    "sample": [
+     "html ::   Page must have a level-one heading"
+    ]
+   },
+   {
+    "id": "scrollable-region-focusable",
+    "impact": "serious",
+    "nodes": 1,
+    "sample": [
+     ".object-scroll ::   Element should have focusable content"
+    ]
+   }
+  ]
+ }
+]
