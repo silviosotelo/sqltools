@@ -45,7 +45,10 @@ artifact configuration.
 ## Current status (verified 2026-11-18)
 
 - **Windows: self-signed.** The installer, the MSI and the app binary are
-  signed with a locally generated code-signing certificate
+  signed with a generated code-signing certificate (locally, and in CI run
+  `45812702256` where `Get-AuthenticodeSignature` lists both
+  `SQLTools_0.1.1_x64-setup.exe` and the `.msi` as signed by
+  `CN=SQLTools Self-Signed`; the local one is
   (`CN=SQLTools Self-Signed`, thumbprint `3B9C9F1B…F7`, valid until 2029). The
   app binary is signed **before** bundling (`tauri build --no-bundle` →
   `signtool sign` → `tauri bundle`), so the installed
@@ -54,12 +57,15 @@ artifact configuration.
   not trusted outside this machine — that is what self-signing means: the
   binaries are signed, but SmartScreen will still warn until a CA-issued or
   SignPath certificate is used.
-- **macOS: self-signed (CI).** The workflow generates a self-signed
-  code-signing identity on the runner when no Apple identity secret exists,
-  imports it into a temporary keychain, trusts it for the build and lets Tauri
-  sign the bundle; a verification step runs `codesign --verify --deep --strict`
-  and prints `codesign -dv` plus `spctl --assess` (Gatekeeper still rejects it:
-  no notarization).
+- **macOS: ad-hoc signature (CI).** When no Apple identity secret exists the
+  workflow sets `APPLE_SIGNING_IDENTITY=-` and Tauri signs the bundle ad-hoc.
+  A throwaway self-signed certificate was tried first and made `codesign` wait
+  forever for a private-key access prompt on the runner (two runs of 40
+  minutes), so it was dropped: an ad-hoc signature needs no keychain, passes
+  `codesign --verify --deep --strict` (`valid on disk`, `satisfies its
+  Designated Requirement`, `TeamIdentifier=not set`) and Gatekeeper rejects it
+  exactly like it would reject a self-signed one (`spctl: rejected`, no
+  notarization). Verified in CI run `45812702256`.
 - The updater signatures in `latest.json` are a different mechanism; they work
   and are unaffected.
 - Linux packages are not distro-signed; the `.sig` files in the release are
