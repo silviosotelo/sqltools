@@ -16,8 +16,12 @@ await cdp.evaluate(`document.activeElement?.blur()`);
 const stops = [];
 for (let i = 0; i < max; i++) {
   await cdp.key("Tab", "Tab", 9);
-  await cdp.wait(120); // CodeMirror applies .cm-focused asynchronously
-  const info = await cdp.evaluate(`JSON.stringify((() => {
+  // CodeMirror applies .cm-focused asynchronously and other styles settle on the next frame: poll briefly
+  // instead of trusting one fixed delay (a real missing indicator never appears, so this hides nothing).
+  let info = null;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    await cdp.wait(attempt === 0 ? 60 : 150);
+    info = await cdp.evaluate(`JSON.stringify((() => {
     const a = document.activeElement;
     if (!a || a === document.body) return null;
     const cs = getComputedStyle(a);
@@ -30,6 +34,10 @@ for (let i = 0; i < max; i++) {
     const area = a.closest('.titlebar') ? 'titlebar' : a.closest('.actionstrip') ? 'toolbar' : a.closest('.activity') ? 'activity' : a.closest('.objects-panel') ? 'side' : a.closest('.editor-shell') ? 'editor' : a.closest('.statusbar') ? 'status' : 'panel';
     return { name: name.replace(/\\s+/g, ' '), tag: a.tagName.toLowerCase(), area, visible: r.width > 0 && r.height > 0, inViewport: r.right <= window.innerWidth + 0.5 && r.bottom <= window.innerHeight + 0.5, indicator: Boolean(own || viaWrap) };
   })())`);
+    const parsed = info && JSON.parse(info);
+    if (!parsed || parsed.indicator) break;
+  }
+
   const stop = info && JSON.parse(info);
   if (!stop) break;
   if (stops.length && stops.at(-1).name === stop.name && stops.at(-1).area === stop.area && stops.length > 2 && stops[0].name === stop.name) break; // wrapped around

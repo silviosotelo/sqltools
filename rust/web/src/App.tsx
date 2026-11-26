@@ -371,6 +371,9 @@ export default function App() {
   );
   const [showStatus, setShowStatus] = useState(true);
   const [sideView, setSideView] = useState<SideView>("objects");
+  // Mirrors `sideView` for async handlers that must not switch the view after the user moved on.
+  const sideViewRef = useRef<SideView>("objects");
+  sideViewRef.current = sideView;
   // Bumped every time the user opens the connections view: a save or connect that finishes later
   // may only close the view if the user has not left and come back since it started.
   const connectionsVisit = useRef(0);
@@ -478,6 +481,9 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState("");
   const [paletteIndex, setPaletteIndex] = useState(0);
+  // Read by the window-level accelerator, which cannot see the latest state inside a stable listener.
+  const paletteOpenRef = useRef(false);
+  paletteOpenRef.current = paletteOpen;
   useEffect(() => {
     if (!paletteOpen) {
       setPaletteQuery("");
@@ -668,9 +674,18 @@ export default function App() {
         event.key.toLowerCase() === "p"
       ) {
         event.preventDefault();
-        setPaletteOpen((open) => !open);
+        // Closing must never leave the focus on <body>: it goes back to the editor.
+        if (paletteOpenRef.current) {
+          setPaletteOpen(false);
+          editorRef.current?.focus();
+        } else {
+          setPaletteOpen(true);
+        }
       }
-      if (event.key === "Escape") setPaletteOpen(false);
+      if (event.key === "Escape" && paletteOpenRef.current) {
+        setPaletteOpen(false);
+        editorRef.current?.focus();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -980,9 +995,11 @@ export default function App() {
   };
 
   const showHistory = async () => {
+    const at = sideViewRef.current;
     try {
       setHistoryEntries(await api.history());
-      setSideView("history");
+      // Only switch if the user has not moved to another view while the history was loading.
+      if (sideViewRef.current === at) setSideView("history");
     } catch (error) {
       setStatus(String(error));
     }
@@ -1006,9 +1023,10 @@ export default function App() {
       setStatus(t("noConnection"));
       return;
     }
+    const at = sideViewRef.current;
     try {
       setStats(await api.sessionStats(selected));
-      setSideView("stats");
+      if (sideViewRef.current === at) setSideView("stats");
     } catch (error) {
       setStatus(String(error));
     }
@@ -1235,8 +1253,11 @@ export default function App() {
     }
   };
   const dirty = sql !== cleanSql || fileEol !== cleanEol;
-
-  const confirmDiscard = () => !dirty || window.confirm(t("discardChanges"));
+  // The buffer and the document being closed are not always the same object for one render after switching
+  // tabs, and asking "discard changes?" about the wrong document blocks a close that had nothing to discard.
+  const activeDirty =
+    activeDoc.sql !== activeDoc.cleanSql || activeDoc.eol !== activeDoc.cleanEol;
+  const confirmDiscard = () => !activeDirty || window.confirm(t("discardChanges"));
 
   const newFile = () => {
     const doc = makeDoc("SQL", "");
@@ -1324,6 +1345,8 @@ export default function App() {
       await api.disconnect(selected);
       const version = await api.connect(selected);
       setConnected((current) => ({ ...current, [selected]: version }));
+      // A new session has its own transaction: the flag of the old one is no longer valid.
+      setTransactionTick((tick) => tick + 1);
       setTables(await api.listTableNames(selected));
       setStatus(`${t("connected")}: ${version}`);
     } catch (error) {
@@ -2404,14 +2427,16 @@ export default function App() {
     : [];
 
   const connectionLabel = connections.find((config) => config.id === selected)?.label ?? "";
+  // A DDL tab is described by its own key (`ddl:owner.name.TYPE`), not by the current connection and schema:
+  // after switching either, the tab still holds the text fetched from the old source.
   const ddlKey = /^ddl:([^.]*)\.(.*)\.([^.]+)$/.exec(activeDoc.key ?? "");
-  const breadcrumb: string[] = [
-    isConnected ? connectionLabel || draft.user : t("noConnection"),
-    ...(isConnected ? [schema.trim() || draft.user.toUpperCase()] : []),
-    ...(ddlKey
-      ? [ddlKey[3], ddlKey[2]]
-      : [activeDoc.path ? (activeDoc.path.split(/[\\/]/).pop() ?? activeDoc.path) : t("untitledScript")]),
-  ];
+  const breadcrumb: string[] = ddlKey
+    ? [ddlKey[1], ddlKey[3], ddlKey[2]].filter(Boolean)
+    : [
+        isConnected ? connectionLabel || draft.user : t("noConnection"),
+        ...(isConnected ? [schema.trim() || draft.user.toUpperCase()] : []),
+        activeDoc.path ? (activeDoc.path.split(/[\\/]/).pop() ?? activeDoc.path) : t("untitledScript"),
+      ];
 
   return (
     <div className="app">

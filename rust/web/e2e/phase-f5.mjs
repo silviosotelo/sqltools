@@ -29,7 +29,8 @@ async function palette(name, how = "click") {
     await cdp.key("ArrowDown", "ArrowDown", 40);
   }
   await cdp.key("Enter", "Enter", 13);
-  await cdp.wait(500);
+  await cdp.waitFor(`!document.querySelector('[role="combobox"]')`, 5000, 50);
+  await cdp.wait(150);
   return true;
 }
 
@@ -40,23 +41,41 @@ await cdp.wait(1500);
 const tabs = await J(`Array.from(document.querySelectorAll('.panel-bar .tabs button')).map(b => b.innerText.trim())`);
 check("bottom tabs are Resultados, Plan, Objeto, Salida", tabs.join("|") === "Resultados|Plan de ejecución|Objeto|Salida", tabs);
 
-// 2) Every control of the old 21-button toolbar still exists somewhere.
+// 2) Every control of the old toolbar has a home. Inventory taken from `git show 7e02fbd^:rust/web/src/App.tsx`:
+//    17 titled buttons + the "Conexiones" <select> + the "Solo lectura" checkbox (`connections` appeared twice:
+//    the gear button and the select).
+const homes = {
+  Ejecutar: `Boolean(document.querySelector('.actionstrip button[aria-label^="Ejecutar"]'))`,
+  Cancelar: `Boolean(document.querySelector('.actionstrip button[aria-label="Cancelar"]'))`,
+  Commit: `Boolean(document.querySelector('.actionstrip button[aria-label="Commit"]'))`,
+  Rollback: `Boolean(document.querySelector('.actionstrip button[aria-label="Rollback"]'))`,
+  Formatear: `Boolean(document.querySelector('.actionstrip button[aria-label="Formatear"]'))`,
+  Plan: `Boolean(document.querySelector('.actionstrip button[aria-label="Plan"]'))`,
+  Historial: `Boolean(document.querySelector('.activity .act[aria-label="Historial"]'))`,
+  "Estadísticas": `Boolean(document.querySelector('.activity .act[aria-label="Estadísticas"]'))`,
+  "Exportar CSV": `Boolean(document.querySelector('.panel-bar [title="Exportar CSV"], .panel-bar [aria-label="Exportar CSV"]'))`,
+  Comandos: `Boolean(document.querySelector('.palette-btn'))`,
+  Conectar: `Boolean(document.querySelector('.actionstrip button[aria-label="Conectar"], .actionstrip button[aria-label="Desconectar"]'))`,
+  Conexiones: `Boolean(document.querySelector('.activity .act[aria-label="Conexiones"]'))`,
+  "Solo lectura": `Boolean(document.querySelector('.actionstrip .check-inline input[type="checkbox"]'))`,
+};
+const lost = [];
+for (const [label, expr] of Object.entries(homes)) if (!(await cdp.evaluate(expr))) lost.push(label);
 const strip = await J(`Array.from(document.querySelectorAll('.actionstrip button, .actionstrip input')).map(e => e.getAttribute('aria-label') || e.closest('label')?.innerText.trim() || '')`);
-const need = [/^Ejecutar/, /^Cancelar$/, /^Formatear$/, /^Plan$/, /^Commit$/, /^Rollback$/, /^Solo lectura$/, /^Conectar$/, /^Más acciones$/];
-check("action strip has run, cancel, format, plan, commit, rollback, read-only, connect, more", need.every((re) => strip.some((l) => re.test(l))), strip);
+check("action strip has run, cancel, format, plan, commit, rollback, read-only, connect, more", [/^Ejecutar/, /^Cancelar$/, /^Formatear$/, /^Plan$/, /^Commit$/, /^Rollback$/, /^Solo lectura$/, /^Conectar$/, /^Más acciones$/].every((re) => strip.some((l) => re.test(l))), strip);
 const act = await J(`Array.from(document.querySelectorAll('.activity .act')).map(b => b.getAttribute('aria-label'))`);
 check("activity bar has Historial, Estadísticas, Conexiones, Atajos, Ajustes", ["Historial", "Estadísticas", "Conexiones", "Atajos de teclado", "Ajustes de la aplicación"].every((l) => act.includes(l)), act);
-check("Export CSV lives in the results panel", await cdp.evaluate(`Boolean(document.querySelector('.panel-bar [title="Exportar CSV"], .panel-bar [aria-label="Exportar CSV"]'))`));
 await cdp.click('.actionstrip button[aria-label="Más acciones"]');
 await cdp.wait(300);
 const more = await J(`Array.from(document.querySelectorAll('[role=menuitem]')).map(b => b.innerText.trim())`);
-check("the overflow menu has workspace save/load, refresh cache, check updates", ["Guardar workspace", "Abrir workspace", "Actualizar", "Buscar actualizaciones"].every((l) => more.includes(l)), more);
+for (const label of ["Guardar workspace", "Abrir workspace", "Actualizar", "Buscar actualizaciones"]) if (!more.includes(label)) lost.push(label);
 const focusedInMenu = await cdp.evaluate(`document.activeElement?.getAttribute('role')`);
 check("opening the menu focuses its first item", focusedInMenu === "menuitem", focusedInMenu);
 await cdp.key("Escape", "Escape", 27);
 await cdp.wait(200);
 check("Escape closes the menu and returns focus to its button", (await cdp.evaluate(`document.querySelectorAll('[role=menu]').length`)) === 0 && (await cdp.evaluate(`document.activeElement?.getAttribute('aria-label')`)) === "Más acciones");
-check("the connection list replaces the old select", await cdp.evaluate(`Boolean(document.querySelector('.activity .act[aria-label="Conexiones"]'))`));
+check("every control of the old toolbar has a home", lost.length === 0, lost);
+
 const crumbsOff = await J(`Array.from(document.querySelectorAll('.breadcrumbs li')).map(l => l.innerText.trim())`);
 check("breadcrumbs without a connection: Sin conexión > Script sin título", crumbsOff.join("|") === "Sin conexión|Script sin título", crumbsOff);
 
@@ -111,6 +130,7 @@ await cdp.wait(1200);
 await cdp.clickTitle("Conectar");
 await cdp.waitFor(`/(Conectado|anamnesis@)/.test(document.querySelector("[data-e2e='conn-chip']")?.innerText ?? '')`, 20000);
 await cdp.wait(1500);
+check("the toggle reads Desconectar while connected", await cdp.evaluate(`Boolean(document.querySelector('.actionstrip button[aria-label="Desconectar"]'))`));
 const crumbsOn = await J(`Array.from(document.querySelectorAll('.breadcrumbs li')).map(l => l.innerText.trim())`);
 check("breadcrumbs connected: connection > schema > Script sin título", crumbsOn.length === 3 && crumbsOn[0].length > 0 && crumbsOn[0] !== "Sin conexión" && crumbsOn[2] === "Script sin título", crumbsOn);
 check("no transaction flag right after connecting", (await cdp.count("[data-e2e='txn-pending']")) === 0);
@@ -130,6 +150,27 @@ const statRows = await cdp.count(".stats-scroll tbody tr");
 check("Stats view shows the session statistics", statRows > 0, statRows);
 await cdp.click('.activity .act[aria-label="Objetos"]');
 
+// A DDL tab keeps its own provenance: switching schema must not relabel it.
+await cdp.click('.activity .act[aria-label="Objetos"]');
+await cdp.wait(400);
+await cdp.evaluate(`Array.from(document.querySelectorAll('[role=treeitem]')).find(r => /^Tablas/.test(r.innerText.trim()))?.click()`);
+await cdp.waitFor(`document.querySelectorAll('[role=treeitem][data-type=TABLE][aria-level="2"]').length > 0`, 20000);
+await cdp.evaluate(`(() => { const i = document.querySelector('.objects-panel input[title="Filtro"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, 'A11'); i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+await cdp.wait(400);
+await cdp.evaluate(`document.querySelector('[role=treeitem][data-type=TABLE][aria-level="2"]')?.click()`);
+await cdp.wait(600);
+await cdp.evaluate(`document.querySelector('.cm-content')?.focus()`);
+await cdp.key("F12", "F12", 123, 2);
+await cdp.waitFor(`Array.from(document.querySelectorAll('.editor-tab .tab-title')).some(t => t.innerText.trim().startsWith("A11 (TABLE)"))`, 60000, 200);
+const crumbsDdl = await J(`Array.from(document.querySelectorAll('.breadcrumbs li')).map(l => l.innerText.trim())`);
+await cdp.evaluate(`(() => { const i = document.querySelector('.objects-panel input[title="Esquema"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, 'SYS'); i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+await cdp.wait(700);
+const crumbsDdlAfter = await J(`Array.from(document.querySelectorAll('.breadcrumbs li')).map(l => l.innerText.trim())`);
+check("a DDL tab is labelled with its own type and object", crumbsDdl.join("|") === "TABLE|A11", crumbsDdl);
+check("changing the schema field never relabels the open DDL tab", crumbsDdlAfter.join("|") === crumbsDdl.join("|") && !crumbsDdlAfter.includes("SYS"), crumbsDdlAfter);
+await cdp.evaluate(`(() => { const i = document.querySelector('.objects-panel input[title="Esquema"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, ''); i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+await cdp.wait(500);
+
 await setEditor("select 1 from dual for update");
 await cdp.key("F5", "F5", 116);
 await cdp.waitFor(`Boolean(document.querySelector("[data-e2e='txn-pending']"))`, 15000);
@@ -138,6 +179,15 @@ check("Commit and Rollback are marked while it is open", (await cdp.count(".acti
 await cdp.clickTitle("Rollback");
 await cdp.waitFor(`!document.querySelector("[data-e2e='txn-pending']")`, 15000);
 check("Rollback clears the flag", (await cdp.count("[data-e2e='txn-pending']")) === 0);
+// Reconnecting opens a new session: the old transaction (and its flag) is gone even if the user does not
+// commit or roll back first.
+await setEditor("select 3 from dual for update");
+await cdp.key("F5", "F5", 116);
+await cdp.waitFor(`Boolean(document.querySelector("[data-e2e='txn-pending']"))`, 15000);
+await palette("Session.Reconnect");
+await cdp.waitFor(`!document.querySelector("[data-e2e='txn-pending']")`, 20000);
+check("reconnecting clears the flag of the old session", (await cdp.count("[data-e2e='txn-pending']")) === 0);
+
 await setEditor("select 2 from dual");
 await cdp.key("F5", "F5", 116);
 await cdp.wait(1500);

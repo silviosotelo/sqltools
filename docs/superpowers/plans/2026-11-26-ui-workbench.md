@@ -456,3 +456,23 @@ Evidencia (app instalada 26/11/2026 11:46, firmada autofirmada): `flow --compare
 **Cierre del goal — estado de las cinco fases:** F1 `e9ce19e`+`fix`, F2 `17eefc8`, F3 `ec0712f`, F4 `c0d5556`, F5 este commit. Cada una con binario instalado y probado por CDP, compuerta completa y revisión externa (F2 por golden idéntico).
 
 **Revisión externa de F5: NO REALIZADA.** codex (hasta las 15:42) y el dvisor interno sin cupo; no se simula aprobación. Autorrevisión: la consulta de transacción se descarta por cleanup del efecto si unning vuelve a true; las opciones de la paleta usan onMouseDown.preventDefault (el click por CDP las ejecuta sin cerrarse por blur).
+
+#### F5 — ronda de revisión y correcciones (2026-11-26)
+
+**Revisión realizada por el subagente `reviewer`** (sesión independiente, solo lectura), porque `codex` sigue sin cupo hasta las 15:42 y el `advisor` interno agotó el mensual. **No es la revisión de `codex`**: queda pendiente y así se declara.
+
+Veredicto: **REFUTADO**, con 2 bloqueos y 3 menores. Los dos bloqueos se verificaron en el código y eran reales; además aparecieron dos defectos más al perseguir una prueba intermitente.
+
+| Hallazgo | Corrección | Prueba |
+|---|---|---|
+| **Bloqueo:** el indicador de transacción quedaba obsoleto tras reconectar (`reconnect()` abre sesión nueva sin cambiar `connected` ni el tick del efecto) | `reconnect()` incrementa `transactionTick`; el efecto vuelve a preguntar a Oracle | `phase-f5`: `FOR UPDATE` → indicador → `Session.Reconnect` → sin indicador |
+| **Bloqueo:** el breadcrumb atribuía un DDL a la conexión/esquema *actuales*, no a los de origen | un documento `ddl:` se describe con su propia clave (`esquema > tipo > objeto`); un script, con el contexto actual | `phase-f5`: pestaña `A11 (TABLE)` → crumbs `TABLE > A11`; cambiar el esquema a `SYS` no los cambia ni aparece `SYS` |
+| **Propio:** cerrar la paleta con `Ctrl+Shift+P` dejaba el foco en `<body>` (la misma clase de fallo que bloqueó F1) | el acelerador devuelve el foco al editor al cerrar; `paletteOpenRef` para leer el estado desde el listener estable | grabado antes/después por CDP: `editor` en ambos cierres (Esc y `Ctrl+Shift+P`) |
+| **Propio:** `showHistory`/`showStats` cambiaban de vista **después** de esperar los datos, así que una carga lenta pisaba la vista a la que el usuario ya se había movido (era la causa de una prueba intermitente) | guard de intención con `sideViewRef`: solo cambia la vista si el usuario no se movió mientras cargaba | `phase-f5` ×3 corridas seguidas en verde |
+| **Propio:** `confirmDiscard` miraba el buffer vivo del editor, así que justo tras cambiar de pestaña podía preguntar "¿descartar cambios?" sobre un documento vacío y bloquear el cierre | se evalúa sobre el documento activo (`activeDoc.sql/cleanSql/eol/cleanEol`), que ya lleva su propio indicador | `phase-f5` `File.New` + `File.Close` estable en 3 corridas |
+
+**Menores atendidos:** la prueba de "no se pierde ningún control" era una muestra de nueve etiquetas; ahora compara contra el inventario real: **17 botones con título + el `<select>` Conexiones + el checkbox Solo lectura** (19 controles; el "21" anterior contaba dos veces `Conexiones`: el engranaje y el select). Cada uno se verifica en su destino (tira, barra de actividad, panel de resultados, menú de overflow o paleta) y el botón Conectar/Desconectar se comprueba en sus dos estados. La caminata de teclado ya no confía en una espera fija de 120 ms: consulta hasta 800 ms por parada.
+
+**Desviación declarada:** cuando el DDL se carga con el campo *Esquema* vacío, la clave del documento no guarda el dueño, así que el breadcrumb muestra `tipo > objeto` sin esquema. Poner el dueño exigiría cambiar el modelo de pestañas de documentos, que el goal prohíbe tocar.
+
+**Evidencia (app instalada 26/11/2026, firmada autofirmada):** `phase-f5` **34 checks OK** (3 corridas consecutivas), `axe` **0 violaciones en 8 vistas × 2 temas**, `phase-f1` 19, `phase-f2` 3, `tree` 11, `env` 12, `keyboard-walk` 26 paradas en claro y oscuro, `commands-check` OK con el mismo digest, `flow` IDENTICAL, `cargo fmt/clippy/check/test` en 0 (19 ok), `npm build` 0, vitest **81 passed**.
