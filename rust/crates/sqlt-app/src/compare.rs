@@ -115,11 +115,16 @@ pub fn apply_script(snapshot: &Snapshot, entries: &[CompareEntry]) -> String {
         let Some(object) = snapshot.get(&key) else {
             continue;
         };
+        // ALL_SOURCE stores the unit without its header command: without this prefix the script is not valid.
+        let body = object.ddl.trim_end();
+        let statement = if body.to_ascii_lowercase().starts_with("create") {
+            body.to_string()
+        } else {
+            format!("create or replace {body}")
+        };
         script.push_str(&format!(
             "\n-- {} ({})\n{}\n",
-            entry.name,
-            entry.object_type,
-            object.ddl.trim_end()
+            entry.name, entry.object_type, statement
         ));
         if !object.ddl.trim_end().ends_with(';') {
             script.push_str(";\n");
@@ -343,6 +348,35 @@ mod tests {
         assert_eq!(by_name["D"], CompareStatus::Extra);
         let b = entries.iter().find(|entry| entry.name == "B").unwrap();
         assert_eq!(b.first_difference, 1);
+    }
+
+    #[test]
+    fn the_script_prefixes_the_unit_source_so_it_can_run() {
+        let wanted = snapshot(&[(
+            "P",
+            object("P", "PROCEDURE", "procedure p is\nbegin\n  null;\nend;"),
+        )]);
+        let entries = compare_snapshot(&wanted, &Snapshot::new());
+        let script = apply_script(&wanted, &entries);
+        assert!(
+            script.contains("create or replace procedure p is"),
+            "{script}"
+        );
+
+        let already = snapshot(&[(
+            "Q",
+            object(
+                "Q",
+                "PROCEDURE",
+                "create or replace procedure q is\nbegin null; end;",
+            ),
+        )]);
+        let entries = compare_snapshot(&already, &Snapshot::new());
+        let script = apply_script(&already, &entries);
+        assert!(
+            !script.contains("create or replace create or replace"),
+            "{script}"
+        );
     }
 
     #[test]

@@ -24,17 +24,15 @@ pub struct ProfileLine {
 #[serde(rename_all = "camelCase")]
 pub struct ProfileResult {
     pub run_id: i64,
-    /// True when the profiler sequence had to be created to make the run possible.
-    pub prepared: bool,
     /// Lines with time, most expensive first.
     pub lines: Vec<ProfileLine>,
     /// Sum of the reported lines, in nanoseconds.
     pub total_time: u64,
 }
 
-/// `DBMS_PROFILER` needs its own sequence in the schema; `profload.sql` creates it, but a schema can
-/// have the tables and not the sequence (that is exactly what `ORA-06528` means). It is idempotent.
-fn ensure_ready(session: &Session, options: QueryOptions) -> Result<bool, String> {
+/// `DBMS_PROFILER` needs its own sequence in the schema (`profload.sql` creates it). Creating it here would
+/// be DDL in the user's working session, which commits their pending transaction, so it is only reported.
+fn ensure_ready(session: &Session, options: QueryOptions) -> Result<(), String> {
     let rows = fetch_rows(
         session,
         "select count(*) from user_sequences where sequence_name = 'PLSQL_PROFILER_RUNNUMBER'",
@@ -47,38 +45,40 @@ fn ensure_ready(session: &Session, options: QueryOptions) -> Result<bool, String
         .and_then(|value| value.parse::<u32>().ok())
         .unwrap_or(0);
     if present > 0 {
-        return Ok(false);
+        return Ok(());
     }
-    session
-        .execute_with(
-            "create sequence plsql_profiler_runnumber minvalue 1 \
-             maxvalue 999999999999999999999999999 increment by 1 start with 1 nocache",
-            &[],
-        )
-        .map_err(|error| {
-            format!("DBMS_PROFILER is not ready and the sequence could not be created: {error}")
-        })?;
-    Ok(true)
+    Err(
+        "DBMS_PROFILER is not installed for this schema: the sequence PLSQL_PROFILER_RUNNUMBER is missing. \
+         Run $ORACLE_HOME/rdbms/admin/profload.sql as this user (it creates the profiler tables and the \
+         sequence) and try again. The app does not run that DDL for you: it would commit your open transaction."
+            .to_string(),
+    )
 }
 
-/// Starts the profiler, runs `sql`, stops it and reads the per-line data of that run.
+/// Starts the profiler, runs `sql`, stops it and reads the per-line data of that run. It owns the session
+/// for the whole cycle (the same lock commit/rollback use), so nothing else interleaves.
 pub fn profile(
     session: &Session,
     sql: &str,
     limit: u32,
     options: QueryOptions,
 ) -> Result<ProfileResult, String> {
-    let prepared = ensure_ready(session, options)?;
+    ensure_ready(session, options)?;
+    let _guard = session.lock_execution();
     let started = session.execute_block(
         "begin dbms_profiler.start_profiler(run_number => :1); end;",
         &[&OracleType::Number(0, 0)],
         &[1],
     )?;
-    let run_id: i64 = started
+    let run_id: Option<i64> = started
         .first()
         .and_then(|value| value.as_deref())
-        .and_then(|value| value.trim().parse().ok())
-        .ok_or_else(|| "DBMS_PROFILER did not return a run number".to_string())?;
+        .and_then(|value| value.trim().parse().ok());
+    let Some(run_id) = run_id else {
+        // The profiler is running but we cannot name the run: stop it before failing.
+        let _ = session.execute_block("begin dbms_profiler.stop_profiler; end;", &[], &[]);
+        return Err("DBMS_PROFILER did not return a run number".to_string());
+    };
 
     let executed = session.execute_with(sql, &[]);
     // Always stop the profiler: leaving it open would profile everything that runs afterwards.
@@ -90,7 +90,6 @@ pub fn profile(
     let total_time = lines.iter().map(|line| line.total_time).sum();
     Ok(ProfileResult {
         run_id,
-        prepared,
         lines,
         total_time,
     })

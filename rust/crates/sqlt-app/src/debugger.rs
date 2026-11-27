@@ -90,6 +90,9 @@ const GET_VALUE: &str = "declare v varchar2(4000); ret binary_integer; \
 /// One debug session: the target connection plus the thread that runs the statement.
 pub struct Debugger {
     target: Arc<Session>,
+    /// The session that attached to the target. Kept here so a command that arrives after the user switched
+    /// connections still detaches from the right supervisor.
+    supervisor: Arc<Session>,
     finished: Arc<AtomicBool>,
     pub id: String,
     pub position: DebugPosition,
@@ -199,6 +202,7 @@ impl Debugger {
         let position = position(&values, 0);
         Ok(Debugger {
             target,
+            supervisor: Arc::clone(debugger),
             finished,
             id,
             position,
@@ -206,11 +210,8 @@ impl Debugger {
     }
 
     /// One `continue` with the flags of `mode`; blocks until the target stops or ends.
-    pub fn step(
-        &mut self,
-        debugger: &Arc<Session>,
-        mode: StepMode,
-    ) -> Result<DebugPosition, String> {
+    pub fn step(&mut self, mode: StepMode) -> Result<DebugPosition, String> {
+        let debugger = &self.supervisor;
         let values = debugger
             .execute_block(
                 CONTINUE,
@@ -230,12 +231,8 @@ impl Debugger {
     }
 
     /// Reads a variable of the current frame (`0` is the running entrypoint). `Ok(None)` = NULL.
-    pub fn watch(
-        &self,
-        debugger: &Arc<Session>,
-        name: &str,
-        frame: i32,
-    ) -> Result<Option<String>, String> {
+    pub fn watch(&self, name: &str, frame: i32) -> Result<Option<String>, String> {
+        let debugger = &self.supervisor;
         let values = debugger
             .execute_block(
                 GET_VALUE,
@@ -259,12 +256,12 @@ impl Debugger {
     /// body, 3 for a trigger. Returns the breakpoint number.
     pub fn set_breakpoint(
         &self,
-        debugger: &Arc<Session>,
         owner: &str,
         name: &str,
         namespace: i32,
         line: i32,
     ) -> Result<i32, String> {
+        let debugger = &self.supervisor;
         let values = debugger
             .execute_block(
                 SET_BREAKPOINT,
@@ -276,7 +273,7 @@ impl Debugger {
                     &OracleType::Number(0, 0),
                     &OracleType::Number(0, 0),
                 ],
-                &[1, 2],
+                &[5, 6],
             )
             .map_err(|error| error.to_string())?;
         let status = number(values.first().cloned().flatten());
@@ -292,8 +289,16 @@ impl Debugger {
     }
 
     /// Detaches and drops the target connection, which also releases the thread if it is still suspended.
-    pub fn stop(self, debugger: &Arc<Session>) {
-        let _ = debugger.execute_with("begin dbms_debug.detach_session; end;", &[]);
+    pub fn stop(self) {
+        let _ = self
+            .supervisor
+            .execute_with("begin dbms_debug.detach_session; end;", &[]);
+        // The target thread may be suspended in the debug loop: give it a moment to end, then close the
+        // connection, which releases the thread and the database session either way.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while !self.finished.load(Ordering::Relaxed) && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
         drop(self.target);
     }
 }

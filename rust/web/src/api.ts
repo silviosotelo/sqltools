@@ -75,6 +75,8 @@ export const api = {
   cancel: (id: string) => invoke<void>("cancel", { id }),
   commit: (id: string) => invoke<void>("commit", { id }),
   rollback: (id: string) => invoke<void>("rollback", { id }),
+  rowidAvailable: (connectionId: string, table: string) =>
+    invoke<boolean>("rowid_available", { connectionId, table }),
   updateCell: (
     connectionId: string,
     table: string,

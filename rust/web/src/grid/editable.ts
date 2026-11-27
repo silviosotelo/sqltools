@@ -69,7 +69,12 @@ export function prepareEditable(sql: string): EditableQuery | null {
   const rest = text.slice(from + "from".length).trim();
   if (!list || !rest) return null;
   if (/\browid\b/i.test(list)) return null; // adding another one would collide
-  if (list.includes("(")) return null; // expressions and aggregates cannot carry a ROWID
+  // Only plain column references: an expression cannot carry a ROWID, and `a AS b` or `a b` would make the
+  // grid edit `b`, which is not a column of the table.
+  const plainColumn = /^[A-Za-z"][A-Za-z0-9_$#".]*$/;
+  if (list !== "*" && !list.split(",").every((part) => plainColumn.test(part.trim()))) return null;
+  // `a AS b` would make the grid edit `b`, which is not a column of the table.
+  if (/\bas\b/i.test(list)) return null;
   if (/\bdistinct\b/i.test(list)) return null;
   if (FORBIDDEN.some((pattern) => pattern.test(rest))) return null;
 

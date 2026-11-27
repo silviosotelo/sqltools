@@ -97,6 +97,55 @@ await cdp.waitFor(`!document.querySelector('.debug-strip')`, 15000);
 check("stopping removes the debug strip", (await cdp.count(".debug-strip")) === 0);
 
 await runSql("begin execute immediate 'drop procedure sqlt_p6_e2e'; end;");
+
+// 5) step INTO a real callee and OUT back to the caller (not just the breakflag constants)
+await runSql("begin execute immediate 'drop procedure sqlt_p6_callee'; exception when others then null; end;");
+await runSql("begin execute immediate 'drop procedure sqlt_p6_caller'; exception when others then null; end;");
+await runSql("alter session set plsql_debug = true");
+await runSql("create or replace procedure sqlt_p6_callee is\nbegin\n  dbms_output.put_line('inside');\nend;");
+await runSql("create or replace procedure sqlt_p6_caller is\nbegin\n  sqlt_p6_callee;\n  dbms_output.put_line('after');\nend;");
+
+await setEditor("begin sqlt_p6_caller; end;");
+await cdp.click('.actionstrip button[aria-label="Más acciones"]');
+await cdp.wait(400);
+await cdp.evaluate(`Array.from(document.querySelectorAll('[role=menuitem]')).find(b => b.innerText.trim() === 'Depurar sentencia')?.click()`);
+await cdp.waitFor(`Boolean(document.querySelector('[data-e2e="debug-position"]'))`, 30000);
+const bpCaller = JSON.parse(
+  await cdp.evaluate(`(async () => {
+    const list = await window.__TAURI_INTERNALS__.invoke("list_connections");
+    try {
+      const number = await window.__TAURI_INTERNALS__.invoke("debug_breakpoint", { connectionId: list[0].id, owner: "ANAMNESIS", name: "SQLT_P6_CALLER", namespace: 1, line: 3 });
+      return JSON.stringify({ ok: true, number });
+    } catch (error) {
+      return JSON.stringify({ ok: false, error: String(error) });
+    }
+  })()`),
+);
+check("a breakpoint can be set on the caller", bpCaller.ok === true, bpCaller);
+
+const positionOf2 = () => cdp.evaluate(`document.querySelector('[data-e2e="debug-position"]')?.innerText.trim() ?? ''`);
+const click2 = (label) => cdp.evaluate(`Array.from(document.querySelectorAll('.debug-strip button')).find(b => b.innerText.trim() === ${JSON.stringify(label)})?.click()`);
+
+await click2("Paso a paso");
+await cdp.wait(2500);
+const atCall = await positionOf2();
+check("stepping stops at the call line of the caller", /SQLT_P6_CALLER:3/.test(atCall), atCall);
+
+await click2("Entrar");
+await cdp.wait(3000);
+const insideCallee = await positionOf2();
+check("step into moves to the callee", /SQLT_P6_CALLEE:\d+/.test(insideCallee), insideCallee);
+
+await click2("Salir");
+await cdp.wait(3000);
+const backInCaller = await positionOf2();
+check("step out returns to the caller after the call", /SQLT_P6_CALLER:(3|4)/.test(backInCaller), backInCaller);
+
+await click2("Detener");
+await cdp.wait(1500);
+await runSql("begin execute immediate 'drop procedure sqlt_p6_callee'; end;");
+await runSql("begin execute immediate 'drop procedure sqlt_p6_caller'; end;");
+
 cdp.close();
 console.log(JSON.stringify(checks, null, 1));
 const bad = Object.entries(checks).filter(([, v]) => !v.ok).map(([k]) => k);

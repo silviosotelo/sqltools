@@ -353,6 +353,7 @@ export default function App() {
   const [projectsOpen, setProjectsOpen] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectName, setProjectName] = useState("");
+  const [projectNotes, setProjectNotes] = useState("");
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandText, setCommandText] = useState("");
   const [commandLog, setCommandLog] = useState<string[]>([]);
@@ -938,9 +939,11 @@ export default function App() {
 
   const runReport = (report: SavedReport) => {
     setReportsOpen(false);
+    const withVariables = report.params.length > 0;
     setSql(report.sql);
-    setSubstitution(report.params.length > 0);
-    void run(report.sql);
+    setSubstitution(withVariables);
+    // `setSubstitution` does not apply until the next render: pass the decision explicitly.
+    void run(report.sql, null, withVariables);
   };
 
   const saveReport = async () => {
@@ -982,11 +985,12 @@ export default function App() {
       await api.saveProject({
         name: projectName,
         schema: schema.trim() || null,
-        notes: "",
+        notes: projectNotes,
         files: docs.map((doc) => ({ title: doc.title, sql: doc.sql })),
         objects,
       });
       setProjectName("");
+      setProjectNotes("");
       setProjects(await api.listProjects());
       setStatus(`${t("projects")}: ${projectName}`);
     } catch (error) {
@@ -995,6 +999,7 @@ export default function App() {
   };
 
   const openProject = async (name: string) => {
+    if (!confirmDiscard()) return;
     try {
       const project = await api.loadProject(name);
       const fresh = project.files.map((file) => makeDoc(file.title || "SQL", file.sql));
@@ -1069,6 +1074,13 @@ export default function App() {
     void loadScheduler();
   }, [sideView, selected, schema, isConnected]);
 
+  // A ROWID is only meaningful on the connection that returned it: switching drops the editable state.
+  useEffect(() => {
+    setEditTable(null);
+    setRowIds([]);
+    setPendingEdits([]);
+  }, [selected]);
+
   /** Builds the DDL from the form. Nothing is executed: the text goes to the editor. */
   const previewDdl = () => {
     try {
@@ -1112,7 +1124,8 @@ export default function App() {
     if (!aiConfig) return;
     try {
       await api.aiSetConfig(aiConfig);
-      await api.aiSetKey(aiKey.trim() ? aiKey : null);
+      // An empty field means "keep the stored key": only a typed key replaces it.
+      if (aiKey.trim()) await api.aiSetKey(aiKey);
       setAiKey("");
       setAiHasKey(await api.aiHasKey());
       setStatus(t("assistantSave"));
@@ -1452,7 +1465,11 @@ export default function App() {
     return { text: out, offset: mapped };
   };
 
-  const run = async (text = sql, offset: number | null = null) => {
+  const run = async (
+    text = sql,
+    offset: number | null = null,
+    substitute = substitution,
+  ) => {
     if (!isConnected) {
       setStatus(t("noConnection"));
       return false;
@@ -1470,7 +1487,7 @@ export default function App() {
     setScrollTop(0);
     let prepared = text;
     let runOffset = offset;
-    if (substitution) {
+    if (substitute) {
       const replaced = substituteVariables(text, offset);
       if (!replaced) {
         setStatus(t("substitutionCancelled"));
@@ -1480,7 +1497,10 @@ export default function App() {
       runOffset = replaced.offset;
     }
     // A single-table select can be edited: run it with the hidden ROWID next to the user's columns.
-    const editable = prepareEditable(prepared);
+    // The rewrite is only used when the table really accepts a ROWID (a view on GROUP BY does not).
+    const candidate = prepareEditable(prepared);
+    const editable =
+      candidate && (await api.rowidAvailable(selected, candidate.table)) ? candidate : null;
     const executed = editable ? editable.sql : prepared;
     setEditTable(editable ? editable.table : null);
     setRowIds([]);
@@ -1738,6 +1758,8 @@ export default function App() {
     }
     const columnIndex = columns.findIndex((column) => column.name === cell.column);
     const isNull = columnIndex >= 0 && rows[cell.row]?.[columnIndex]?.kind === "null";
+    // The viewer shows a NULL cell as "NULL"; an untouched value must stay NULL, not become that word.
+    const unchangedNull = isNull && value === cell.value;
     setPendingEdits((current) => [
       ...current.filter((edit) => !(edit.row === cell.row && edit.column === cell.column)),
       {
@@ -1745,7 +1767,7 @@ export default function App() {
         rowId,
         column: cell.column,
         oldValue: isNull ? null : cell.value,
-        newValue: value === "" ? null : value,
+        newValue: unchangedNull || value === "" ? null : value,
       },
     ]);
     setCellView(null);
@@ -3964,6 +3986,13 @@ export default function App() {
                 </div>
               ))}
             </div>
+            <textarea
+              className="command-log"
+              value={projectNotes}
+              placeholder={t("projectNotes")}
+              aria-label={t("projectNotes")}
+              onChange={(event) => setProjectNotes(event.target.value)}
+            />
             <div className="row">
               <input
                 value={projectName}

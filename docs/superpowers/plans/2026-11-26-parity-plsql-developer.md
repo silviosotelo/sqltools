@@ -644,3 +644,59 @@ mock local. Cancelar una consulta en vuelo no aborta el socket: el resultado se 
 Compuerta del último cierre: axe **0 en 16 vistas × 2 temas**, `cargo fmt/clippy -D warnings/check/test` en 0,
 vitest **103**, `flow` **IDENTICAL**, capturas en los tres tamaños, inventario de paridad actualizado.
 
+### Ronda de revisión externa de P1–P10 (codex gpt-6.2-sol, 27/11) y correcciones
+
+`codex` revisó los commits `19b1e8f`…`c735482` en solo lectura y dijo **"no daría por cerrado P1–P10"** con cinco
+bloqueos. Todos se verificaron y se corrigieron; además apareció un sexto (la reescritura de P2 sobre vistas).
+
+| Hallazgo | Corrección | Prueba |
+|---|---|---|
+| **P6:** `stop` soltaba un `Arc` pero el hilo conservaba otro y nadie lo cancelaba; `DETACH_SESSION` no termina el objetivo; un fallo de `attach`/`synchronize` dejaba la sesión viva; el detach usaba la conexión *seleccionada*; `synchronize`/`continue` bloqueaban el hilo de la UI | `Debugger` guarda su **sesión supervisora** y `stop()` no recibe conexión; detach → espera 3 s a que el hilo termine → cierra la conexión objetivo (lo que libera hilo y sesión de todos modos); `attach`/`synchronize` fallidos cierran el objetivo; los cinco comandos son `async` + `spawn_blocking` | `phase-p6` 10 checks (incluye entrar/salir) |
+| **P6 (menor, era un bug):** el breakpoint leía los binds `1/2` (namespace/owner) en vez de `5/6` (status/número) | outs `[5, 6]` | `phase-p6` sigue frenando en el breakpoint con `status=0` |
+| **P2:** `SELECT a AS b` quedaba editable y `b` se usaba como columna física; los ROWID sobrevivían al cambio de conexión; un NULL sin tocar se guardaba como el texto "NULL" | la lista del SELECT debe ser de **columnas simples** (rechaza `as`, alias sin `as` y expresiones); al cambiar de conexión se limpia el estado de edición; un NULL sin tocar queda NULL | `editable.test.ts` 8 tests + `phase-p2` |
+| **P2 (nuevo, encontrado al arreglar p1):** una vista con `GROUP BY`/`DISTINCT` (`user_constraints`) rechaza ROWID con **ORA-01446** y el reintento dependía de un evento asíncrono, así que a veces no ocurría | comando `rowid_available` (`select rowid from <tabla> where rownum = 0`): la app **pregunta antes** de reescribir y deja el grid de solo lectura si no hay ROWID | `phase-p1` 3 corridas seguidas en verde (antes 1 de 3) |
+| **P5:** crear la secuencia faltante era DDL en la sesión de trabajo → **commit implícito** del DML pendiente; un fallo al leer el `run_number` salía sin `STOP_PROFILER`; el ciclo no tomaba el lock de ejecución | ya **no crea nada**: error accionable que pide `profload.sql`; `STOP_PROFILER` también cuando el número no se puede leer; `lock_execution()` durante todo el ciclo | `phase-p5` 3 checks |
+| **P1:** `ALTER PACKAGE BODY … COMPILE` no es sintaxis Oracle | `ALTER PACKAGE <n> COMPILE BODY` / `ALTER TYPE <n> COMPILE BODY`, con `compile_statement` y test | test `the_body_is_compiled_with_the_body_keyword` |
+| **P4:** el script de diferencias emitía el texto de `ALL_SOURCE` sin `CREATE OR REPLACE`, así que no era ejecutable | prefijo `create or replace ` cuando falta (sin duplicarlo si ya está) | test `the_script_prefixes_the_unit_source_so_it_can_run` |
+| **P7:** el informe cambiaba la opción de sustitución y ejecutaba en el mismo evento, con el valor anterior de React | `run(texto, offset, substitute)` explícito; `runReport` pasa la decisión | `phase-p7` ejecuta el informe sin parámetros |
+| **P8:** abrir un proyecto reemplazaba los buffers sin proteger cambios | `confirmDiscard()` antes de reemplazar; el diálogo ahora **guarda las notas** del proyecto | `phase-p8` 5 checks |
+| **P10:** un error de encabezado podía devolver el `Authorization` completo (y la UI permite insertarlo en el editor); aceptaba HTTP remoto | `redact()` quita la clave de cualquier mensaje; HTTP solo para loopback (el mock), HTTPS para el resto | tests `the_key_is_never_returned_in_an_error`, `a_remote_plain_http_url_is_refused_before_sending`, `only_loopback_may_use_plain_http` |
+| **P10 (menor):** guardar ajustes con el campo de clave vacío **borraba** la clave guardada | solo se escribe si el usuario tipeó algo | — |
+
+**Evidencia tras las correcciones** (app instalada 27/11 01:44, firmada autofirmada):
+
+| Comando | Resultado |
+|---|---|
+| `phase-p1` … `phase-p10` | 15 / 11 / 4 / 5 / 3 / **10** / 9 / 5 / 6 / 9 |
+| `axe-cdp.mjs` | 0 violaciones, 16 vistas × 2 temas |
+| `phase-f1` / `phase-f5` / `keyboard-walk` | 19 / 39 / 30 paradas |
+| `commands-check` / `flow` | mismo digest / IDENTICAL |
+| `cargo fmt` / `clippy -D warnings` / `check -p sqlt-desktop` / `test` | 0 / 0 / 0 / 0 (**19 ok**, 59 tests en la lib) |
+| `npm run build` / `npm test` | 0 / **103 passed** |
+
+**P6 — verificación real de Entrar/Salir** (antes solo se probaban las constantes):
+
+```
+paso a paso  → SQLT_P6_CALLER:3 · breakpoint
+Entrar       → SQLT_P6_CALLEE:1 · procedure entry
+Salir        → SQLT_P6_CALLER:4 · procedure finished
+```
+
+### Auditoría de los 13 comandos sin implementar — resuelta con evidencia
+
+Se extrajo el texto del **manual oficial instalado** (`C:\Program Files\PLSQL Developer 17\Manual.pdf`,
+322 páginas, 551 k caracteres) y se buscaron los comandos. Resultado:
+
+| Comando | Evidencia en el manual | Decisión |
+|---|---|---|
+| `Window.NextWindow` / `Window.PrevWindow` | documentados: "you will need to use the Window List (see chapter 32) or the keyboard (**Ctrl-Tab and Ctrl-Shift-Tab**) to select a window" | **PSD los implementa** → se quedan |
+| `Window.NewWindow` / `Window.LastWindow` | "Linked Query in New Window", "When opening a new window for the connection…" | **PSD los implementa** → se quedan |
+| `Test` | capítulo 23.21 **Window Types – Test Window** (59 menciones) | **PSD lo implementa** → se queda |
+| `Window.NextTab` / `Window.PreviousTab` | el manual no tiene concepto de pestañas (usa ventanas) | sin evidencia de ausencia → se quedan (en una app de pestañas sí tienen destino) |
+| `Window.Cascade` / `TileHorizontally` / `TileVertically` / `ArrangeIcons` | el manual no describe el menú Window (PL/SQL Developer es MDI; la guía no documenta sus menús) | sin evidencia de ausencia → se quedan |
+| `Edit.JumpNext` / `Edit.JumpPrevious` | el único "jump" del manual es navegación del editor (cap. 25.20), no un par de comandos | sin evidencia de ausencia → se quedan |
+
+**Decisión:** no se retira ninguno. El dueño autorizó retirar solo lo que PL/SQL Developer no implemente y el
+manual confirma tres familias; para el resto no hay evidencia de ausencia (la guía no documenta menús). Si el
+dueño quiere retirarlos, alcanza con capturas de los menús Window/Edit de la app.
+

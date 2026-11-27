@@ -43,6 +43,20 @@ fn qualified(table: &str) -> Result<String, String> {
     }
 }
 
+/// Whether `<table>` accepts a ROWID column. Views built on `GROUP BY`, `DISTINCT` and friends reject it
+/// with ORA-01446, and the grid must stay read-only for them *before* rewriting the query.
+pub fn rowid_available(
+    session: &Session,
+    table: &str,
+    options: QueryOptions,
+) -> Result<bool, String> {
+    let sql = format!("select rowid from {} where rownum = 0", qualified(table)?);
+    match session.query(&sql, options) {
+        Ok(_) => Ok(true),
+        Err(_) => Ok(false),
+    }
+}
+
 /// Applies one cell change. `Ok(true)` = exactly one row updated; `Ok(false)` = the row no longer
 /// matches what was read (conflict); `Err` = the database refused it.
 pub fn update_cell(

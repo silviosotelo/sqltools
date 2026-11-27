@@ -27,9 +27,16 @@ const waitStatus = async (re, ms) => {
   }
 };
 async function runSql(sql) {
-  await cdp.evaluate(`document.querySelector('.cm-content')?.focus()`);
-  await cdp.key("a", "KeyA", 65, 2);
-  await cdp.send("Input.insertText", { text: sql });
+  // Right after connecting a keystroke can be lost: type, check the buffer took the text, retry if not.
+  const probe = sql.trim().slice(0, 18);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await cdp.evaluate(`document.querySelector('.cm-content')?.focus()`);
+    await cdp.key("a", "KeyA", 65, 2);
+    await cdp.send("Input.insertText", { text: sql });
+    await cdp.wait(250);
+    const typed = await cdp.evaluate(`document.querySelector('.cm-content')?.innerText ?? ''`);
+    if (typed.includes(probe)) break;
+  }
   await cdp.key("F5", "F5", 116);
   await cdp.waitFor(`document.querySelectorAll('.grid tbody tr').length > 0`, 20000);
   return cdp.evaluate(`document.querySelector('.grid tbody tr td:nth-child(2)')?.innerText.trim() ?? ""`);

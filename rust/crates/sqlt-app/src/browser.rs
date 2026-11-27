@@ -146,17 +146,32 @@ pub fn list_invalid_objects(
 }
 
 /// Recompiles one unit with `REUSE SETTINGS`, so the session's compile flags are preserved.
+/// Oracle spells the body differently: `ALTER PACKAGE <name> COMPILE BODY`, not `ALTER PACKAGE BODY ...`.
+pub fn compile_statement(
+    schema: Option<&str>,
+    name: &str,
+    object_type: &str,
+) -> Result<String, String> {
+    let target = qualified(schema, name)?;
+    match compile_type(object_type)? {
+        "PACKAGE BODY" => Ok(format!(
+            "alter package {target} compile body reuse settings"
+        )),
+        "TYPE BODY" => Ok(format!("alter type {target} compile body reuse settings")),
+        kind => Ok(format!(
+            "alter {} {target} compile reuse settings",
+            kind.to_ascii_lowercase()
+        )),
+    }
+}
+
 pub fn compile_object(
     session: &Session,
     schema: Option<&str>,
     name: &str,
     object_type: &str,
 ) -> Result<(), String> {
-    let kind = compile_type(object_type)?;
-    let sql = format!(
-        "alter {kind} {} compile reuse settings",
-        qualified(schema, name)?
-    );
+    let sql = compile_statement(schema, name, object_type)?;
     session
         .execute_with(&sql, &[])
         .map(|_| ())
@@ -272,6 +287,23 @@ mod tests {
             "\"ANAMNESIS\".\"A11\""
         );
         assert_eq!(qualified(None, "A11").unwrap(), "\"A11\"");
+    }
+
+    #[test]
+    fn the_body_is_compiled_with_the_body_keyword() {
+        assert_eq!(
+            compile_statement(None, "PKG", "PACKAGE BODY").unwrap(),
+            "alter package \"PKG\" compile body reuse settings"
+        );
+        assert_eq!(
+            compile_statement(Some("ANAMNESIS"), "T", "TYPE BODY").unwrap(),
+            "alter type \"ANAMNESIS\".\"T\" compile body reuse settings"
+        );
+        assert_eq!(
+            compile_statement(None, "P", "PROCEDURE").unwrap(),
+            "alter procedure \"P\" compile reuse settings"
+        );
+        assert!(compile_statement(None, "T", "TABLE").is_err());
     }
 
     #[test]

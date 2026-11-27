@@ -126,9 +126,39 @@ pub fn parse_response(json: &str) -> Result<String, String> {
         .ok_or_else(|| "The provider returned no content".to_string())
 }
 
+/// True for a loopback host, where plain HTTP is acceptable (the local mock and local runtimes).
+pub fn is_loopback(base_url: &str) -> bool {
+    let rest = match base_url.split_once("://") {
+        Some((_, rest)) => rest,
+        None => return false,
+    };
+    let host = rest.split(['/', ':']).next().unwrap_or_default();
+    matches!(host, "127.0.0.1" | "localhost" | "[::1]" | "::1")
+}
+
+/// Removes the credential from anything that will be shown or stored.
+pub fn redact(message: &str, api_key: &str) -> String {
+    if api_key.is_empty() {
+        return message.to_string();
+    }
+    message.replace(api_key, "***")
+}
+
 /// One chat completion. Blocks up to `timeout_secs`; nothing is retried behind the user's back.
 pub fn run(config: &AiConfig, api_key: &str, function: &str, code: &str) -> Result<String, String> {
     let (system, user) = instructions(function, code)?;
+    if config
+        .base_url
+        .trim()
+        .to_ascii_lowercase()
+        .starts_with("http://")
+        && !is_loopback(&config.base_url)
+    {
+        return Err(format!(
+            "Refusing to send the API key over plain HTTP to {}. Use https:// (http is only allowed for localhost).",
+            config.base_url
+        ));
+    }
     let url = format!("{}/chat/completions", config.base_url.trim_end_matches('/'));
     let agent = ureq::AgentBuilder::new()
         .timeout(std::time::Duration::from_secs(config.timeout_secs.max(5)))
@@ -140,15 +170,19 @@ pub fn run(config: &AiConfig, api_key: &str, function: &str, code: &str) -> Resu
         .send_json(build_request(&config.model, &system, &user));
     match response {
         Ok(response) => {
-            let body = response.into_string().map_err(|error| error.to_string())?;
+            let body = response
+                .into_string()
+                .map_err(|error| redact(&error.to_string(), api_key))?;
             parse_response(&body)
+                .map(|answer| redact(&answer, api_key))
+                .map_err(|error| redact(&error, api_key))
         }
         Err(ureq::Error::Status(status, response)) => {
             let body = response.into_string().unwrap_or_default();
             let message = parse_response(&body).err().unwrap_or(body);
-            Err(format!("HTTP {status}: {message}"))
+            Err(redact(&format!("HTTP {status}: {message}"), api_key))
         }
-        Err(error) => Err(error.to_string()),
+        Err(error) => Err(redact(&error.to_string(), api_key)),
     }
 }
 
@@ -176,6 +210,39 @@ mod tests {
         assert_eq!(request["model"], "m");
         assert_eq!(request["messages"][0]["role"], "system");
         assert_eq!(request["messages"][1]["content"], "usr");
+    }
+
+    #[test]
+    fn only_loopback_may_use_plain_http() {
+        assert!(is_loopback("http://127.0.0.1:8080/v1"));
+        assert!(is_loopback("http://localhost/v1"));
+        assert!(!is_loopback("http://api.example.com/v1"));
+        assert!(!is_loopback("https://api.example.com/v1"));
+    }
+
+    #[test]
+    fn the_key_is_never_returned_in_an_error() {
+        let error = "invalid header: Authorization: Bearer sk-secret-123";
+        assert_eq!(
+            redact(error, "sk-secret-123"),
+            "invalid header: Authorization: Bearer ***"
+        );
+        assert_eq!(
+            redact("nothing to hide", "sk-secret-123"),
+            "nothing to hide"
+        );
+    }
+
+    #[test]
+    fn a_remote_plain_http_url_is_refused_before_sending() {
+        let config = AiConfig {
+            base_url: "http://api.example.com/v1".to_string(),
+            model: "m".to_string(),
+            timeout_secs: 5,
+        };
+        let error = run(&config, "sk-secret", "explain", "select 1").unwrap_err();
+        assert!(error.contains("https"), "{error}");
+        assert!(!error.contains("sk-secret"), "{error}");
     }
 
     #[test]

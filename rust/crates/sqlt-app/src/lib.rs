@@ -39,7 +39,7 @@ pub use compare::{
     CompareStatus, Snapshot, SnapshotObject, TodoItem,
 };
 pub use debugger::{DebugPosition, Debugger, StepMode};
-pub use grid::update_cell;
+pub use grid::{rowid_available, update_cell};
 pub use profiler::{profile, read_lines, ProfileLine, ProfileResult};
 pub use projects::{Project, ProjectFile};
 pub use reports::{parameters as report_parameters, FileEntry, Report};

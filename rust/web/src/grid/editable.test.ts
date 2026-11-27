@@ -33,6 +33,10 @@ describe("prepareEditable", () => {
       "update t set a = 1",
       "select * from t where a = :1",
       "select * from t; select * from u",
+      "select a as b from t",
+      "select n name from t",
+      "select a as b from t",
+      "select n name from t",
     ]) {
       expect(prepareEditable(sql), sql).toBeNull();
     }

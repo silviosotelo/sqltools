@@ -535,101 +535,132 @@ fn profile_sql(
 }
 
 /// Starts debugging `sql` on a second connection. The statement usually calls the unit under test.
+/// The blocking DBMS_DEBUG calls run off the webview thread; the target has `abort_on_timeout` so a step
+/// cannot hang forever.
 #[tauri::command]
-fn debug_start(
+async fn debug_start(
     state: State<'_, Arc<AppState>>,
     connection_id: String,
     sql: String,
 ) -> Result<debugger::DebugPosition, String> {
-    let session = state.session(&connection_id)?;
-    let spec = state.connect_spec(&connection_id)?;
-    // Only units compiled with debug information can be stepped; make it the default for this session.
-    session
-        .execute_with("alter session set plsql_debug = true", &[])
-        .ok();
-    let mut slot = state
-        .debug
-        .lock()
-        .map_err(|_| "Debugger lock poisoned".to_string())?;
-    if let Some(previous) = slot.take() {
-        previous.stop(&session);
-    }
-    let debugger = debugger::Debugger::start(&session, &spec, sql, 15)?;
-    let position = debugger.position.clone();
-    *slot = Some(debugger);
-    Ok(position)
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let session = state.session(&connection_id)?;
+        let spec = state.connect_spec(&connection_id)?;
+        // Only units compiled with debug information can be stepped; make it the default for this session.
+        session
+            .execute_with("alter session set plsql_debug = true", &[])
+            .ok();
+        let mut slot = state
+            .debug
+            .lock()
+            .map_err(|_| "Debugger lock poisoned".to_string())?;
+        if let Some(previous) = slot.take() {
+            previous.stop();
+        }
+        let debugger = debugger::Debugger::start(&session, &spec, sql, 15)?;
+        let position = debugger.position.clone();
+        *slot = Some(debugger);
+        Ok(position)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-fn debug_step(
+async fn debug_step(
     state: State<'_, Arc<AppState>>,
-    connection_id: String,
     mode: String,
 ) -> Result<debugger::DebugPosition, String> {
-    let session = state.session(&connection_id)?;
-    let step = match mode.as_str() {
-        "into" => debugger::StepMode::Into,
-        "out" => debugger::StepMode::Out,
-        _ => debugger::StepMode::Over,
-    };
-    let mut slot = state
-        .debug
-        .lock()
-        .map_err(|_| "Debugger lock poisoned".to_string())?;
-    let active = slot
-        .as_mut()
-        .ok_or_else(|| "There is no debug session".to_string())?;
-    active.step(&session, step)
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let step = match mode.as_str() {
+            "into" => debugger::StepMode::Into,
+            "out" => debugger::StepMode::Out,
+            _ => debugger::StepMode::Over,
+        };
+        let mut slot = state
+            .debug
+            .lock()
+            .map_err(|_| "Debugger lock poisoned".to_string())?;
+        let active = slot
+            .as_mut()
+            .ok_or_else(|| "There is no debug session".to_string())?;
+        active.step(step)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-fn debug_watch(
+async fn debug_watch(
     state: State<'_, Arc<AppState>>,
-    connection_id: String,
     name: String,
 ) -> Result<Option<String>, String> {
-    let session = state.session(&connection_id)?;
-    let slot = state
-        .debug
-        .lock()
-        .map_err(|_| "Debugger lock poisoned".to_string())?;
-    let active = slot
-        .as_ref()
-        .ok_or_else(|| "There is no debug session".to_string())?;
-    active.watch(&session, &name, 0)
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let slot = state
+            .debug
+            .lock()
+            .map_err(|_| "Debugger lock poisoned".to_string())?;
+        let active = slot
+            .as_ref()
+            .ok_or_else(|| "There is no debug session".to_string())?;
+        active.watch(&name, 0)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-fn debug_breakpoint(
+async fn debug_breakpoint(
     state: State<'_, Arc<AppState>>,
-    connection_id: String,
     owner: String,
     name: String,
     namespace: i32,
     line: i32,
 ) -> Result<i32, String> {
-    let session = state.session(&connection_id)?;
-    let slot = state
-        .debug
-        .lock()
-        .map_err(|_| "Debugger lock poisoned".to_string())?;
-    let active = slot
-        .as_ref()
-        .ok_or_else(|| "There is no debug session".to_string())?;
-    active.set_breakpoint(&session, &owner, &name, namespace, line)
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let slot = state
+            .debug
+            .lock()
+            .map_err(|_| "Debugger lock poisoned".to_string())?;
+        let active = slot
+            .as_ref()
+            .ok_or_else(|| "There is no debug session".to_string())?;
+        active.set_breakpoint(&owner, &name, namespace, line)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-fn debug_stop(state: State<'_, Arc<AppState>>, connection_id: String) -> Result<(), String> {
+async fn debug_stop(state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut slot = state
+            .debug
+            .lock()
+            .map_err(|_| "Debugger lock poisoned".to_string())?;
+        if let Some(active) = slot.take() {
+            active.stop();
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// True when the table accepts a ROWID: the grid only rewrites the query when it does.
+#[tauri::command]
+fn rowid_available(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    table: String,
+) -> Result<bool, String> {
     let session = state.session(&connection_id)?;
-    let mut slot = state
-        .debug
-        .lock()
-        .map_err(|_| "Debugger lock poisoned".to_string())?;
-    if let Some(active) = slot.take() {
-        active.stop(&session);
-    }
-    Ok(())
+    grid::rowid_available(&session, &table, state.query_options(&connection_id))
 }
 
 #[tauri::command]
@@ -1382,6 +1413,7 @@ fn main() {
             delete_project,
             list_scheduler_jobs,
             ai_config,
+            rowid_available,
             ai_set_config,
             ai_has_key,
             ai_set_key,
