@@ -384,3 +384,28 @@ P5 PROBE OK
 sentencia no es PL/SQL, `DBMS_PROFILER` no registra líneas y la app lo dice. Las filas del profiler quedan en
 las tablas `PLSQL_PROFILER_*` del usuario (la app no las borra en uso normal).
 
+### P6 — pre-vuelo del Debugger (2026-11-26): bloqueada por alcance
+
+Antes de escribir el debugger se probó qué permite `DBMS_DEBUG` en `anamnesis@desa02`. Todo lo que sigue es
+evidencia ejecutada, no suposición:
+
+| Prueba | Resultado |
+|---|---|
+| `all_tab_privs` para `DBMS_DEBUG` | 1 concesión, **a PUBLIC**: se puede llamar |
+| `alter session set plsql_debug = true` + compilar | funciona; la unidad queda con `plsql_debug = TRUE` (las breakpoints serían posibles) |
+| `dbms_debug.initialize` | **funciona** con bind de salida `VARCHAR2` (devuelve `0170E3870001`); con `NUMBER` daba `ORA-06502` |
+| `dbms_debug.set_breakpoint(owner, program, null, 4)` | `PLS-00221`: la firma real pide más parámetros (incluye un `OUT`), así que cada llamada necesita descubrir su firma exacta y bindear las salidas |
+| `dbms_debug.debug_on` | devuelve ok, pero deja la sesión **dentro del debug loop** |
+| `dbms_debug.debug_off` | **se cuelga** (900 s, proceso terminado a mano) porque no hay ningún debugger adjunto que la libere |
+
+**Consecuencia de diseño:** un debugger real necesita **dos sesiones OCI** —una de ellas en un hilo, bloqueada en
+el debug loop como objetivo— y un bucle de comandos en la otra (`continue`, `step`, `get_value`), cada uno con
+sus propios `OUT` y con timeout. Además hay que garantizar `debug_off` o matar la sesión objetivo al salir: la
+prueba demostró que sin debugger adjunto la sesión queda colgada.
+
+Eso es un sub-proyecto de varios turnos (protocolo de 8+ llamadas con firmas por descubrir, hilo objetivo,
+UI de paso/variables y recuperación ante cuelgues), no una fase más de las que veníamos cerrando en un turno.
+Se deja **P6 sin implementar** y se pide la decisión del dueño: invertir los turnos que haga falta en el
+debugger, o sacarlo del alcance y seguir con P7–P10. La sesión de prueba quedó terminada y no hay objetos
+creados (el procedimiento de prueba se borró).
+
