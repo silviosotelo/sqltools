@@ -438,3 +438,55 @@ Lo que falta para cerrar P6: los **valores numéricos de `breakflags`** (para pa
 `debugger.rs` con `start/step/stop/watch`, la UI de paso y variables, y las verificaciones de la compuerta.
 El prototipo se borró; la evidencia queda acá.
 
+### P6 — cerrada (2026-11-26)
+
+**Qué cambió:** `crates/sqlt-app/src/debugger.rs` implementa el debugger sobre `DBMS_DEBUG` con las **dos
+sesiones** que exige el paquete: `Debugger::start` abre una conexión OCI aparte, la arma con
+`set_timeout_behaviour(abort_on_timeout)` y `debug_on`, corre la sentencia ahí en un hilo, y desde la sesión de
+la app hace `attach_session` + `synchronize`. `step(Over|Into|Out)` usa `continue` con `break_next_line` (32),
+`break_any_call` (12) y `break_any_return` (512); `watch(name)` lee variables del frame con `get_value`; y
+`stop` hace `detach_session` + cierra la conexión objetivo, que además libera el hilo si quedó suspendido.
+Los RECORD del paquete se bindean desde **bloques PL/SQL envoltorio** (OCI no puede bindear records) y
+`Session::execute_block` devuelve `Option<String>` porque `DBMS_DEBUG` deja campos en NULL.
+
+**Lo que costó y quedó documentado:** el namespace de un PROCEDURE es **1** (usé 2, de ahí `error_bad_handle`
+16); `set_breakpoint` devuelve **1 = error_deferred** cuando se pide antes de que el programa corra — se acepta
+y se instala al sincronizar, así que no es un error; `set_timeout` es función, `set_timeout_behaviour` es
+procedimiento; y el primer `continue` desde el bloque anónimo no entra en la unidad: el camino confiable es
+breakpoint + paso.
+
+**UI:** entrada **Depurar sentencia** en "Más acciones" y, mientras hay sesión, una tira de depuración con la
+posición (`UNIDAD:línea · motivo`), **Paso a paso / Entrar / Salir / Detener** y un campo de **Variable** con
+los valores observados. Cada paso se registra en Salida.
+
+**Verificación contra Oracle (sonda temporal, ya borrada):**
+
+```
+start: interpreter starting :-1 terminated=false
+set_breakpoint: [Some("0"), Some("1")]
+step 0: breakpoint SQLT_P6_DBG:4 terminated=false status=0   L = Some("0")
+step 1: new line SQLT_P6_DBG:5   ...                          L = Some("1")
+step 2: new line SQLT_P6_DBG:6   ...                          L = Some("1")
+step 3: new line SQLT_P6_DBG:5   ...                          L = Some("2")
+step 4: new line SQLT_P6_DBG:6   ...                          L = Some("2")
+step 5: new line SQLT_P6_DBG:5   ...                          L = Some("4")
+```
+
+**Evidencia en la app instalada** (23:37, firmada autofirmada):
+
+| Comando | Resultado |
+|---|---|
+| `node e2e/phase-p6.mjs` | `P6 CHECKS OK (6)`: el menú ofrece Depurar; la sesión arranca (`interpreter starting`); el breakpoint se acepta; el paso frena en `SQLT_P6_E2E:4 · breakpoint`; `L=0` en la tira; Detener quita la tira |
+| `phase-p1` … `phase-p5` | 15 / 11 / 4 / 5 / 3 |
+| `axe-cdp.mjs` | 0 violaciones, 9 vistas × 2 temas (la tira de depuración no está en el barrido: requiere una sesión activa; declarado) |
+| `phase-f1` / `phase-f2` / `phase-f5` / `tree` / `env` / `keyboard-walk` | 19 / 3 / 39 / 11 / 12 / 28 paradas |
+| `commands-check` / `flow` | mismo digest / IDENTICAL |
+| capturas 1366×768, 1024×700 y 1024×640, claro y oscuro | `docs/screenshots/parity-p6-debugger-*.png`, con `SQLT_P6_SHOT:4 · breakpoint` visible y sin desbordes |
+| `cargo fmt` / `clippy -D warnings` / `check -p sqlt-desktop` / `test` | 0 / 0 / 0 / 0 (19 ok; +3 tests del debugger) |
+| `npm run build` / `npm test` | 0 / **98 passed** |
+
+**Límites declarados:** la unidad tiene que estar compilada **con información de debug** (`PLSQL_DEBUG=TRUE` en
+la sesión que la compila; la app lo activa al iniciar la depuración, no recompila). No hay UI para poner
+breakpoints (el comando existe y lo usa la prueba); una sesión de depuración por vez; el timeout es de 15 s y
+al detener se cierra la sesión objetivo.
+

@@ -221,3 +221,12 @@ export type ProfileResult = {
   lines: ProfileLine[];
   totalTime: number;
 };
+
+export type DebugPosition = {
+  program: string;
+  line: number;
+  reason: number;
+  reasonName: string;
+  terminated: boolean;
+  status: number;
+};

@@ -28,6 +28,7 @@ import type {
   CommandSpec,
   ConnectionConfig,
   ConstraintInfo,
+  DebugPosition,
   Dependency,
   FormatOptions,
   GrantInfo,
@@ -331,6 +332,11 @@ export default function App() {
   const [editValue, setEditValue] = useState("");
   const [qbe, setQbe] = useState("");
   const [todos, setTodos] = useState<TodoItem[]>([]);
+  const [debugPosition, setDebugPosition] = useState<DebugPosition | null>(null);
+  const [debugWatchName, setDebugWatchName] = useState("");
+  const [debugWatches, setDebugWatches] = useState<
+    Array<{ name: string; value: string | null }>
+  >([]);
   const [helpOpen, setHelpOpen] = useState(false);
   const [showToolbar, setShowToolbar] = useState(true);
   // null = unknown (never queried, or the last query failed).
@@ -778,6 +784,81 @@ export default function App() {
     else if (view === "stats") void showStats();
     else if (view === "connections") openConnections();
     else setSideView(view);
+  };
+
+  const updateWatches = async () => {
+    if (debugWatches.length === 0) return;
+    const next: Array<{ name: string; value: string | null }> = [];
+    for (const watch of debugWatches) {
+      try {
+        next.push({ name: watch.name, value: await api.debugWatch(selected, watch.name) });
+      } catch (error) {
+        next.push({ name: watch.name, value: String(error) });
+      }
+    }
+    setDebugWatches(next);
+  };
+
+  const startDebug = async () => {
+    if (!isConnected) {
+      setStatus(t("noConnection"));
+      return;
+    }
+    const text = sql.trim();
+    if (!text) {
+      setStatus(t("profileEmpty"));
+      return;
+    }
+    try {
+      const position = await api.debugStart(selected, text);
+      setDebugPosition(position);
+      setDebugWatches([]);
+      setOutput([`${position.reasonName} ${position.program}:${position.line}`]);
+      setPanel("output");
+      setStatus(`${t("debug")}: ${position.reasonName}`);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const stepDebug = async (mode: "over" | "into" | "out") => {
+    try {
+      const position = await api.debugStep(selected, mode);
+      setDebugPosition(position);
+      setOutput((current) => [
+        ...current,
+        `${position.reasonName} ${position.program}:${position.line}`,
+      ]);
+      await updateWatches();
+      if (position.terminated) {
+        setDebugPosition(null);
+        setStatus(`${t("debug")}: ${position.reasonName}`);
+      }
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const stopDebug = async () => {
+    try {
+      await api.debugStop(selected);
+    } finally {
+      setDebugPosition(null);
+      setDebugWatches([]);
+      setStatus("");
+    }
+  };
+
+  const addWatch = async () => {
+    const name = debugWatchName.trim().toUpperCase();
+    if (!name) return;
+    try {
+      const value = await api.debugWatch(selected, name);
+      setDebugWatches((current) => [...current.filter((w) => w.name !== name), { name, value }]);
+      setDebugWatchName("");
+    } catch (error) {
+      setDebugWatches((current) => [...current, { name, value: String(error) }]);
+    }
   };
 
   const formatNanos = (nanos: number) => {
@@ -2934,6 +3015,7 @@ export default function App() {
             { id: "ws-load", label: t("workspaceLoad"), onClick: () => void loadWorkspace() },
             { id: "cache", label: t("refresh"), onClick: () => void refreshObjectCache(), disabled: !isConnected },
             { id: "profile", label: t("profileStatement"), onClick: () => void profileStatement(), disabled: !isConnected },
+            { id: "debug", label: t("debugStatement"), onClick: () => void startDebug(), disabled: !isConnected },
             { id: "snapshot-save", label: t("saveSnapshot"), onClick: () => void saveSourcesSnapshot(), disabled: !isConnected },
             { id: "snapshot-compare", label: t("compareSnapshot"), onClick: () => void compareWithSnapshot(), disabled: !isConnected },
             ...(updateInfo
@@ -2943,6 +3025,40 @@ export default function App() {
           ]}
           breadcrumb={breadcrumb}
         />
+      )}
+      {debugPosition && (
+        <div className="actionstrip debug-strip" role="group" aria-label={t("debug")}>
+          <span className="debug-pos" data-e2e="debug-position">
+            {debugPosition.program}:{debugPosition.line} · {debugPosition.reasonName}
+          </span>
+          <button className="plain" onClick={() => void stepDebug("over")}>
+            {t("debugOver")}
+          </button>
+          <button className="plain" onClick={() => void stepDebug("into")}>
+            {t("debugInto")}
+          </button>
+          <button className="plain" onClick={() => void stepDebug("out")}>
+            {t("debugOut")}
+          </button>
+          <button className="plain" onClick={() => void stopDebug()}>
+            {t("debugStop")}
+          </button>
+          <input
+            className="qbe"
+            value={debugWatchName}
+            placeholder={t("debugWatch")}
+            aria-label={t("debugWatch")}
+            onChange={(event) => setDebugWatchName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") void addWatch();
+            }}
+          />
+          {debugWatches.map((watch) => (
+            <span key={watch.name} className="debug-watch">
+              {watch.name}={watch.value ?? "NULL"}
+            </span>
+          ))}
+        </div>
       )}
       {!showToolbar && (
         <button

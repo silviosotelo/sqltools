@@ -11,6 +11,7 @@ import type {
   IndexInfo,
   CompileError,
   CompareResult,
+  DebugPosition,
   Dependency,
   ObjectCount,
   ObjectInfo,
@@ -163,6 +164,15 @@ export const api = {
       schema,
       objectType,
     }),
+  debugStart: (connectionId: string, sql: string) =>
+    invoke<DebugPosition>("debug_start", { connectionId, sql }),
+  debugStep: (connectionId: string, mode: "over" | "into" | "out") =>
+    invoke<DebugPosition>("debug_step", { connectionId, mode }),
+  debugWatch: (connectionId: string, name: string) =>
+    invoke<string | null>("debug_watch", { connectionId, name }),
+  debugBreakpoint: (connectionId: string, owner: string, name: string, namespace: number, line: number) =>
+    invoke<number>("debug_breakpoint", { connectionId, owner, name, namespace, line }),
+  debugStop: (connectionId: string) => invoke<void>("debug_stop", { connectionId }),
   profileSql: (connectionId: string, sql: string) =>
     invoke<ProfileResult>("profile_sql", { connectionId, sql }),
   listTodos: (connectionId: string, schema: string | null) =>

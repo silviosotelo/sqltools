@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use sqlt_app::{
-    browser, catalog, compare, grid, profiler, AppState, ConnectionConfig, HistoryEntry,
+    browser, catalog, compare, debugger, grid, profiler, AppState, ConnectionConfig, HistoryEntry,
 };
 use sqlt_core::{Batch, ColumnMeta};
 use tauri::ipc::Channel;
@@ -531,6 +531,104 @@ fn profile_sql(
 ) -> Result<profiler::ProfileResult, String> {
     let session = state.session(&connection_id)?;
     profiler::profile(&session, &sql, 200, state.query_options(&connection_id))
+}
+
+/// Starts debugging `sql` on a second connection. The statement usually calls the unit under test.
+#[tauri::command]
+fn debug_start(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    sql: String,
+) -> Result<debugger::DebugPosition, String> {
+    let session = state.session(&connection_id)?;
+    let spec = state.connect_spec(&connection_id)?;
+    // Only units compiled with debug information can be stepped; make it the default for this session.
+    session
+        .execute_with("alter session set plsql_debug = true", &[])
+        .ok();
+    let mut slot = state
+        .debug
+        .lock()
+        .map_err(|_| "Debugger lock poisoned".to_string())?;
+    if let Some(previous) = slot.take() {
+        previous.stop(&session);
+    }
+    let debugger = debugger::Debugger::start(&session, &spec, sql, 15)?;
+    let position = debugger.position.clone();
+    *slot = Some(debugger);
+    Ok(position)
+}
+
+#[tauri::command]
+fn debug_step(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    mode: String,
+) -> Result<debugger::DebugPosition, String> {
+    let session = state.session(&connection_id)?;
+    let step = match mode.as_str() {
+        "into" => debugger::StepMode::Into,
+        "out" => debugger::StepMode::Out,
+        _ => debugger::StepMode::Over,
+    };
+    let mut slot = state
+        .debug
+        .lock()
+        .map_err(|_| "Debugger lock poisoned".to_string())?;
+    let active = slot
+        .as_mut()
+        .ok_or_else(|| "There is no debug session".to_string())?;
+    active.step(&session, step)
+}
+
+#[tauri::command]
+fn debug_watch(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    name: String,
+) -> Result<Option<String>, String> {
+    let session = state.session(&connection_id)?;
+    let slot = state
+        .debug
+        .lock()
+        .map_err(|_| "Debugger lock poisoned".to_string())?;
+    let active = slot
+        .as_ref()
+        .ok_or_else(|| "There is no debug session".to_string())?;
+    active.watch(&session, &name, 0)
+}
+
+#[tauri::command]
+fn debug_breakpoint(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    owner: String,
+    name: String,
+    namespace: i32,
+    line: i32,
+) -> Result<i32, String> {
+    let session = state.session(&connection_id)?;
+    let slot = state
+        .debug
+        .lock()
+        .map_err(|_| "Debugger lock poisoned".to_string())?;
+    let active = slot
+        .as_ref()
+        .ok_or_else(|| "There is no debug session".to_string())?;
+    active.set_breakpoint(&session, &owner, &name, namespace, line)
+}
+
+#[tauri::command]
+fn debug_stop(state: State<'_, Arc<AppState>>, connection_id: String) -> Result<(), String> {
+    let session = state.session(&connection_id)?;
+    let mut slot = state
+        .debug
+        .lock()
+        .map_err(|_| "Debugger lock poisoned".to_string())?;
+    if let Some(active) = slot.take() {
+        active.stop(&session);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1153,6 +1251,11 @@ fn main() {
             save_sources_snapshot,
             compare_with_snapshot,
             profile_sql,
+            debug_start,
+            debug_step,
+            debug_watch,
+            debug_breakpoint,
+            debug_stop,
             count_objects,
             list_columns,
             load_ddl,

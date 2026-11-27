@@ -24,6 +24,8 @@ pub struct AppState {
     pub store: Mutex<ConnectionStore>,
     pub sessions: Mutex<HashMap<String, Arc<Session>>>,
     pub history: Mutex<Vec<HistoryEntry>>,
+    /// The running debug session, when the debugger is active.
+    pub debug: Mutex<Option<crate::debugger::Debugger>>,
 }
 
 impl AppState {
@@ -36,6 +38,7 @@ impl AppState {
             store: Mutex::new(store),
             sessions: Mutex::new(HashMap::new()),
             history: Mutex::new(Vec::new()),
+            debug: Mutex::new(None),
         }
     }
 

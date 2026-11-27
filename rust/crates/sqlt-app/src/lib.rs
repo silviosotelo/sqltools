@@ -5,6 +5,7 @@ pub mod browser;
 pub mod catalog;
 pub mod commands;
 pub mod compare;
+pub mod debugger;
 pub mod export;
 pub mod fileio;
 pub mod grid;
@@ -32,6 +33,7 @@ pub use compare::{
     apply_script, compare_snapshot, markers_in_line, todos_from_source, CompareEntry,
     CompareStatus, Snapshot, SnapshotObject, TodoItem,
 };
+pub use debugger::{DebugPosition, Debugger, StepMode};
 pub use grid::update_cell;
 pub use profiler::{profile, read_lines, ProfileLine, ProfileResult};
 pub use state::{AppState, HistoryEntry};
