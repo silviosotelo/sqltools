@@ -18,6 +18,7 @@ import { StatsView } from "./components/StatsView";
 import { ToDoView } from "./components/ToDoView";
 import { FilesView } from "./components/FilesView";
 import { useObjectTree } from "./tree/useObjectTree";
+import { sequenceDdl, tableDdl, type ColumnForm } from "./ddl/forms";
 import { ROWID_COLUMN, prepareEditable, queryByExample } from "./grid/editable";
 import { objectId, type TreeGroup } from "./tree/treeModel";
 import { ResultsPanel } from "./components/ResultsPanel";
@@ -34,6 +35,7 @@ import type {
   FileEntry,
   Project,
   Report as SavedReport,
+  SchedulerJob,
   FormatOptions,
   GrantInfo,
   HistoryEntry,
@@ -353,6 +355,15 @@ export default function App() {
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandText, setCommandText] = useState("");
   const [commandLog, setCommandLog] = useState<string[]>([]);
+  const [schedulerJobs, setSchedulerJobs] = useState<SchedulerJob[]>([]);
+  const [newObjectOpen, setNewObjectOpen] = useState(false);
+  const [newObjectKind, setNewObjectKind] = useState<"table" | "sequence">("table");
+  const [newObjectName, setNewObjectName] = useState("");
+  const [newColumns, setNewColumns] = useState<ColumnForm[]>([
+    { name: "ID", type: "NUMBER", nullable: false, defaultValue: "", primaryKey: true },
+  ]);
+  const [newSequence, setNewSequence] = useState({ startWith: 1, incrementBy: 1, maxValue: "", cycle: false, cache: 20 });
+  const [ddlPreview, setDdlPreview] = useState("");
   const [helpOpen, setHelpOpen] = useState(false);
   const [showToolbar, setShowToolbar] = useState(true);
   // null = unknown (never queried, or the last query failed).
@@ -1030,6 +1041,50 @@ export default function App() {
     } catch (error) {
       setCommandLog((entries) => [...entries, String(error)]);
     }
+  };
+
+  const loadScheduler = async () => {
+    if (!isConnected) {
+      setSchedulerJobs([]);
+      return;
+    }
+    try {
+      setSchedulerJobs(await api.listSchedulerJobs(selected, schema.trim() || null));
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  useEffect(() => {
+    if (sideView !== "scheduler") return;
+    void loadScheduler();
+  }, [sideView, selected, schema, isConnected]);
+
+  /** Builds the DDL from the form. Nothing is executed: the text goes to the editor. */
+  const previewDdl = () => {
+    try {
+      const ddl =
+        newObjectKind === "table"
+          ? tableDdl({ name: newObjectName, columns: newColumns })
+          : sequenceDdl({ name: newObjectName, ...newSequence });
+      setDdlPreview(ddl);
+      setStatus("");
+      return ddl;
+    } catch (error) {
+      setDdlPreview("");
+      setStatus(`${t("ddlInvalid")}: ${String(error instanceof Error ? error.message : error)}`);
+      return null;
+    }
+  };
+
+  const insertDdl = () => {
+    const ddl = previewDdl();
+    if (!ddl) return;
+    openDoc(`${newObjectName} (${newObjectKind === "table" ? "TABLE" : "SEQUENCE"})`, ddl, {
+      key: `new:${newObjectKind}:${newObjectName}`,
+    });
+    setNewObjectOpen(false);
+    setStatus(t("insertDdl"));
   };
 
   const formatNanos = (nanos: number) => {
@@ -3195,6 +3250,7 @@ export default function App() {
             { id: "reports", label: t("reportsOpen"), onClick: () => void openReports() },
             { id: "projects", label: t("projectsOpen"), onClick: () => void openProjects() },
             { id: "command", label: t("commandWindow"), onClick: () => setCommandOpen(true) },
+            { id: "new-object", label: t("newObject"), onClick: () => setNewObjectOpen(true), disabled: !isConnected },
             { id: "snapshot-save", label: t("saveSnapshot"), onClick: () => void saveSourcesSnapshot(), disabled: !isConnected },
             { id: "snapshot-compare", label: t("compareSnapshot"), onClick: () => void compareWithSnapshot(), disabled: !isConnected },
             ...(updateInfo
@@ -3357,6 +3413,26 @@ export default function App() {
           )}
 
           {sideView === "stats" && <StatsView stats={stats} />}
+
+          {sideView === "scheduler" && (
+            <section className="side-section side-fill" aria-labelledby="scheduler-title">
+              <h2 id="scheduler-title" className="panel-title">
+                {t("scheduler")}
+              </h2>
+              <div className="history" tabIndex={0} role="group" aria-label={t("scheduler")}>
+                {schedulerJobs.length === 0 && <p className="side-empty">{t("schedulerEmpty")}</p>}
+                {schedulerJobs.map((job) => (
+                  <div key={`${job.owner}.${job.name}`} className="history-row">
+                    <span>
+                      {job.name} · {job.enabled ? t("schedulerEnabled") : t("schedulerDisabled")} ·{" "}
+                      {job.state}
+                    </span>
+                    <code>{job.repeatInterval || job.nextRun}</code>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           {sideView === "files" && (
             <FilesView
@@ -3577,6 +3653,159 @@ export default function App() {
           </div>
         </div>
       )}
+      {newObjectOpen && (
+        <div className="palette-backdrop" onClick={() => setNewObjectOpen(false)}>
+          <div
+            className="palette new-object"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("newObject")}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="panel-title">{t("newObject")}</div>
+            <div className="row">
+              <select
+                aria-label={t("newObject")}
+                value={newObjectKind}
+                onChange={(event) => {
+                  setNewObjectKind(event.target.value as "table" | "sequence");
+                  setDdlPreview("");
+                }}
+              >
+                <option value="table">{t("newTable")}</option>
+                <option value="sequence">{t("newSequence")}</option>
+              </select>
+              <input
+                value={newObjectName}
+                placeholder={t("objectName")}
+                aria-label={t("objectName")}
+                onChange={(event) => setNewObjectName(event.target.value)}
+              />
+            </div>
+            {newObjectKind === "table" ? (
+              <div className="palette-list">
+                {newColumns.map((column, index) => (
+                  <div className="row" key={index}>
+                    <input
+                      value={column.name}
+                      placeholder={t("columnName")}
+                      aria-label={`${t("columnName")} ${index + 1}`}
+                      onChange={(event) =>
+                        setNewColumns((current) =>
+                          current.map((item, i) =>
+                            i === index ? { ...item, name: event.target.value } : item,
+                          ),
+                        )
+                      }
+                    />
+                    <input
+                      value={column.type}
+                      placeholder={t("columnType")}
+                      aria-label={`${t("columnType")} ${index + 1}`}
+                      onChange={(event) =>
+                        setNewColumns((current) =>
+                          current.map((item, i) =>
+                            i === index ? { ...item, type: event.target.value } : item,
+                          ),
+                        )
+                      }
+                    />
+                    <label className="check-inline">
+                      <input
+                        type="checkbox"
+                        checked={column.nullable}
+                        aria-label={`${t("columnNullable")} ${index + 1}`}
+                        onChange={(event) =>
+                          setNewColumns((current) =>
+                            current.map((item, i) =>
+                              i === index ? { ...item, nullable: event.target.checked } : item,
+                            ),
+                          )
+                        }
+                      />
+                      {t("columnNullable")}
+                    </label>
+                    <label className="check-inline">
+                      <input
+                        type="checkbox"
+                        checked={column.primaryKey}
+                        aria-label={`${t("columnPrimary")} ${index + 1}`}
+                        onChange={(event) =>
+                          setNewColumns((current) =>
+                            current.map((item, i) =>
+                              i === index ? { ...item, primaryKey: event.target.checked } : item,
+                            ),
+                          )
+                        }
+                      />
+                      {t("columnPrimary")}
+                    </label>
+                  </div>
+                ))}
+                <button
+                  className="plain"
+                  onClick={() =>
+                    setNewColumns((current) => [
+                      ...current,
+                      { name: "", type: "VARCHAR2(60)", nullable: true, defaultValue: "", primaryKey: false },
+                    ])
+                  }
+                >
+                  {t("addColumn")}
+                </button>
+              </div>
+            ) : (
+              <div className="row">
+                <label className="check-inline">
+                  {t("sequenceStart")}
+                  <input
+                    type="number"
+                    value={newSequence.startWith}
+                    aria-label={t("sequenceStart")}
+                    onChange={(event) =>
+                      setNewSequence((current) => ({ ...current, startWith: Number(event.target.value) || 1 }))
+                    }
+                  />
+                </label>
+                <label className="check-inline">
+                  {t("sequenceIncrement")}
+                  <input
+                    type="number"
+                    value={newSequence.incrementBy}
+                    aria-label={t("sequenceIncrement")}
+                    onChange={(event) =>
+                      setNewSequence((current) => ({ ...current, incrementBy: Number(event.target.value) || 1 }))
+                    }
+                  />
+                </label>
+                <label className="check-inline">
+                  <input
+                    type="checkbox"
+                    checked={newSequence.cycle}
+                    aria-label={t("sequenceCycle")}
+                    onChange={(event) =>
+                      setNewSequence((current) => ({ ...current, cycle: event.target.checked }))
+                    }
+                  />
+                  {t("sequenceCycle")}
+                </label>
+              </div>
+            )}
+            <pre className="command-log" data-e2e="ddl-preview">
+              {ddlPreview || t("ddlPreview")}
+            </pre>
+            <div className="row">
+              <button className="plain" onClick={previewDdl}>
+                {t("ddlPreview")}
+              </button>
+              <button className="plain" onClick={insertDdl} disabled={!newObjectName.trim()}>
+                {t("insertDdl")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {projectsOpen && (
         <div className="palette-backdrop" onClick={() => setProjectsOpen(false)}>
           <div

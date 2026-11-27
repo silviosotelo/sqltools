@@ -116,6 +116,24 @@ const VIEWS = {
     },
     expect: `Boolean(document.querySelector('[data-e2e="command-log"]'))`,
   },
+  scheduler: {
+    steps: async (cdp) => {
+      await ensureConnected(cdp);
+      await cdp.click('.activity .act[aria-label="Tareas programadas"]');
+      await cdp.wait(1200);
+    },
+    expect: `Boolean(document.querySelector('.objects-panel .history-row, .objects-panel .side-empty'))`,
+  },
+  newObject: {
+    steps: async (cdp) => {
+      await ensureConnected(cdp);
+      await cdp.click('.actionstrip button[aria-label="Más acciones"]');
+      await cdp.wait(300);
+      await cdp.evaluate(`Array.from(document.querySelectorAll('[role=menuitem]')).find(b => b.innerText.trim() === 'Nuevo objeto…')?.click()`);
+      await cdp.waitFor(`Boolean(document.querySelector('[data-e2e="ddl-preview"]'))`, 8000);
+    },
+    expect: `Boolean(document.querySelector('[data-e2e="ddl-preview"]'))`,
+  },
   menu: {
     steps: async (cdp) => {
       await cdp.click('.actionstrip button[aria-label="Más acciones"]');

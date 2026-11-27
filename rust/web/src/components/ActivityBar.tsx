@@ -7,7 +7,8 @@ export type SideView =
   | "history"
   | "stats"
   | "todos"
-  | "files";
+  | "files"
+  | "scheduler";
 
 const VIEWS: Array<{ id: SideView; icon: IconName; label: MessageKey }> = [
   { id: "objects", icon: "database", label: "objects" },
@@ -16,6 +17,7 @@ const VIEWS: Array<{ id: SideView; icon: IconName; label: MessageKey }> = [
   { id: "stats", icon: "stats", label: "stats" },
   { id: "todos", icon: "warning", label: "todos" },
   { id: "files", icon: "open", label: "files" },
+  { id: "scheduler", icon: "plan", label: "scheduler" },
 ];
 
 export function ActivityBar({

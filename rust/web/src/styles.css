@@ -1719,3 +1719,17 @@ kbd {
   white-space: pre-wrap;
 }
 
+
+/* New object form: compact rows, the DDL preview reuses the command-window log style. */
+.new-object .row input[type='text'],
+.new-object .row input:not([type]) {
+  min-width: 120px;
+}
+.new-object .row input {
+  height: 23px;
+  padding: 0 6px;
+  border: 1px solid var(--control-border);
+  border-radius: 2px;
+  background: var(--surface);
+}
+

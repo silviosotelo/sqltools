@@ -244,3 +244,12 @@ export type Project = {
   files: ProjectFile[];
   objects: string[];
 };
+
+export type SchedulerJob = {
+  name: string;
+  owner: string;
+  enabled: boolean;
+  state: string;
+  repeatInterval: string;
+  nextRun: string;
+};

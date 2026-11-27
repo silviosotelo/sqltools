@@ -559,3 +559,38 @@ que el botón **Ejecutar** quede habilitado; 3 corridas seguidas en verde.
 ni compara versiones; la ventana de comandos ejecuta una sentencia por Enter (no interpreta `SQL*Plus`
 como `SET SERVEROUTPUT`), y los `objects` del proyecto son los que estaban abiertos en pestañas de DDL.
 
+### P9 — cerrada (2026-11-27)
+
+**Formularios DDL (`web/src/ddl/forms.ts`):** generan el texto y **nunca ejecutan**: la sentencia va al
+editor. Tabla con columnas (nombre, tipo, nula, PK) y `CONSTRAINT <tabla>_PK PRIMARY KEY`; secuencia con
+inicio, incremento, `maxvalue`/`nomaxvalue`, `cycle` y caché. Identificadores citados solo cuando hace falta y
+rechazo de comillas, tipos inválidos, columnas duplicadas, tabla sin columnas y `maxvalue` no numérico.
+**5 tests de vitest.**
+
+**Scheduler (`crates/sqlt-app/src/scheduler.rs`):** vista de solo lectura sobre `DBMS_SCHEDULER`
+(`Tareas programadas`, séptima vista lateral) con nombre, habilitada/deshabilitada, estado, intervalo y próxima
+ejecución. `user_scheduler_jobs` no tiene columna `OWNER` (se usa el pseudo-campo `user`), corregido al probar.
+
+**UI:** **Nuevo objeto…** en "Más acciones" (selector Tabla/Secuencia, nombre, editor de columnas, preview y
+"Insertar en el editor") y la vista **Tareas programadas**.
+
+**Evidencia en la app instalada** (27/11, firmada autofirmada):
+
+| Comando | Resultado |
+|---|---|
+| `node e2e/phase-p9.mjs` | `P9 CHECKS OK (6)`: la vista lista un job real creado por la prueba (`SQLT_P9_E2E … deshabilitada`); el formulario de tabla previsualiza `create table SQLT_P9_E2E ( ID NUMBER NOT NULL, CONSTRAINT SQLT_P9_E2E_PK PRIMARY KEY (ID) );`; **insertar** deja el DDL en el editor y el estado pasa a "Insertar en el editor" (no se ejecutó); el de secuencia produce `create sequence SQLT_P9_SEQ start with 1 increment by 1 nomaxvalue nocycle cache 20;`. La prueba borra su job |
+| `axe-cdp.mjs` | **0 violaciones, 15 vistas × 2 temas** (incluye Tareas programadas y Nuevo objeto) |
+| `phase-p1` … `phase-p8` | 15 / 11 / 4 / 5 / 3 / 6 / 9 / 5 |
+| `phase-f1` / `phase-f5` / `keyboard-walk` | 19 / 39 / 30 paradas |
+| `commands-check` / `flow` | mismo digest / IDENTICAL |
+| capturas 1366×768, 1024×700 y 1024×640, claro y oscuro | `docs/screenshots/parity-p9-scheduler-*.png` (108 tareas) y `parity-p9-new-object-*.png` |
+| `cargo fmt` / `clippy -D warnings` / `check -p sqlt-desktop` / `test` | 0 / 0 / 0 / 0 (19 ok) |
+| `npm run build` / `npm test` | 0 / **103 passed** (5 nuevos de DDL) |
+
+**Dos defectos propios corregidos en la fase:** la consulta del scheduler usaba `owner` sobre
+`user_scheduler_jobs` (no existe); y la lista de 108 tareas es un área desplazable sin contenido enfocable
+(`scrollable-region-focusable`), ahora `tabIndex={0}` con `role="group"`.
+
+**Límites declarados:** el formulario cubre tablas y secuencias (no índices, constraints ni vistas); no crea un
+objeto directamente, por diseño. El scheduler es de solo lectura: no crea, habilita ni ejecuta jobs.
+

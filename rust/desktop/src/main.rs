@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use sqlt_app::{
-    browser, catalog, compare, debugger, grid, profiler, projects, reports, AppState,
+    browser, catalog, compare, debugger, grid, profiler, projects, reports, scheduler, AppState,
     ConnectionConfig, HistoryEntry,
 };
 use sqlt_core::{Batch, ColumnMeta};
@@ -703,6 +703,20 @@ fn delete_project(name: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn list_scheduler_jobs(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    schema: Option<String>,
+) -> Result<Vec<scheduler::SchedulerJob>, String> {
+    let session = state.session(&connection_id)?;
+    scheduler::list_jobs(
+        &session,
+        schema.as_deref(),
+        state.query_options(&connection_id),
+    )
+}
+
+#[tauri::command]
 fn history(state: State<'_, Arc<AppState>>) -> Vec<HistoryEntry> {
     state.history()
 }
@@ -1337,6 +1351,7 @@ fn main() {
             save_project,
             load_project,
             delete_project,
+            list_scheduler_jobs,
             pick_folder,
             count_objects,
             list_columns,

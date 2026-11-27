@@ -14,6 +14,7 @@ pub mod profiler;
 pub mod profiles;
 pub mod projects;
 pub mod reports;
+pub mod scheduler;
 pub mod script;
 pub mod sqlplus;
 pub mod state;
@@ -40,6 +41,7 @@ pub use grid::update_cell;
 pub use profiler::{profile, read_lines, ProfileLine, ProfileResult};
 pub use projects::{Project, ProjectFile};
 pub use reports::{parameters as report_parameters, FileEntry, Report};
+pub use scheduler::SchedulerJob;
 pub use state::{AppState, HistoryEntry};
 pub use store::{
     config_dir, ConnectionConfig, ConnectionStore, Environment, StoreError, ENV_COLORS,

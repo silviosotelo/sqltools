@@ -15,6 +15,7 @@ import type {
   FileEntry,
   Project,
   Report,
+  SchedulerJob,
   Dependency,
   ObjectCount,
   ObjectInfo,
@@ -167,6 +168,8 @@ export const api = {
       schema,
       objectType,
     }),
+  listSchedulerJobs: (connectionId: string, schema: string | null) =>
+    invoke<SchedulerJob[]>("list_scheduler_jobs", { connectionId, schema }),
   listProjects: () => invoke<Project[]>("list_projects"),
   saveProject: (project: Project) => invoke<void>("save_project", { project }),
   loadProject: (name: string) => invoke<Project>("load_project", { name }),
