@@ -50,7 +50,7 @@ Method and limits:
 | 20 | Query Builder | Graphical SELECT builder: drag tables, columns, where, order by, FK joins | **Missing** | — |
 | 21 | Compare User Objects | Compare object selections, show differences, apply or save a script | **Partial** | `sqlt-meta::compare_ddl` (DDL comparison with first difference). Missing: the compare window and script generation |
 | 22 | Export User Objects | Export DDL of a selection of objects | **Have** | `Tools.ExtractSchemaDDL` (writes a DDL file) |
-| 23 | Tools | Find database objects, invalid objects, import/export tables, test data generator, text/ODBC import, compare data, `dbms_alert`/`dbms_pipe` monitor, session info | **Partial** | `Script.FindObject`, `Session.RefreshObjectCache`. Missing: the rest |
+| 23 | Tools | Find database objects, invalid objects, import/export tables, test data generator, text/ODBC import, compare data, `dbms_alert`/`dbms_pipe` monitor, session info | **Partial** | Since P7: a basic import of delimited files that previews the rows and generates INSERT statements in the editor; since P1: invalid objects and recompile. Plus `Script.FindObject`, `Session.RefreshObjectCache`. Missing: ODBC import, data generator, compare data, monitors |
 
 ## Observable facts collected (for interoperability work)
 

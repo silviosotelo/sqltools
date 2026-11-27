@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use sqlt_app::{
-    ai, browser, catalog, compare, debugger, grid, profiler, projects, reports, scheduler,
+    ai, browser, catalog, compare, debugger, grid, import, profiler, projects, reports, scheduler,
     AppState, ConnectionConfig, HistoryEntry,
 };
 use sqlt_core::{Batch, ColumnMeta};
@@ -661,6 +661,25 @@ fn rowid_available(
 ) -> Result<bool, String> {
     let session = state.session(&connection_id)?;
     grid::rowid_available(&session, &table, state.query_options(&connection_id))
+}
+
+/// Preview of a delimited file: columns, first rows, total. It only reads the file.
+#[tauri::command]
+fn csv_preview(path: String, has_header: bool) -> Result<import::CsvPreview, String> {
+    let text = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
+    import::preview(&text, has_header, 5)
+}
+
+/// `INSERT` statements for the file, into `table`. Nothing is executed.
+#[tauri::command]
+fn csv_insert_script(
+    path: String,
+    table: String,
+    has_header: bool,
+    max_rows: usize,
+) -> Result<String, String> {
+    let text = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
+    import::insert_script(&table, &text, has_header, max_rows)
 }
 
 #[tauri::command]
@@ -1413,6 +1432,8 @@ fn main() {
             delete_project,
             list_scheduler_jobs,
             ai_config,
+            csv_preview,
+            csv_insert_script,
             rowid_available,
             ai_set_config,
             ai_has_key,

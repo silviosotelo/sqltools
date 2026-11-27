@@ -10,6 +10,7 @@ pub mod debugger;
 pub mod export;
 pub mod fileio;
 pub mod grid;
+pub mod import;
 pub mod migrate;
 pub mod profiler;
 pub mod profiles;
@@ -40,6 +41,7 @@ pub use compare::{
 };
 pub use debugger::{DebugPosition, Debugger, StepMode};
 pub use grid::{rowid_available, update_cell};
+pub use import::{insert_script, preview as csv_preview, CsvPreview};
 pub use profiler::{profile, read_lines, ProfileLine, ProfileResult};
 pub use projects::{Project, ProjectFile};
 pub use reports::{parameters as report_parameters, FileEntry, Report};

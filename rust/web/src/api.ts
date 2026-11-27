@@ -4,6 +4,7 @@ import type {
   CommandSpec,
   ConnectionConfig,
   ConstraintInfo,
+  CsvPreview,
   FileText,
   FormatOptions,
   GrantInfo,
@@ -176,6 +177,10 @@ export const api = {
   aiHasKey: () => invoke<boolean>("ai_has_key"),
   aiSetKey: (key: string | null) => invoke<void>("ai_set_key", { key }),
   aiRun: (fn: string, code: string) => invoke<string>("ai_run", { function: fn, code }),
+  csvPreview: (path: string, hasHeader: boolean) =>
+    invoke<CsvPreview>("csv_preview", { path, hasHeader }),
+  csvInsertScript: (path: string, table: string, hasHeader: boolean, maxRows: number) =>
+    invoke<string>("csv_insert_script", { path, table, hasHeader, maxRows }),
   listSchedulerJobs: (connectionId: string, schema: string | null) =>
     invoke<SchedulerJob[]>("list_scheduler_jobs", { connectionId, schema }),
   listProjects: () => invoke<Project[]>("list_projects"),

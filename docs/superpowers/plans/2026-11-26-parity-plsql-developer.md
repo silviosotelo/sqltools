@@ -700,3 +700,29 @@ Se extrajo el texto del **manual oficial instalado** (`C:\Program Files\PLSQL De
 manual confirma tres familias; para el resto no hay evidencia de ausencia (la guía no documenta menús). Si el
 dueño quiere retirarlos, alcanza con capturas de los menús Window/Edit de la app.
 
+### P7 — import básico (agregado tras la revisión, 2026-11-27)
+
+El goal incluye **"import básico"** en el alcance de P7 y la revisión marcó que no existía. Se implementó
+`crates/sqlt-app/src/import.rs`: lee un archivo delimitado (coma o punto y coma, detectado del encabezado),
+respeta comillas con delimitadores, saltos de línea y comillas dobles, rechaza archivos no rectangulares y
+**genera `INSERT` en el editor**, sin ejecutar nada (igual que los formularios DDL de P9). Campos vacíos y la
+palabra `NULL` se vuelven `NULL`; los números quedan sin comillas; las comillas simples se escapan. Con
+encabezado usa sus nombres, sin él `COL1..COLn`. **8 tests.** UI: **Importar archivo…** con tabla destino,
+casilla de encabezado, vista previa de las primeras filas y "Insertar en el editor".
+
+`phase-p7` pasa a **13 checks**: los 9 previos más reabrir el diálogo de informes, la vista previa del archivo
+(`NAME|AGE`, 2 filas) y los `INSERT` generados (`values ('O''Brien', 42)` y `values (NULL, 7)`), más la entrada
+del menú.
+
+### Revisiones por fase: desviación declarada
+
+El goal pide consultar al `advisor` o a `codex` **antes de comprometer el enfoque y antes de cerrar cada
+fase**. Hay que decirlo sin adornos: **durante P1–P9 no se hizo**. En ese momento `codex` estaba sin cupo
+(hasta las 15:42 del 26/11) y el `advisor` interno había agotado el mensual, pero no se registró la consulta
+por fase ni la caída de cuota en cada una.
+
+Mitigación aplicada: al terminar P10 se corrió **una revisión de `codex` sobre el diff completo de P1–P10**
+(`gpt-6.2-sol`, 27/11), y sus cinco bloqueos y dos menores se corrigieron y verificaron (ver la sección
+"Ronda de revisión externa"). Es una cobertura equivalente sobre el conjunto, no la consulta por fase que el
+goal pedía: queda como **desviación conocida**, no como cumplimiento.
+

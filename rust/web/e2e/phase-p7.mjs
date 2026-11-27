@@ -48,11 +48,55 @@ await cdp.evaluate(`Array.from(document.querySelectorAll('.palette .report-row b
 await cdp.waitFor(`/1 filas?|1 row/.test(document.querySelector("[data-e2e='status-message']")?.innerText ?? '')`, 20000);
 check("running the report executes its SQL", /1 filas?/.test(await status()), await status());
 
-// 3) a report with parameters is reported as such
+// 3) basic import: a delimited file becomes INSERT statements in the editor
+const csvPath = "C:/Users/sotelos/AppData/Local/Temp/opencode/p7-import.csv";
+const fs = await import("node:fs");
+fs.writeFileSync(csvPath, "NAME;AGE\nO'Brien;42\n;7\n", "utf8");
+const imported = JSON.parse(
+  await cdp.evaluate(`(async () => {
+    try {
+      const preview = await window.__TAURI_INTERNALS__.invoke("csv_preview", { path: ${JSON.stringify(csvPath)}, hasHeader: true });
+      const script = await window.__TAURI_INTERNALS__.invoke("csv_insert_script", { path: ${JSON.stringify(csvPath)}, table: "SQLT_P7_E2E", hasHeader: true, maxRows: 100 });
+      return JSON.stringify({ ok: true, preview, script });
+    } catch (error) {
+      return JSON.stringify({ ok: false, error: String(error) });
+    }
+  })()`),
+);
+check(
+  "the import preview reads the file's columns and rows",
+  imported.ok && imported.preview.columns.join("|") === "NAME|AGE" && imported.preview.totalRows === 2,
+  imported.preview ?? imported,
+);
+check(
+  "the import generates INSERT statements without executing them",
+  imported.ok &&
+    /insert into "SQLT_P7_E2E" \("NAME", "AGE"\) values \('O''Brien', 42\);/.test(imported.script) &&
+    /values \(NULL, 7\);/.test(imported.script),
+  String(imported.script ?? imported.error ?? "").slice(0, 200),
+);
 await cdp.click('.actionstrip button[aria-label="Más acciones"]');
-await cdp.wait(300);
-await cdp.evaluate(`Array.from(document.querySelectorAll('[role=menuitem]')).find(b => b.innerText.trim() === 'Informes…')?.click()`);
-await cdp.waitFor(`Boolean(document.querySelector('.palette'))`, 8000);
+await cdp.wait(400);
+const importMenu = await J(`Array.from(document.querySelectorAll('[role=menuitem]')).map(b => b.innerText.trim())`);
+check("the menu offers importing a file", importMenu.includes("Importar archivo…"), importMenu);
+await cdp.evaluate(`document.querySelector('.menu-backdrop')?.click()`);
+await cdp.wait(200);
+
+// 3) a report with parameters is reported as such
+const openReportsDialog = async () => {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    // close anything left open, then open the menu and pick the reports entry
+    await cdp.evaluate(`document.querySelector('.palette-backdrop')?.click()`);
+    await cdp.wait(200);
+    await cdp.click('.actionstrip button[aria-label="Más acciones"]');
+    await cdp.wait(400);
+    await cdp.evaluate(`Array.from(document.querySelectorAll('[role=menuitem]')).find(b => b.innerText.trim() === 'Informes…')?.click()`);
+    const open = await cdp.waitFor(`Boolean(document.querySelector('.palette input[aria-label="Nombre del informe"]'))`, 6000);
+    if (open) return true;
+  }
+  return false;
+};
+check("the reports dialog can be reopened", await openReportsDialog());
 await cdp.evaluate(`(() => { const i = document.querySelector('.palette input[aria-label="Nombre del informe"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, 'sqlt_p7_params'); i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
 await cdp.evaluate(`document.querySelector('.cm-content')?.focus()`);
 await cdp.evaluate(`(() => { const e = document.querySelector('.cm-content'); e.focus(); })()`);

@@ -255,3 +255,5 @@ export type SchedulerJob = {
 };
 
 export type AiConfig = { baseUrl: string; model: string; timeoutSecs: number };
+
+export type CsvPreview = { columns: string[]; rows: string[][]; totalRows: number };

@@ -30,6 +30,7 @@ import type {
   CommandSpec,
   ConnectionConfig,
   ConstraintInfo,
+  CsvPreview,
   DebugPosition,
   Dependency,
   FileEntry,
@@ -374,6 +375,11 @@ export default function App() {
   const [aiKey, setAiKey] = useState("");
   const [aiHasKey, setAiHasKey] = useState(false);
   const [assistantBusy, setAssistantBusy] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importPath, setImportPath] = useState("");
+  const [importTable, setImportTable] = useState("");
+  const [importHeader, setImportHeader] = useState(true);
+  const [importPreview, setImportPreview] = useState<CsvPreview | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [showToolbar, setShowToolbar] = useState(true);
   // null = unknown (never queried, or the last query failed).
@@ -1147,6 +1153,41 @@ export default function App() {
       setStatus(String(error));
     } finally {
       setAssistantBusy(false);
+    }
+  };
+
+  /** Picks a delimited file and shows its first rows. Nothing is imported until the user inserts the script. */
+  const openImport = async () => {
+    try {
+      const path = await api.pickSqlFile();
+      if (!path) return;
+      setImportPath(path);
+      setImportTable("");
+      setImportPreview(await api.csvPreview(path, importHeader));
+      setImportOpen(true);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const refreshImportPreview = async (hasHeader: boolean) => {
+    if (!importPath) return;
+    setImportHeader(hasHeader);
+    try {
+      setImportPreview(await api.csvPreview(importPath, hasHeader));
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const insertImportScript = async () => {
+    try {
+      const script = await api.csvInsertScript(importPath, importTable, importHeader, 500);
+      openDoc(`${importTable} (IMPORT)`, script, { key: `import:${importTable}:${importPath}` });
+      setImportOpen(false);
+      setStatus(t("importInsert"));
+    } catch (error) {
+      setStatus(String(error));
     }
   };
 
@@ -3324,6 +3365,7 @@ export default function App() {
             { id: "command", label: t("commandWindow"), onClick: () => setCommandOpen(true) },
             { id: "new-object", label: t("newObject"), onClick: () => setNewObjectOpen(true), disabled: !isConnected },
             { id: "assistant", label: t("assistantOpen"), onClick: () => void openAssistant() },
+            { id: "import", label: t("importCsv"), onClick: () => void openImport(), disabled: !isConnected },
             { id: "snapshot-save", label: t("saveSnapshot"), onClick: () => void saveSourcesSnapshot(), disabled: !isConnected },
             { id: "snapshot-compare", label: t("compareSnapshot"), onClick: () => void compareWithSnapshot(), disabled: !isConnected },
             ...(updateInfo
@@ -3726,6 +3768,69 @@ export default function App() {
           </div>
         </div>
       )}
+      {importOpen && importPreview && (
+        <div className="palette-backdrop" onClick={() => setImportOpen(false)}>
+          <div
+            className="palette"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("importCsv")}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="panel-title">{t("importCsv")}</div>
+            <div className="row">
+              <input
+                value={importTable}
+                placeholder={t("importTable")}
+                aria-label={t("importTable")}
+                onChange={(event) => setImportTable(event.target.value)}
+              />
+              <label className="check-inline">
+                <input
+                  type="checkbox"
+                  checked={importHeader}
+                  aria-label={t("importHeader")}
+                  onChange={(event) => void refreshImportPreview(event.target.checked)}
+                />
+                {t("importHeader")}
+              </label>
+              <span className="pending-edits">
+                {importPreview.totalRows} {t("importRows")}
+              </span>
+            </div>
+            <div className="palette-list" data-e2e="import-preview">
+              <table className="grid">
+                <thead>
+                  <tr>
+                    {importPreview.columns.map((column) => (
+                      <th key={column}>{column}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {importPreview.rows.map((row, index) => (
+                    <tr key={index}>
+                      {row.map((value, cell) => (
+                        <td key={cell}>{value}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="row">
+              <button
+                className="plain"
+                onClick={() => void insertImportScript()}
+                disabled={!importTable.trim()}
+              >
+                {t("importInsert")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {assistantOpen && aiConfig && (
         <div className="palette-backdrop" onClick={() => setAssistantOpen(false)}>
           <div
