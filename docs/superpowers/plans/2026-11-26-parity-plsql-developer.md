@@ -594,3 +594,53 @@ ejecución. `user_scheduler_jobs` no tiene columna `OWNER` (se usa el pseudo-cam
 **Límites declarados:** el formulario cubre tablas y secuencias (no índices, constraints ni vistas); no crea un
 objeto directamente, por diseño. El scheduler es de solo lectura: no crea, habilita ni ejecuta jobs.
 
+### P10 — cerrada (2026-11-27). Goal completo: P1–P10.
+
+**Cliente (`crates/sqlt-app/src/ai.rs`):** compatible con OpenAI (`POST {base}/chat/completions`), sin
+dependencia de un proveedor concreto (sirve OpenAI, un proxy, Ollama o vLLM). `AiConfig { baseUrl, model,
+timeoutSecs }` en `<config>/ai.json`; **la clave vive en el keyring del sistema** (`com.sqltools.rust` /
+`ai-key`) y nunca se escribe en un archivo ni viaja a la UI. Siete funciones predefinidas (crear, completar,
+corregir, explicar, comentar, revisar, optimizar) con su instrucción; timeout configurable (60 s por defecto);
+sin telemetría y **nada sale de la máquina hasta que el usuario ejecuta**. Dependencia nueva: `ureq` (TLS +
+JSON). **7 tests**, incluido uno contra un **proveedor simulado local** que verifica la URL, el `Bearer`, el
+modelo y el cuerpo enviado, sin gastar cuota ni usar credenciales.
+
+**UI:** diálogo **Asistente AI…** con selector de función, el código o pedido (prefijado con el documento),
+respuesta, **Insertar en el editor**, y ajustes del proveedor (URL base, modelo y clave que se guarda en el
+keyring; el campo solo dice si ya hay una).
+
+**Evidencia en la app instalada** (27/11 01:33, firmada autofirmada), contra el mock local:
+
+| Comando | Resultado |
+|---|---|
+| `node e2e/phase-p10.mjs` | `P10 CHECKS OK (9)`: el menú ofrece el asistente; el diálogo abre con su área de respuesta; los ajustes guardan URL base, modelo y clave; **la respuesta del proveedor aparece** (`select 42 as respuesta from dual`); la petición fue a `/v1/chat/completions` con `Authorization: Bearer test-key`; el cuerpo lleva el código y la instrucción de "explain"; la respuesta se inserta en el editor; **la configuración no contiene la clave**. La prueba borra la clave y repone el proveedor por defecto |
+| `axe-cdp.mjs` | **0 violaciones, 16 vistas × 2 temas** (incluye el asistente) |
+| `phase-p1` … `phase-p9` | 15 / 11 / 4 / 5 / 3 / 6 / 9 / 5 / 6 |
+| `phase-f1` / `phase-f5` / `keyboard-walk` | 19 / 39 / 30 paradas |
+| `commands-check` / `flow` | mismo digest / IDENTICAL |
+| capturas 1366×768, 1024×700 y 1024×640, claro y oscuro | `docs/screenshots/parity-p10-assistant-*.png` |
+| `cargo fmt` / `clippy -D warnings` / `check -p sqlt-desktop` / `test` | 0 / 0 / 0 / 0 (19 ok; 7 tests nuevos) |
+| `npm run build` / `npm test` | 0 / **103 passed** |
+
+**NO VERIFICADO:** ninguna llamada real a un proveedor (no hay clave del dueño); todo lo anterior es contra el
+mock local. Cancelar una consulta en vuelo no aborta el socket: el resultado se descarta y el timeout lo corta
+(declarado).
+
+## Cierre del goal P1–P10
+
+| Fase | Commit | Checks propios |
+|---|---|---|
+| P1 | `19b1e8f` | 15 |
+| P2 | `d6b44c4` | 11 |
+| P3 | `dc135ee` | 4 |
+| P4 | `96956f4` | 5 |
+| P5 | `6873a66` | 3 |
+| P6 | `e0bd78e` | 6 |
+| P7 | `c3683cd` | 9 |
+| P8 | `ef12433` | 5 |
+| P9 | `2ff99c0` (+`48e740d`) | 6 |
+| P10 | este commit | 9 |
+
+Compuerta del último cierre: axe **0 en 16 vistas × 2 temas**, `cargo fmt/clippy -D warnings/check/test` en 0,
+vitest **103**, `flow` **IDENTICAL**, capturas en los tres tamaños, inventario de paridad actualizado.
+

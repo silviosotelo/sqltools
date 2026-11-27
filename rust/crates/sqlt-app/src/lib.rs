@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Use cases shared by the Tauri shell and future frontends.
 
+pub mod ai;
 pub mod browser;
 pub mod catalog;
 pub mod commands;
@@ -22,6 +23,7 @@ pub mod store;
 pub mod templates;
 pub mod workspace;
 
+pub use ai::{run as ai_run, AiConfig};
 pub use browser::{
     compile_invalid_objects, compile_object, ddl_ident, list_dependencies, list_errors,
     list_invalid_objects, set_constraint_enabled, set_trigger_enabled, CompileError, Dependency,

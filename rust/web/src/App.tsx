@@ -33,6 +33,7 @@ import type {
   DebugPosition,
   Dependency,
   FileEntry,
+  AiConfig,
   Project,
   Report as SavedReport,
   SchedulerJob,
@@ -364,6 +365,14 @@ export default function App() {
   ]);
   const [newSequence, setNewSequence] = useState({ startWith: 1, incrementBy: 1, maxValue: "", cycle: false, cache: 20 });
   const [ddlPreview, setDdlPreview] = useState("");
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [assistantFn, setAssistantFn] = useState("explain");
+  const [assistantCode, setAssistantCode] = useState("");
+  const [assistantAnswer, setAssistantAnswer] = useState("");
+  const [aiConfig, setAiConfig] = useState<AiConfig | null>(null);
+  const [aiKey, setAiKey] = useState("");
+  const [aiHasKey, setAiHasKey] = useState(false);
+  const [assistantBusy, setAssistantBusy] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [showToolbar, setShowToolbar] = useState(true);
   // null = unknown (never queried, or the last query failed).
@@ -1085,6 +1094,47 @@ export default function App() {
     });
     setNewObjectOpen(false);
     setStatus(t("insertDdl"));
+  };
+
+  const openAssistant = async () => {
+    try {
+      setAiConfig(await api.aiConfig());
+      setAiHasKey(await api.aiHasKey());
+      setAssistantCode((current) => current || sql);
+      setAssistantAnswer("");
+      setAssistantOpen(true);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const saveAssistantSettings = async () => {
+    if (!aiConfig) return;
+    try {
+      await api.aiSetConfig(aiConfig);
+      await api.aiSetKey(aiKey.trim() ? aiKey : null);
+      setAiKey("");
+      setAiHasKey(await api.aiHasKey());
+      setStatus(t("assistantSave"));
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  /** Nothing leaves the machine until this runs; the key stays in the keyring. */
+  const runAssistant = async () => {
+    setAssistantBusy(true);
+    setStatus(t("assistantSending"));
+    try {
+      const answer = await api.aiRun(assistantFn, assistantCode);
+      setAssistantAnswer(answer);
+      setStatus("");
+    } catch (error) {
+      setAssistantAnswer(String(error));
+      setStatus(String(error));
+    } finally {
+      setAssistantBusy(false);
+    }
   };
 
   const formatNanos = (nanos: number) => {
@@ -3251,6 +3301,7 @@ export default function App() {
             { id: "projects", label: t("projectsOpen"), onClick: () => void openProjects() },
             { id: "command", label: t("commandWindow"), onClick: () => setCommandOpen(true) },
             { id: "new-object", label: t("newObject"), onClick: () => setNewObjectOpen(true), disabled: !isConnected },
+            { id: "assistant", label: t("assistantOpen"), onClick: () => void openAssistant() },
             { id: "snapshot-save", label: t("saveSnapshot"), onClick: () => void saveSourcesSnapshot(), disabled: !isConnected },
             { id: "snapshot-compare", label: t("compareSnapshot"), onClick: () => void compareWithSnapshot(), disabled: !isConnected },
             ...(updateInfo
@@ -3653,6 +3704,82 @@ export default function App() {
           </div>
         </div>
       )}
+      {assistantOpen && aiConfig && (
+        <div className="palette-backdrop" onClick={() => setAssistantOpen(false)}>
+          <div
+            className="palette assistant"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("assistant")}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="panel-title">{t("assistant")}</div>
+            <div className="row">
+              <select
+                value={assistantFn}
+                aria-label={t("assistant")}
+                onChange={(event) => setAssistantFn(event.target.value)}
+              >
+                <option value="create">{t("assistantFnCreate")}</option>
+                <option value="complete">{t("assistantFnComplete")}</option>
+                <option value="fix">{t("assistantFnFix")}</option>
+                <option value="explain">{t("assistantFnExplain")}</option>
+                <option value="comment">{t("assistantFnComment")}</option>
+                <option value="review">{t("assistantFnReview")}</option>
+                <option value="optimize">{t("assistantFnOptimize")}</option>
+              </select>
+              <button className="plain" onClick={() => void runAssistant()} disabled={assistantBusy}>
+                {t("assistantRun")}
+              </button>
+              <button
+                className="plain"
+                onClick={() => {
+                  setSql(assistantAnswer);
+                  setAssistantOpen(false);
+                }}
+                disabled={!assistantAnswer}
+              >
+                {t("assistantInsert")}
+              </button>
+            </div>
+            <textarea
+              className="command-log"
+              value={assistantCode}
+              aria-label={t("assistantCode")}
+              onChange={(event) => setAssistantCode(event.target.value)}
+            />
+            <pre className="command-log" data-e2e="assistant-answer">
+              {assistantAnswer || t("assistantAnswer")}
+            </pre>
+            <details className="side-section">
+              <summary>{t("assistantSettings")}</summary>
+              <div className="row">
+                <input
+                  value={aiConfig.baseUrl}
+                  aria-label={t("assistantBaseUrl")}
+                  onChange={(event) => setAiConfig({ ...aiConfig, baseUrl: event.target.value })}
+                />
+                <input
+                  value={aiConfig.model}
+                  aria-label={t("assistantModel")}
+                  onChange={(event) => setAiConfig({ ...aiConfig, model: event.target.value })}
+                />
+                <input
+                  type="password"
+                  value={aiKey}
+                  aria-label={t("assistantKey")}
+                  placeholder={aiHasKey ? t("assistantKeySaved") : t("assistantKeyMissing")}
+                  onChange={(event) => setAiKey(event.target.value)}
+                />
+                <button className="plain" onClick={() => void saveAssistantSettings()}>
+                  {t("assistantSave")}
+                </button>
+              </div>
+            </details>
+          </div>
+        </div>
+      )}
+
       {newObjectOpen && (
         <div className="palette-backdrop" onClick={() => setNewObjectOpen(false)}>
           <div

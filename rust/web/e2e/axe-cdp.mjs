@@ -134,6 +134,15 @@ const VIEWS = {
     },
     expect: `Boolean(document.querySelector('[data-e2e="ddl-preview"]'))`,
   },
+  assistant: {
+    steps: async (cdp) => {
+      await cdp.click('.actionstrip button[aria-label="Más acciones"]');
+      await cdp.wait(300);
+      await cdp.evaluate(`Array.from(document.querySelectorAll('[role=menuitem]')).find(b => b.innerText.trim() === 'Asistente AI…')?.click()`);
+      await cdp.waitFor(`Boolean(document.querySelector('.assistant [data-e2e="assistant-answer"]'))`, 8000);
+    },
+    expect: `Boolean(document.querySelector('.assistant [data-e2e="assistant-answer"]'))`,
+  },
   menu: {
     steps: async (cdp) => {
       await cdp.click('.actionstrip button[aria-label="Más acciones"]');

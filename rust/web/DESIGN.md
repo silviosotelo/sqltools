@@ -84,3 +84,14 @@ ratio in either theme.
 ## Verification (e2e, against the installed app)
 
 `rust/web/e2e/`: `flow.mjs` (regression flow against a golden), `axe-cdp.mjs` (8 views x 2 themes, must be 0), `keyboard-walk.mjs`, `commands-check.mjs` (283/226/213 digest), `tree.mjs`, `env.mjs`, `phase-f1/f2/f5.mjs`, `shots-final.mjs`. Launch with `launch-app.ps1` (detached), install with `install-local.ps1`.
+
+## Parity surfaces (P1–P10)
+
+- **Side views:** Objects, Connections, History, Stats, To-Do, Files, Scheduler.
+- **Bottom tabs:** Results, Plan, Object, Output (unchanged since F5).
+- **Dialogs:** command palette (combobox), more-actions menu, reports, projects, command window, new object
+  (table/sequence form with a DDL preview), AI assistant. Each is `role="dialog"` with `aria-modal` and a
+  label, so its content stays inside a landmark.
+- **Bars:** the debug strip appears under the action strip while a debug session is active (position, step
+  over/into/out, stop, variable watch).
+- **Lists** that scroll without focusable children get `tabIndex={0}` (axe `scrollable-region-focusable`).

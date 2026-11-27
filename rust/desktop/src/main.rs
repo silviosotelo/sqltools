@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use sqlt_app::{
-    browser, catalog, compare, debugger, grid, profiler, projects, reports, scheduler, AppState,
-    ConnectionConfig, HistoryEntry,
+    ai, browser, catalog, compare, debugger, grid, profiler, projects, reports, scheduler,
+    AppState, ConnectionConfig, HistoryEntry,
 };
 use sqlt_core::{Batch, ColumnMeta};
 use tauri::ipc::Channel;
@@ -717,6 +717,35 @@ fn list_scheduler_jobs(
 }
 
 #[tauri::command]
+fn ai_config() -> ai::AiConfig {
+    ai::load_config(&ai::config_file())
+}
+
+#[tauri::command]
+fn ai_set_config(config: ai::AiConfig) -> Result<(), String> {
+    ai::save_config(&ai::config_file(), &config)
+}
+
+/// Whether a key is stored. The key itself never travels to the UI.
+#[tauri::command]
+fn ai_has_key() -> Result<bool, String> {
+    Ok(ai::stored_key()?.is_some())
+}
+
+#[tauri::command]
+fn ai_set_key(key: Option<String>) -> Result<(), String> {
+    ai::set_key(key.as_deref())
+}
+
+#[tauri::command]
+fn ai_run(function: String, code: String) -> Result<String, String> {
+    let config = ai::load_config(&ai::config_file());
+    let key = ai::stored_key()?
+        .ok_or_else(|| "No API key: set one in the assistant settings".to_string())?;
+    ai::run(&config, &key, &function, &code)
+}
+
+#[tauri::command]
 fn history(state: State<'_, Arc<AppState>>) -> Vec<HistoryEntry> {
     state.history()
 }
@@ -1352,6 +1381,11 @@ fn main() {
             load_project,
             delete_project,
             list_scheduler_jobs,
+            ai_config,
+            ai_set_config,
+            ai_has_key,
+            ai_set_key,
+            ai_run,
             pick_folder,
             count_objects,
             list_columns,

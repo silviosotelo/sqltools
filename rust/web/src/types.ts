@@ -253,3 +253,5 @@ export type SchedulerJob = {
   repeatInterval: string;
   nextRun: string;
 };
+
+export type AiConfig = { baseUrl: string; model: string; timeoutSecs: number };
