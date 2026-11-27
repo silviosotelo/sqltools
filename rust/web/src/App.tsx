@@ -287,6 +287,10 @@ export default function App() {
   const [running, setRunning] = useState(false);
   const [status, setStatus] = useState("");
   const [tables, setTables] = useState<string[]>([]);
+  // Completion suggestions: every object of the owner, loaded once per connection/schema.
+  const [objectSuggestions, setObjectSuggestions] = useState<
+    Array<{ name: string; objectType: string }>
+  >([]);
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
   const [plan, setPlan] = useState("");
   const [panel, setPanel] = useState<Panel>("results");
@@ -773,7 +777,39 @@ export default function App() {
     else setSideView(view);
   };
 
+  const loadSuggestions = async (connectionId: string) => {
+    try {
+      const list = await api.suggestObjects(connectionId, schema.trim() || null);
+      setObjectSuggestions(
+        list.map((object) => ({ name: object.name, objectType: object.objectType })),
+      );
+    } catch {
+      setObjectSuggestions([]);
+    }
+  };
+
+  useEffect(() => {
+    if (!isConnected) {
+      setObjectSuggestions([]);
+      return;
+    }
+    let current = true;
+    const timer = setTimeout(() => {
+      if (current) void loadSuggestions(selected);
+    }, 600);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+  }, [isConnected, selected, schema]);
+
   const loadColumnsFor = async (table: string) => {
+    // The editor hands over the name as the user typed it; Oracle stores unquoted names in upper case,
+    // so `a11.` must look for `A11` or the column query finds nothing.
+    table = table
+      .split(".")
+      .map((part) => (/^[A-Za-z][A-Za-z0-9_$#]*$/.test(part) ? part.toUpperCase() : part))
+      .join(".");
     const parts = table.replace(/"/g, "").split(".");
     const name = parts.pop() ?? table;
     const owner = parts.pop() ?? (schema.trim() || null);
@@ -1712,6 +1748,7 @@ export default function App() {
     if (!isConnected) return;
     try {
       setTables(await api.listTableNames(selected));
+      void loadSuggestions(selected);
       setStatus(t("refresh"));
     } catch (error) {
       setStatus(String(error));
@@ -2952,6 +2989,7 @@ export default function App() {
               ref={editorRef}
               initialValue={sql}
               tables={tables}
+              objects={objectSuggestions}
               loadColumns={loadColumnsFor}
               onChange={setSql}
               onExecute={(text, offset) => void run(text, offset)}

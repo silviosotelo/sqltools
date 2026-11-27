@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import { autocompletion, type CompletionContext } from "@codemirror/autocomplete";
+import { autocompletion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
+import { limitSuggestions, statementAt, tableForQualifier, tablesInScope } from "./editor/completion";
 import {
   copyLineDown,
   cursorMatchingBracket,
@@ -84,6 +85,7 @@ import {
 type Props = {
   initialValue: string;
   tables: string[];
+  objects?: Array<{ name: string; objectType: string }>;
   loadColumns: (table: string) => Promise<string[]>;
   onChange: (value: string) => void;
   onExecute: (sql: string, offset: number | null) => void;
@@ -504,53 +506,70 @@ const keywords = [
   "EXPLAIN PLAN",
 ];
 
-function resolveTable(doc: string, qualifier: string): string {
-  const pattern =
-    /\b(?:from|join|update|into)\s+([A-Za-z0-9_$#"]+(?:\.[A-Za-z0-9_$#"]+)?)(?:\s+(?:as\s+)?([A-Za-z0-9_$#]+))?/gi;
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(doc))) {
-    const table = match[1];
-    const alias = match[2];
-    if (alias && alias.toLowerCase() === qualifier.toLowerCase()) return table;
-    if (
-      table.split(".").pop()?.toLowerCase() === qualifier.toLowerCase()
-    ) {
-      return table;
-    }
-  }
-  return qualifier;
-}
-
 function completionSource(
   getTables: () => string[],
   getColumns: (table: string) => Promise<string[]>,
+  getObjects: () => Array<{ name: string; objectType: string }>,
 ) {
-  return async (context: CompletionContext) => {
+  const typeOf = (objectType: string): string =>
+    objectType === "TABLE" || objectType === "VIEW"
+      ? "class"
+      : objectType === "SEQUENCE" || objectType === "SYNONYM" || objectType === "TYPE"
+        ? "variable"
+        : "function";
+  return async (context: CompletionContext): Promise<CompletionResult | null> => {
+    const doc = context.state.doc.toString();
+    const statement = statementAt(doc, context.pos);
+
+    // `alias.` (or `table.`): columns of that table, resolved lexically.
     const dot = context.matchBefore(/[A-Za-z0-9_$#"]+\.$/);
     if (dot) {
       const qualifier = dot.text.slice(0, -1);
-      const table = resolveTable(
-        context.state.doc.toString(),
-        qualifier,
-      );
+      const table = tableForQualifier(statement, qualifier);
+      if (!table) return null;
       try {
         const columns = await getColumns(table);
         return {
           from: context.pos,
-          options: columns.map((label) => ({ label, type: "property" })),
+          options: limitSuggestions(
+            columns.map((label) => ({ label, type: "property", boost: 1 })),
+          ),
         };
       } catch {
         return null;
       }
     }
+
     const word = context.matchBefore(/[\w$#]*/);
     if (!word || (word.from === word.to && !context.explicit)) return null;
+
+    // Unqualified: keywords, the owner's objects (all nine types) and, while the statement is short
+    // enough to be unambiguous, the columns of the tables it already names.
+    const objects = getObjects();
+    const tables = tablesInScope(statement);
+    let columns: string[] = [];
+    if (tables.length > 0 && tables.length <= 2) {
+      try {
+        const lists = await Promise.all(tables.map((entry) => getColumns(entry.table)));
+        columns = [...new Set(lists.flat())];
+      } catch {
+        columns = [];
+      }
+    }
     return {
       from: word.from,
-      options: [
-        ...keywords.map((label) => ({ label, type: "keyword" })),
+      // Columns of the tables already in the statement first, then the catalogue: the cap keeps the
+      // most useful entries visible instead of the alphabetical start of the schema.
+      options: limitSuggestions([
+        ...columns.map((label) => ({ label, type: "property", boost: 1 })),
+        ...objects.map((object) => ({
+          label: object.name,
+          type: typeOf(object.objectType),
+          detail: object.objectType,
+        })),
         ...getTables().map((label) => ({ label, type: "class" })),
-      ],
+        ...keywords.map((label) => ({ label, type: "keyword" })),
+      ]),
     };
   };
 }
@@ -558,6 +577,7 @@ function completionSource(
 export const Editor = forwardRef<EditorHandle, Props>(function Editor({
   initialValue,
   tables,
+  objects = [],
   loadColumns,
   onChange,
   onExecute,
@@ -584,8 +604,8 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
     enabled: true,
     compartment: new Compartment(),
   });
-  const callbacks = useRef({ onChange, onExecute, onCursor, label, tables, loadColumns });
-  callbacks.current = { onChange, onExecute, onCursor, label, tables, loadColumns };
+  const callbacks = useRef({ onChange, onExecute, onCursor, label, tables, loadColumns, objects });
+  callbacks.current = { onChange, onExecute, onCursor, label, tables, loadColumns, objects };
   theme.current.mode = themeMode;
 
   useEffect(() => {
@@ -1310,6 +1330,7 @@ export const Editor = forwardRef<EditorHandle, Props>(function Editor({
                 completionSource(
                   () => callbacks.current.tables,
                   (table) => callbacks.current.loadColumns(table),
+                  () => callbacks.current.objects,
                 )(context),
             ],
           }),

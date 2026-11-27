@@ -160,6 +160,8 @@ export const api = {
       schema,
       objectType,
     }),
+  suggestObjects: (connectionId: string, schema: string | null) =>
+    invoke<ObjectInfo[]>("suggest_objects", { connectionId, schema }),
   countObjects: (connectionId: string, schema: string | null) =>
     invoke<ObjectCount[]>("count_objects", { connectionId, schema }),
   listColumns: (

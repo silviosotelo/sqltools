@@ -456,6 +456,21 @@ fn update_cell(
 }
 
 #[tauri::command]
+fn suggest_objects(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    schema: Option<String>,
+) -> Result<Vec<catalog::ObjectInfo>, String> {
+    let session = state.session(&connection_id)?;
+    catalog::suggest_objects(
+        &session,
+        schema.as_deref(),
+        5000,
+        state.query_options(&connection_id),
+    )
+}
+
+#[tauri::command]
 fn history(state: State<'_, Arc<AppState>>) -> Vec<HistoryEntry> {
     state.history()
 }
@@ -1070,6 +1085,7 @@ fn main() {
             toggle_trigger,
             toggle_constraint,
             update_cell,
+            suggest_objects,
             count_objects,
             list_columns,
             load_ddl,

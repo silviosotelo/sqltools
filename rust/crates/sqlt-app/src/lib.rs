@@ -22,7 +22,7 @@ pub use browser::{
 };
 pub use catalog::{
     count_objects, list_columns, list_constraints, list_grants, list_indexes, list_objects,
-    list_table_names, list_triggers, load_ddl, load_table_ddl_meta, session_stats,
+    list_table_names, list_triggers, load_ddl, load_table_ddl_meta, session_stats, suggest_objects,
     transaction_pending,
 };
 pub use commands::{registry, CommandSpec};

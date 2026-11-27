@@ -244,3 +244,48 @@ P2 PROBE OK
 mensaje de la propia app); no hay edición por lotes ni de varias celdas a la vez; el QBE es un `WHERE` único,
 no una fila de filtros por columna.
 
+### P3 — cerrada (2026-11-26)
+
+**Qué cambió:** el autocompletado deja de ser una regex y pasa a un escaneo léxico testeado
+(`web/src/editor/completion.ts`): tokeniza respetando comillas, comentarios y paréntesis; `tablesInScope`
+reconoce `from`/`join`/`update`/`into`, alias con o sin `AS`, `owner.tabla` y listas con coma; `statementAt`
+limita al enunciado del cursor; `tableForQualifier` resuelve alias antes que nombre; `limitSuggestions`
+quita duplicados y corta en 100. **9 tests de vitest.**
+
+En el editor, `alias.` ofrece las columnas de esa tabla y, sin calificador, primero las columnas de las tablas
+ya nombradas (con `boost` para que CodeMirror no las mande al final), después los objetos del dueño con su
+tipo, las tablas y las palabras clave. El catálogo sale de `catalog::suggest_objects` (nuevo): los nueve tipos
+del árbol, ordenados por nombre y tope de 5000, recargado al conectar, al cambiar de esquema y con
+`Session.RefreshObjectCache`.
+
+**Dos defectos propios corregidos durante la fase:**
+1. El nombre que llega desde el editor está en minúsculas (`a11.`) y `user_tab_columns` compara exacto: no
+   aparecía ninguna columna. Ahora se normaliza a mayúsculas cada parte no citada antes de consultar.
+2. Las columnas se perdían detrás del tope de 100 porque CodeMirror ordena por puntaje; se marcan con
+   `boost: 1` para que el contexto gane al catálogo.
+
+**Verificación contra Oracle (conexión del keyring), sonda temporal:**
+
+```
+user scope: 5000 objects, types: ["FUNCTION", "PACKAGE", "PROCEDURE", "SEQUENCE", "TABLE", "TRIGGER", "TYPE", "VIEW"]
+capped at 50: 50
+owner scope: 5000
+P3 PROBE OK
+```
+
+**Evidencia en la app instalada** (22:06, firmada autofirmada):
+
+| Comando | Resultado |
+|---|---|
+| `node e2e/phase-p3.mjs` | `P3 CHECKS OK (4)`: el comando devuelve >1000 objetos con ≥6 tipos; `t` → `FECHA`, `TIPO_CTO`, `TIPO_EMP`; sin calificador aparecen las columnas de `A11`; un calificador desconocido no inventa nada |
+| `phase-p1` / `phase-p2` / `phase-f5` | 15 / 11 / 39 |
+| `axe-cdp.mjs` | 0 violaciones, 8 vistas × 2 temas |
+| `phase-f1` / `phase-f2` / `tree` / `env` / `keyboard-walk` | 19 / 3 / 11 / 12 / 27 paradas |
+| `commands-check` / `flow` | mismo digest / IDENTICAL |
+| capturas con el popup abierto, 1366×768, 1024×700 y 1024×640, claro y oscuro | `docs/screenshots/parity-p3-completion-*.png`, `popup: true`, `clipped: false`, sin scroll de página |
+| `cargo fmt` / `clippy -D warnings` / `check -p sqlt-desktop` / `test` | 0 / 0 / 0 / 0 (19 ok) |
+| `npm run build` / `npm test` | 0 / **98 passed** (9 nuevos) |
+
+**Límites declarados:** el catálogo se corta en 5000 nombres (un esquema mayor sugiere menos, nunca rompe);
+no hay sugerencias de columnas de tablas en subconsultas anidadas ni de paquetes (`pkg.proc`).
+

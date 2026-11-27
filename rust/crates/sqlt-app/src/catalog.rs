@@ -103,6 +103,48 @@ pub fn list_objects(
 }
 
 /// Counts objects per type with the same scope rules as [`list_objects`] (own schema by default).
+/// Names of every object the completion can suggest: the same nine types the tree shows, capped so a big
+/// schema does not flood the popup. Ordered by name.
+pub fn suggest_objects(
+    session: &Session,
+    schema: Option<&str>,
+    limit: u32,
+    options: QueryOptions,
+) -> Result<Vec<ObjectInfo>, String> {
+    const TYPES: &str =
+        "'TABLE','VIEW','PACKAGE','PROCEDURE','FUNCTION','TRIGGER','SEQUENCE','TYPE','SYNONYM'";
+    let (sql, owner) = match schema {
+        Some(owner) => (
+            format!(
+                "select object_name, object_type, status from (select object_name, object_type, status \
+                 from all_objects where owner = :1 and object_type in ({TYPES}) order by object_name) \
+                 where rownum <= :2"
+            ),
+            Some(owner.to_string()),
+        ),
+        None => (
+            format!(
+                "select object_name, object_type, status from (select object_name, object_type, status \
+                 from user_objects where object_type in ({TYPES}) order by object_name) where rownum <= :1"
+            ),
+            None,
+        ),
+    };
+    let bindings: Vec<&dyn ToSql> = match &owner {
+        Some(owner) => vec![owner as &dyn ToSql, &limit as &dyn ToSql],
+        None => vec![&limit as &dyn ToSql],
+    };
+    let rows = fetch_rows(session, &sql, &bindings, options)?;
+    Ok(rows
+        .iter()
+        .map(|row| ObjectInfo {
+            name: cell(row, 0),
+            object_type: cell(row, 1),
+            status: cell(row, 2),
+        })
+        .collect())
+}
+
 pub fn count_objects(
     session: &Session,
     schema: Option<&str>,
