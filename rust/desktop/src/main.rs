@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use sqlt_app::{browser, catalog, AppState, ConnectionConfig, HistoryEntry};
+use sqlt_app::{browser, catalog, grid, AppState, ConnectionConfig, HistoryEntry};
 use sqlt_core::{Batch, ColumnMeta};
 use tauri::ipc::Channel;
 use tauri::State;
@@ -208,6 +208,8 @@ fn execute(
     state: State<'_, Arc<AppState>>,
     connection_id: String,
     sql: String,
+    // What to store in the history when `sql` is a rewritten statement (the grid adds a ROWID).
+    history_sql: Option<String>,
     max_rows: usize,
     offset: Option<usize>,
     halt_on_error: bool,
@@ -218,6 +220,7 @@ fn execute(
     let session = state.session(&connection_id)?;
     let options = state.query_options(&connection_id);
     let state = state.inner().clone();
+    let recorded_sql = history_sql.unwrap_or_else(|| sql.clone());
     let started_at = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -246,7 +249,7 @@ fn execute(
         let error = outcome.as_ref().err().cloned().or(first_error);
         state.record(HistoryEntry {
             connection_id,
-            sql,
+            sql: recorded_sql,
             rows,
             elapsed_ms,
             error: error.clone(),
@@ -428,6 +431,28 @@ fn toggle_constraint(
 ) -> Result<(), String> {
     let session = state.session(&connection_id)?;
     browser::set_constraint_enabled(&session, schema.as_deref(), &table, &name, enabled)
+}
+
+#[tauri::command]
+fn update_cell(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    table: String,
+    column: String,
+    rowid: String,
+    old_value: Option<String>,
+    new_value: Option<String>,
+) -> Result<bool, String> {
+    let session = state.session(&connection_id)?;
+    grid::update_cell(
+        &session,
+        &table,
+        &column,
+        &rowid,
+        old_value.as_deref(),
+        new_value.as_deref(),
+        state.query_options(&connection_id),
+    )
 }
 
 #[tauri::command]
@@ -1044,6 +1069,7 @@ fn main() {
             list_compile_errors,
             toggle_trigger,
             toggle_constraint,
+            update_cell,
             count_objects,
             list_columns,
             load_ddl,

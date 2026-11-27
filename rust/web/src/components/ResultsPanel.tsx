@@ -28,8 +28,8 @@ export interface ResultsPanelProps {
   dataPanelRef: RefObject<HTMLElement | null>;
   exportCsv: () => void | Promise<void>;
   setStatus: Dispatch<SetStateAction<string>>;
-  setActiveCell: Dispatch<SetStateAction<{ column: string; value: string } | null>>;
-  setCellView: Dispatch<SetStateAction<{ column: string; value: string } | null>>;
+  setActiveCell: Dispatch<SetStateAction<{ column: string; value: string; row: number } | null>>;
+  setCellView: Dispatch<SetStateAction<{ column: string; value: string; row: number } | null>>;
   plan: string;
   output: string[];
   selectedObject: ObjectInfo | null;
@@ -45,11 +45,19 @@ export interface ResultsPanelProps {
   onRecompile: (object: ObjectInfo) => void;
   onToggleTrigger: (trigger: TriggerInfo) => void;
   onToggleConstraint: (constraint: ConstraintInfo) => void;
+  /** True when the last run was a single-table select (see grid/editable.ts). */
+  editable: boolean;
+  pendingEdits: number;
+  onSaveEdits: () => void;
+  onCancelEdits: () => void;
+  qbe: string;
+  onQbe: (value: string) => void;
+  onQbeApply: () => void;
 }
 
 /** The bottom panel: tab bar plus the content of the active tab (results grid, history, plan, object, output). */
 export function ResultsPanel({
-  panel, setPanel, columns, rows, scrollTop, setScrollTop, setRows, setColumns, running, isConnected, dataPanelRef, exportCsv, setStatus, setActiveCell, setCellView, plan, output, selectedObject, objectTab, loadDetail, loadDdlFor, objectColumns, constraints, indexes, triggers, grants, dependencies, onRecompile, onToggleTrigger, onToggleConstraint,
+  panel, setPanel, columns, rows, scrollTop, setScrollTop, setRows, setColumns, running, isConnected, dataPanelRef, exportCsv, setStatus, setActiveCell, setCellView, plan, output, selectedObject, objectTab, loadDetail, loadDdlFor, objectColumns, constraints, indexes, triggers, grants, dependencies, onRecompile, onToggleTrigger, onToggleConstraint, editable, pendingEdits, onSaveEdits, onCancelEdits, qbe, onQbe, onQbeApply,
 }: ResultsPanelProps) {
   const { t } = useTranslation();
   const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
@@ -83,6 +91,34 @@ export function ResultsPanel({
             {t("output")}
           </button>
         </nav>
+        {panel === "results" && (
+          <>
+            <input
+              className="qbe"
+              value={qbe}
+              placeholder={t("qbePlaceholder")}
+              aria-label={t("qbe")}
+              title={t("qbe")}
+              onChange={(event) => onQbe(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") onQbeApply();
+              }}
+            />
+            {pendingEdits > 0 && (
+              <>
+                <span className="pending-edits">
+                  {pendingEdits} {t("pendingChanges")}
+                </span>
+                <button className="plain" onClick={onSaveEdits}>
+                  {t("saveChanges")}
+                </button>
+                <button className="plain" onClick={onCancelEdits}>
+                  {t("discardChanges")}
+                </button>
+              </>
+            )}
+          </>
+        )}
         <button
           className="tb"
           title={t("exportCsv")}
@@ -116,7 +152,7 @@ export function ResultsPanel({
             {columns.length === 0 ? (
               <p className="no-results">{t("noResults")}</p>
             ) : (
-            <table className="grid">
+            <table className={editable ? "grid editable" : "grid"}>
               <thead>
                 <tr>
                   <th className="row-number">#</th>
@@ -154,12 +190,14 @@ export function ResultsPanel({
                           setActiveCell({
                             column: columns[columnIndex]?.name ?? "",
                             value: cellText(value),
+                            row: start + index,
                           })
                         }
                         onDoubleClick={() =>
                           setCellView({
                             column: columns[columnIndex]?.name ?? "",
                             value: cellText(value),
+                            row: start + index,
                           })
                         }
                       >

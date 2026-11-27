@@ -187,3 +187,60 @@ fase (`PKG_APP_VENTAS_ESCRITURA`, `CARGAR_PLAN_WEB`, `CARGAR_PLAN_WEB2`, `MIGRA_
 `RESCISION_CONTRATO_JNTRG`); la recompilación los intenta y deja 3 todavía inválidos. No es un defecto de la
 app: son errores de esos objetos en la base.
 
+### P2 — cerrada (2026-11-26)
+
+**Decisión de diseño (sin parser de SQL):** el grid es editable solo cuando la última sentencia es un
+`SELECT` de **una tabla** con lista de columnas simple, sin `join`, `union`, `group by`, `distinct`, agregados,
+alias de tabla ni variables de bind. Lo decide `web/src/grid/editable.ts` con un escaneo léxico (paréntesis y
+comillas respetados) y 8 tests de vitest. En ese caso la app ejecuta el mismo `SELECT` con
+`t.ROWID as "__sqlt_rowid"` al final, oculta esa columna y guarda el ROWID alineado con cada fila.
+
+**Edición:** doble clic en una celda abre el editor con el valor actual; `Aplicar` (o `NULL`) deja el cambio en
+un buffer. `Guardar cambios` aplica uno por uno
+`update <tabla> set <col> = :1 where rowid = :2 and (<col> = :3 or (<col> is null and :3 is null))`:
+`1` fila afectada = guardado, `0` = conflicto (la fila cambió desde que se leyó) y se informa la fila, sin
+pisar nada. `Descartar` limpia el buffer. Los identificadores se citan y se rechazan si traen comillas; la tabla
+se deja sin citar cuando es un identificador simple para que Oracle pliegue mayúsculas (`a11` encuentra `A11`).
+2 tests de Rust sobre la sentencia.
+
+**QBE:** una condición `WHERE` en la barra del panel envuelve la consulta del usuario
+(`select * from (<sql>) where <condición>`) y deja el `ORDER BY` afuera (test de vitest incluido).
+
+**Regresiones propias detectadas y corregidas en la fase:**
+1. Las **vistas** (`user_constraints`, `all_objects`) no tienen ROWID: el `SELECT` reescrito fallaba. Ahora, si
+   el reescrito falla, la app reintenta con la sentencia del usuario y deja el grid de solo lectura.
+2. El **historial** guardaba el SQL reescrito. El comando `execute` recibe un `historySql` opcional y el registro
+   conserva el texto del usuario (`phase-f5` vuelve a verificar el historial).
+3. El mensaje de guardado lo pisaba el refresco; ahora se informa después de refrescar.
+
+**Verificación contra Oracle (conexión del keyring), sonda temporal y autolimpiante:**
+
+```
+rowids: AADxFFABQAAIAGNAAA AADxFFABQAAIAGNAAB
+update with the value as read -> true
+update with a stale value -> false (false = conflict)
+set NULL -> true
+set a value where it was NULL -> true
+edit the row that was NULL -> true
+unsafe table refused: true
+leftovers: 0
+P2 PROBE OK
+```
+
+**Evidencia en la app instalada** (21:23, firmada autofirmada):
+
+| Comando | Resultado |
+|---|---|
+| `node e2e/phase-p2.mjs` | `P2 CHECKS OK (11)`: grid editable con ROWID oculto, editor abre con el valor, cambio en buffer (no se envía), guardado "1 filas guardadas", valor visible en el grid, celda a NULL, QBE filtra a 1 fila, un join queda de solo lectura |
+| `phase-p1` / `phase-f5` | 15 / 39 (el historial conserva el SQL del usuario) |
+| `axe-cdp.mjs` | 0 violaciones, 8 vistas × 2 temas |
+| `phase-f1` / `phase-f2` / `tree` / `env` / `keyboard-walk` | 19 / 3 / 11 / 12 / 27 paradas |
+| `commands-check` / `flow` | mismo digest / IDENTICAL |
+| capturas 1366×768, 1024×700 y 1024×640, claro y oscuro | `docs/screenshots/parity-p2-editable-grid-*.png`, `clipped: 0` |
+| `cargo fmt` / `clippy -D warnings` / `check -p sqlt-desktop` / `test` | 0 / 0 / 0 / 0 (19 ok) |
+| `npm run build` / `npm test` | 0 / **89 passed** (8 nuevos del rewriter) |
+
+**Límites declarados:** solo tabla única (una vista, un join o un agregado quedan de solo lectura, con el
+mensaje de la propia app); no hay edición por lotes ni de varias celdas a la vez; el QBE es un `WHERE` único,
+no una fila de filtros por columna.
+

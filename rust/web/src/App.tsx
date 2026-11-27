@@ -16,6 +16,7 @@ import { EnvBadge } from "./components/EnvBadge";
 import { HistoryView } from "./components/HistoryView";
 import { StatsView } from "./components/StatsView";
 import { useObjectTree } from "./tree/useObjectTree";
+import { ROWID_COLUMN, prepareEditable, queryByExample } from "./grid/editable";
 import { objectId, type TreeGroup } from "./tree/treeModel";
 import { ResultsPanel } from "./components/ResultsPanel";
 import { cellText, type ObjectTab, type Panel } from "./results";
@@ -308,11 +309,21 @@ export default function App() {
   const [activeCell, setActiveCell] = useState<{
     column: string;
     value: string;
+    row: number;
   } | null>(null);
   const [cellView, setCellView] = useState<{
     column: string;
     value: string;
+    row: number;
   } | null>(null);
+  // Grid editing: only a single-table select is editable; the ROWID travels next to the rows.
+  const [editTable, setEditTable] = useState<string | null>(null);
+  const [rowIds, setRowIds] = useState<string[]>([]);
+  const [pendingEdits, setPendingEdits] = useState<
+    Array<{ row: number; rowId: string; column: string; oldValue: string | null; newValue: string | null }>
+  >([]);
+  const [editValue, setEditValue] = useState("");
+  const [qbe, setQbe] = useState("");
   const [helpOpen, setHelpOpen] = useState(false);
   const [showToolbar, setShowToolbar] = useState(true);
   // null = unknown (never queried, or the last query failed).
@@ -942,6 +953,12 @@ export default function App() {
       prepared = replaced.text;
       runOffset = replaced.offset;
     }
+    // A single-table select can be edited: run it with the hidden ROWID next to the user's columns.
+    const editable = prepareEditable(prepared);
+    const executed = editable ? editable.sql : prepared;
+    setEditTable(editable ? editable.table : null);
+    setRowIds([]);
+    setPendingEdits([]);
     // Error offsets only map back to the editor when the text did not change.
     const offsetsValid = prepared === text;
     // Errors from this run are only valid while the text it ran on is intact.
@@ -950,19 +967,30 @@ export default function App() {
     setStatus(t("running"));
     setPanel("results");
     try {
-      await api.execute(
-        selected,
-        prepared,
-        5000,
-        runOffset,
-        haltOnError,
-        (event: QueryEvent) => {
+      // A rewritten single-table select adds the ROWID; anything else keeps the user's text.
+      let rewriteFailed = false;
+      // While the fallback runs there is no ROWID column to strip.
+      let usingRowid = editable !== null;
+      const onEvent = (event: QueryEvent) => {
           if (event.type === "columns") {
-            // Each statement of a script replaces the grid with its own result.
-            setColumns(event.data);
+            // Each statement of a script replaces the grid with its own result. The ROWID is not shown:
+            // it is kept per row so an edit can address exactly that row.
+            setColumns(event.data.filter((column) => column.name !== ROWID_COLUMN));
             setRows([]);
+            setRowIds([]);
           } else if (event.type === "batch") {
-            setRows((current) => [...current, ...event.data.rows]);
+            const rowidIndex = usingRowid ? event.data.rows[0]?.length - 1 : -1;
+            const ids = event.data.rows.map((row) =>
+              rowidIndex >= 0 && row[rowidIndex]
+                ? cellText(row[rowidIndex])
+                : "",
+            );
+            const values =
+              rowidIndex >= 0
+                ? event.data.rows.map((row) => row.filter((_, index) => index !== rowidIndex))
+                : event.data.rows;
+            setRowIds((current) => [...current, ...ids]);
+            setRows((current) => [...current, ...values]);
           } else if (event.type === "output") {
             setOutput((current) => [...current, ...event.data]);
             setPanel("output");
@@ -985,11 +1013,34 @@ export default function App() {
               `${event.data.rows} ${label} · ${event.data.elapsedMs} ms${errors}`,
             );
           } else {
+            rewriteFailed = true;
             setRunning(false);
             setStatus(event.data);
           }
-        },
-      );
+      };
+      const exec = (statement: string, historyText?: string) =>
+        api.execute(selected, statement, 5000, runOffset, haltOnError, onEvent, historyText);
+      try {
+        await exec(executed, editable ? prepared : undefined);
+        // A view or another object without ROWID cannot carry one: run the user's statement, read-only.
+        if (editable && rewriteFailed) {
+          usingRowid = false;
+          setEditTable(null);
+          setRowIds([]);
+          setColumns([]);
+          setRows([]);
+          rewriteFailed = false;
+          await exec(prepared);
+        }
+      } catch (error) {
+        if (!editable) throw error;
+        // A view or another object without ROWID cannot carry one: run the user's statement, read-only.
+        setEditTable(null);
+        setRowIds([]);
+        setColumns([]);
+        setRows([]);
+        await exec(prepared);
+      }
       return true;
     } catch (error) {
       setRunning(false);
@@ -1148,6 +1199,78 @@ export default function App() {
   };
 
   /** Both directions of ALL_DEPENDENCIES, merged for the Dependencies tab. */
+  /** Buffers one cell change; nothing reaches the database until Save. */
+  useEffect(() => {
+    if (cellView) setEditValue(cellView.value === "NULL" ? "" : cellView.value);
+  }, [cellView]);
+
+  const stageEdit = (cell: { column: string; value: string; row: number }, value: string) => {
+    const rowId = rowIds[cell.row];
+    if (!rowId) {
+      setStatus(t("notEditable"));
+      return;
+    }
+    const columnIndex = columns.findIndex((column) => column.name === cell.column);
+    const isNull = columnIndex >= 0 && rows[cell.row]?.[columnIndex]?.kind === "null";
+    setPendingEdits((current) => [
+      ...current.filter((edit) => !(edit.row === cell.row && edit.column === cell.column)),
+      {
+        row: cell.row,
+        rowId,
+        column: cell.column,
+        oldValue: isNull ? null : cell.value,
+        newValue: value === "" ? null : value,
+      },
+    ]);
+    setCellView(null);
+    setStatus(`${cell.column}: ${t("pendingChanges")}`);
+  };
+
+  /** Applies the buffer; a row changed by somebody else is reported, not overwritten. */
+  const saveEdits = async () => {
+    if (!editTable || pendingEdits.length === 0) return;
+    let saved = 0;
+    const conflicts: number[] = [];
+    for (const edit of pendingEdits) {
+      try {
+        const changed = await api.updateCell(
+          selected,
+          editTable,
+          edit.column,
+          edit.rowId,
+          edit.oldValue,
+          edit.newValue,
+        );
+        if (changed) saved += 1;
+        else conflicts.push(edit.row + 1);
+      } catch (error) {
+        setStatus(String(error));
+        return;
+      }
+    }
+    setPendingEdits([]);
+    // Refresh first and let the last stream events land: the run writes its own row/time message, so the
+    // save result has to be the final word.
+    if (conflicts.length === 0) {
+      await run(sql);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    setStatus(
+      conflicts.length
+        ? `${saved} ${t("rowsSaved")} · ${t("conflictRows")}: ${conflicts.join(", ")}`
+        : `${saved} ${t("rowsSaved")}`,
+    );
+  };
+
+  const discardEdits = () => {
+    setPendingEdits([]);
+    setStatus("");
+  };
+
+  const applyQbe = () => {
+    void run(queryByExample(sql, qbe));
+  };
+
   const loadDependencies = async (object: ObjectInfo) => {
     const owner = schema.trim() || null;
     try {
@@ -2904,6 +3027,13 @@ export default function App() {
           onRecompile={(object) => void recompileObject(object)}
           onToggleTrigger={(trigger) => void toggleTrigger(trigger)}
           onToggleConstraint={(constraint) => void toggleConstraint(constraint)}
+          editable={editTable !== null}
+          pendingEdits={pendingEdits.length}
+          onSaveEdits={() => void saveEdits()}
+          onCancelEdits={discardEdits}
+          qbe={qbe}
+          onQbe={setQbe}
+          onQbeApply={applyQbe}
           />
 
         </main>
@@ -2931,9 +3061,29 @@ export default function App() {
           <div className="palette" onClick={(event) => event.stopPropagation()}>
             <div className="panel-title">
               {cellView.column || t("cellViewer")}
+              {editTable ? ` · ${t("editCell")}` : ""}
             </div>
-            <pre className="cell-value">{cellView.value}</pre>
+            {editTable ? (
+              <input
+                autoFocus
+                className="edit-input"
+                value={editValue}
+                aria-label={t("editCell")}
+                onChange={(event) => setEditValue(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") stageEdit(cellView, editValue);
+                }}
+              />
+            ) : (
+              <pre className="cell-value">{cellView.value}</pre>
+            )}
             <div className="row">
+              {editTable && (
+                <>
+                  <button onClick={() => stageEdit(cellView, editValue)}>{t("apply")}</button>
+                  <button onClick={() => stageEdit(cellView, "")}>{t("setNull")}</button>
+                </>
+              )}
               <button onClick={() => void navigator.clipboard.writeText(cellView.value)}>
                 {t("copyValue")}
               </button>

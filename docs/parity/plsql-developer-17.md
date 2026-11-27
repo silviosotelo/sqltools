@@ -32,7 +32,7 @@ Method and limits:
 | 2 | Integrated Debugger | Step in/over/out, run until exception, breakpoints, variables, call stack, on any program unit without modifying it | **Missing** | — (needs `DBMS_DEBUG`/`DBMS_DEBUG_JDWP` session work) |
 | 3 | AI Assistant | Predefined and user AI functions to create/modify/fix/explain code, with an API key | **Missing** | — |
 | 4 | PL/SQL Beautifier | Rule-based formatting, optional on compile/save/open | **Have** | `Edit.FormatSQL`, `Edit.FormatSQLwithSettings`, formatter profiles (`sqlt-app`), formatted in F1–F5 |
-| 5 | SQL Window | Multiple statements, editable grid, QBE search in results, recall from history | **Partial** | Editor + virtualised grid + history (`api.history`), export CSV. Missing: editing cells back to the DB, QBE |
+| 5 | SQL Window | Multiple statements, editable grid, QBE search in results, recall from history | **Partial** | Since P2: single-table results are editable by ROWID with optimistic concurrency (`rows_affected = 0` is reported as a conflict), NULL is supported, and a WHERE filter wraps the query (QBE). Plus editor, virtualised grid, history and export CSV. Missing: editing rows of joins/views/aggregates, multi-cell edits |
 | 6 | Command Window | SQL*Plus look and feel with built-in script editor | **Partial** | `Script.ExecuteInSQLPlus`, script runner with events, errors from `ALL_ERRORS`. Missing: embedded command window UI |
 | 7 | Reports | Built-in and custom reports, report files, command-line runner | **Missing** | — |
 | 8 | Diagrams | Graphical selection of objects and relations, usable as workspace | **Missing** | — |

@@ -1623,3 +1623,61 @@ kbd {
 .link-btn:hover {
   background: var(--accent-soft);
 }
+
+/* A single-table result can be edited: the cursor tells the user before the first double click. */
+.grid.editable tbody td:not(.row-number) {
+  cursor: text;
+}
+
+.qbe {
+  width: 220px;
+  height: 23px;
+  padding: 0 6px;
+  border: 1px solid var(--control-border);
+  border-radius: 2px;
+  background: var(--surface);
+}
+
+.pending-edits {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.edit-input {
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--control-border);
+  border-radius: 3px;
+  background: var(--surface);
+}
+
+/* A single-table result can be edited: the cursor says so before the first double click. */
+.grid.editable tbody td:not(.row-number) {
+  cursor: text;
+}
+
+.qbe {
+  width: 220px;
+  height: 23px;
+  padding: 0 6px;
+  border: 1px solid var(--control-border);
+  border-radius: 2px;
+  background: var(--surface);
+}
+
+.pending-edits {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.edit-input {
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--control-border);
+  border-radius: 3px;
+  background: var(--surface);
+}

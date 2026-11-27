@@ -42,12 +42,14 @@ export const api = {
     offset: number | null,
     haltOnError: boolean,
     onEvent: (event: QueryEvent) => void,
+    historySql?: string,
   ) => {
     const channel = new Channel<QueryEvent>();
     channel.onmessage = onEvent;
     return invoke<void>("execute", {
       connectionId,
       sql,
+      historySql: historySql ?? null,
       maxRows,
       offset,
       haltOnError,
@@ -64,6 +66,22 @@ export const api = {
   cancel: (id: string) => invoke<void>("cancel", { id }),
   commit: (id: string) => invoke<void>("commit", { id }),
   rollback: (id: string) => invoke<void>("rollback", { id }),
+  updateCell: (
+    connectionId: string,
+    table: string,
+    column: string,
+    rowid: string,
+    oldValue: string | null,
+    newValue: string | null,
+  ) =>
+    invoke<boolean>("update_cell", {
+      connectionId,
+      table,
+      column,
+      rowid,
+      oldValue,
+      newValue,
+    }),
   transactionPending: (connectionId: string) =>
     invoke<boolean>("transaction_pending", { connectionId }),
   history: () => invoke<HistoryEntry[]>("history"),

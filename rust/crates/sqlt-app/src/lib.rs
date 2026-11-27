@@ -6,6 +6,7 @@ pub mod catalog;
 pub mod commands;
 pub mod export;
 pub mod fileio;
+pub mod grid;
 pub mod migrate;
 pub mod profiles;
 pub mod script;
@@ -25,6 +26,7 @@ pub use catalog::{
     transaction_pending,
 };
 pub use commands::{registry, CommandSpec};
+pub use grid::update_cell;
 pub use state::{AppState, HistoryEntry};
 pub use store::{
     config_dir, ConnectionConfig, ConnectionStore, Environment, StoreError, ENV_COLORS,
