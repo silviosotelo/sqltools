@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use sqlt_app::{browser, catalog, grid, AppState, ConnectionConfig, HistoryEntry};
+use sqlt_app::{browser, catalog, compare, grid, AppState, ConnectionConfig, HistoryEntry};
 use sqlt_core::{Batch, ColumnMeta};
 use tauri::ipc::Channel;
 use tauri::State;
@@ -468,6 +468,57 @@ fn suggest_objects(
         5000,
         state.query_options(&connection_id),
     )
+}
+
+#[tauri::command]
+fn list_todos(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    schema: Option<String>,
+) -> Result<Vec<compare::TodoItem>, String> {
+    let session = state.session(&connection_id)?;
+    compare::scan_todos(
+        &session,
+        schema.as_deref(),
+        state.query_options(&connection_id),
+    )
+}
+
+/// Writes the sources of the schema to `path` and returns how many objects were saved.
+#[tauri::command]
+fn save_sources_snapshot(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    schema: Option<String>,
+    path: String,
+) -> Result<usize, String> {
+    let session = state.session(&connection_id)?;
+    let snapshot = compare::collect_sources(
+        &session,
+        schema.as_deref(),
+        state.query_options(&connection_id),
+    )?;
+    compare::save_snapshot_file(std::path::Path::new(&path), &snapshot)?;
+    Ok(snapshot.len())
+}
+
+#[tauri::command]
+fn compare_with_snapshot(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    schema: Option<String>,
+    path: String,
+) -> Result<compare::CompareResult, String> {
+    let wanted = compare::load_snapshot_file(std::path::Path::new(&path))?;
+    let session = state.session(&connection_id)?;
+    let current = compare::collect_sources(
+        &session,
+        schema.as_deref(),
+        state.query_options(&connection_id),
+    )?;
+    let entries = compare::compare_snapshot(&wanted, &current);
+    let script = compare::apply_script(&wanted, &entries);
+    Ok(compare::CompareResult { entries, script })
 }
 
 #[tauri::command]
@@ -1086,6 +1137,9 @@ fn main() {
             toggle_constraint,
             update_cell,
             suggest_objects,
+            list_todos,
+            save_sources_snapshot,
+            compare_with_snapshot,
             count_objects,
             list_columns,
             load_ddl,

@@ -71,6 +71,14 @@ const VIEWS = {
     },
     expect: `document.querySelectorAll('.stats-scroll tbody tr').length > 0`,
   },
+  todos: {
+    steps: async (cdp) => {
+      await ensureConnected(cdp);
+      await cdp.click('.activity .act[aria-label="To-Do"]');
+      await cdp.waitFor(`document.querySelectorAll('.objects-panel .history-row').length > 0`, 30000);
+    },
+    expect: `document.querySelectorAll('.objects-panel .history-row').length > 0`,
+  },
   menu: {
     steps: async (cdp) => {
       await cdp.click('.actionstrip button[aria-label="Más acciones"]');

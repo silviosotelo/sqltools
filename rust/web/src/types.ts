@@ -183,3 +183,24 @@ export type Dependency = {
 };
 
 export type CompileError = { line: number; position: number; text: string };
+
+export type TodoItem = {
+  owner: string;
+  name: string;
+  objectType: string;
+  line: number;
+  text: string;
+  marker: string;
+};
+
+export type CompareStatus = "identical" | "different" | "missing" | "extra";
+
+export type CompareEntry = {
+  name: string;
+  objectType: string;
+  status: CompareStatus;
+  firstDifference: number;
+  differingLines: number;
+};
+
+export type CompareResult = { entries: CompareEntry[]; script: string };

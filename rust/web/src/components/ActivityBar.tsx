@@ -1,13 +1,14 @@
 import { Icon, type IconName } from "../icons";
 import { useTranslation, type MessageKey } from "../i18n";
 
-export type SideView = "objects" | "connections" | "history" | "stats";
+export type SideView = "objects" | "connections" | "history" | "stats" | "todos";
 
 const VIEWS: Array<{ id: SideView; icon: IconName; label: MessageKey }> = [
   { id: "objects", icon: "database", label: "objects" },
   { id: "connections", icon: "connect", label: "connections" },
   { id: "history", icon: "history", label: "history" },
   { id: "stats", icon: "stats", label: "stats" },
+  { id: "todos", icon: "warning", label: "todos" },
 ];
 
 export function ActivityBar({

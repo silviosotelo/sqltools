@@ -15,6 +15,7 @@ import { ActionStrip } from "./components/ActionStrip";
 import { EnvBadge } from "./components/EnvBadge";
 import { HistoryView } from "./components/HistoryView";
 import { StatsView } from "./components/StatsView";
+import { ToDoView } from "./components/ToDoView";
 import { useObjectTree } from "./tree/useObjectTree";
 import { ROWID_COLUMN, prepareEditable, queryByExample } from "./grid/editable";
 import { objectId, type TreeGroup } from "./tree/treeModel";
@@ -35,6 +36,7 @@ import type {
   ObjectInfo,
   QueryEvent,
   StatEntry,
+  TodoItem,
   TriggerInfo,
   UpdateInfo,
   Value,
@@ -328,6 +330,7 @@ export default function App() {
   >([]);
   const [editValue, setEditValue] = useState("");
   const [qbe, setQbe] = useState("");
+  const [todos, setTodos] = useState<TodoItem[]>([]);
   const [helpOpen, setHelpOpen] = useState(false);
   const [showToolbar, setShowToolbar] = useState(true);
   // null = unknown (never queried, or the last query failed).
@@ -776,6 +779,94 @@ export default function App() {
     else if (view === "connections") openConnections();
     else setSideView(view);
   };
+
+  const loadTodos = async () => {
+    if (!isConnected) {
+      setTodos([]);
+      return;
+    }
+    try {
+      setTodos(await api.listTodos(selected, schema.trim() || null));
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  /** Opens the object a note belongs to, so the line and the text are in front of the user. */
+  const openTodo = async (item: TodoItem) => {
+    try {
+      const ddl = await api.loadDdl(
+        selected,
+        schema.trim() || null,
+        item.name,
+        item.objectType,
+      );
+      openDoc(`${item.name} (${item.objectType})`, ddl, {
+        key: `src:${item.objectType}:${item.name}`,
+      });
+      setPanel("results");
+      setStatus(`${item.marker} ${item.name}:${item.line}`);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const saveSourcesSnapshot = async () => {
+    if (!isConnected) {
+      setStatus(t("noConnection"));
+      return;
+    }
+    const path = await api.pickSqlSavePath("sources-snapshot.json");
+    if (!path) return;
+    try {
+      const count = await api.saveSourcesSnapshot(selected, schema.trim() || null, path);
+      setStatus(`${count} ${t("snapshotSaved")} ${path}`);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const compareWithSnapshot = async () => {
+    if (!isConnected) {
+      setStatus(t("noConnection"));
+      return;
+    }
+    const path = await api.pickSqlFile();
+    if (!path) return;
+    try {
+      const result = await api.compareWithSnapshot(selected, schema.trim() || null, path);
+      const count = (status: string) => result.entries.filter((entry) => entry.status === status).length;
+      setStatus(
+        t("compareResult")
+          .replace("{same}", String(count("identical")))
+          .replace("{different}", String(count("different")))
+          .replace("{missing}", String(count("missing")))
+          .replace("{extra}", String(count("extra"))),
+      );
+      const lines = result.entries
+        .filter((entry) => entry.status !== "identical")
+        .map(
+          (entry) =>
+            `${entry.status.toUpperCase().padEnd(9)} ${entry.objectType} ${entry.name}` +
+            (entry.status === "different"
+              ? ` — ${entry.differingLines} linea(s), primera ${entry.firstDifference}`
+              : ""),
+        );
+      setOutput(lines.length ? lines : [t("compareResult").replace("{same}", "0").replace("{different}", "0").replace("{missing}", "0").replace("{extra}", "0")]);
+      setPanel("output");
+      if (result.script.trim()) {
+        openDoc(t("applyScript"), result.script, { key: "compare:script" });
+      }
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  /** Reload the notes whenever the side view opens or the schema changes. */
+  useEffect(() => {
+    if (sideView !== "todos") return;
+    void loadTodos();
+  }, [sideView, selected, schema, isConnected]);
 
   const loadSuggestions = async (connectionId: string) => {
     try {
@@ -2805,6 +2896,8 @@ export default function App() {
             { id: "ws-save", label: t("workspaceSave"), onClick: () => void saveWorkspace() },
             { id: "ws-load", label: t("workspaceLoad"), onClick: () => void loadWorkspace() },
             { id: "cache", label: t("refresh"), onClick: () => void refreshObjectCache(), disabled: !isConnected },
+            { id: "snapshot-save", label: t("saveSnapshot"), onClick: () => void saveSourcesSnapshot(), disabled: !isConnected },
+            { id: "snapshot-compare", label: t("compareSnapshot"), onClick: () => void compareWithSnapshot(), disabled: !isConnected },
             ...(updateInfo
               ? [{ id: "install", label: `${t("installUpdate")}: ${updateInfo.version}`, onClick: () => void installUpdate(), disabled: installing }]
               : []),
@@ -2931,6 +3024,10 @@ export default function App() {
           )}
 
           {sideView === "stats" && <StatsView stats={stats} />}
+
+          {sideView === "todos" && (
+            <ToDoView items={todos} onOpen={(item) => void openTodo(item)} />
+          )}
 
           <details className="side-section" ref={profileDetailsRef}>
             <summary>{t("formatterProfiles")}</summary>

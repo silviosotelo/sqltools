@@ -10,9 +10,11 @@ import type {
   HistoryEntry,
   IndexInfo,
   CompileError,
+  CompareResult,
   Dependency,
   ObjectCount,
   ObjectInfo,
+  TodoItem,
   QueryEvent,
   StatEntry,
   StatementRange,
@@ -160,6 +162,12 @@ export const api = {
       schema,
       objectType,
     }),
+  listTodos: (connectionId: string, schema: string | null) =>
+    invoke<TodoItem[]>("list_todos", { connectionId, schema }),
+  saveSourcesSnapshot: (connectionId: string, schema: string | null, path: string) =>
+    invoke<number>("save_sources_snapshot", { connectionId, schema, path }),
+  compareWithSnapshot: (connectionId: string, schema: string | null, path: string) =>
+    invoke<CompareResult>("compare_with_snapshot", { connectionId, schema, path }),
   suggestObjects: (connectionId: string, schema: string | null) =>
     invoke<ObjectInfo[]>("suggest_objects", { connectionId, schema }),
   countObjects: (connectionId: string, schema: string | null) =>

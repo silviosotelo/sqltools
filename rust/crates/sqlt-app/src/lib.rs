@@ -4,6 +4,7 @@
 pub mod browser;
 pub mod catalog;
 pub mod commands;
+pub mod compare;
 pub mod export;
 pub mod fileio;
 pub mod grid;
@@ -26,6 +27,10 @@ pub use catalog::{
     transaction_pending,
 };
 pub use commands::{registry, CommandSpec};
+pub use compare::{
+    apply_script, compare_snapshot, markers_in_line, todos_from_source, CompareEntry,
+    CompareStatus, Snapshot, SnapshotObject, TodoItem,
+};
 pub use grid::update_cell;
 pub use state::{AppState, HistoryEntry};
 pub use store::{

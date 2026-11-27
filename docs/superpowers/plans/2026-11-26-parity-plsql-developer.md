@@ -289,3 +289,51 @@ P3 PROBE OK
 **Límites declarados:** el catálogo se corta en 5000 nombres (un esquema mayor sugiere menos, nunca rompe);
 no hay sugerencias de columnas de tablas en subconsultas anidadas ni de paquetes (`pkg.proc`).
 
+### P4 — cerrada (2026-11-26)
+
+**Comparador real (no el diff de texto de `sqlt-meta`):** `crates/sqlt-app/src/compare.rs` toma un
+**snapshot** de las fuentes del esquema (`ALL_SOURCE`/`USER_SOURCE`, una sola consulta por tipo+nombre, sin
+DDL por objeto) y lo compara con la base actual. Clasifica cada objeto en **idéntico / distinto / faltante /
+sobrante**, informa la primera línea y cuántas difieren, y genera el **script** que llevaría la base al
+snapshot (solo lo que difiere o falta, con el encabezado del objeto). El snapshot se guarda como JSON estable
+(clave `TIPO:NOMBRE`, porque `PACKAGE` y `PACKAGE BODY` comparten nombre). 4 tests unitarios.
+
+**To-Do Items:** `scan_todos` recorre `ALL_SOURCE` buscando marcas y las filtra en Rust: la marca debe estar en
+mayúsculas, ser palabra completa y **abrir el comentario** (entre el último `--`/`/*` y la marca solo se admite
+puntuación). Sin ese filtro la base devolvía **443** coincidencias, casi todas la palabra española "todos";
+con el filtro quedan **16 notas reales** (`-- TODO: Guardar BLOB en storage…`).
+
+**UI:** quinta vista lateral **To-Do** (lista con marca, tipo, objeto y línea; al hacer clic abre la fuente del
+objeto en una pestaña) y dos entradas en el menú "Más acciones": **Guardar snapshot de fuentes…** y
+**Comparar con snapshot…** (el resultado va a Salida y el script se abre en una pestaña para revisarlo).
+
+**Verificación contra Oracle (conexión del keyring), sonda temporal:**
+
+```
+snapshot objects: 4710
+identical after a round trip: 4710 of 4710
+changed: AJUSTAR_A_MONTO (FUNCTION), first line 34
+missing detected: yes
+todos in the schema: 16
+  TODO PACKAGE BODY PKG_APP:5955 -- TODO: Guardar BLOB en storage (DOCUMENTO_CLIENTE o filesystem)
+P4 PROBE OK
+```
+
+**Evidencia en la app instalada** (22:33, firmada autofirmada):
+
+| Comando | Resultado |
+|---|---|
+| `node e2e/phase-p4.mjs` | `P4 CHECKS OK (5)`: quinta vista To-Do con 16 notas (`TODO|FIXME … :línea`), clic abre la fuente; el menú ofrece las dos entradas; `save_sources_snapshot` guarda 4710 objetos y `compare_with_snapshot` los da idénticos con script vacío |
+| `phase-p1` / `phase-p2` / `phase-p3` | 15 / 11 / 4 |
+| `axe-cdp.mjs` | 0 violaciones, **9 vistas** × 2 temas (incluye To-Do) |
+| `phase-f1` / `phase-f2` / `phase-f5` / `tree` / `env` / `keyboard-walk` | 19 / 3 / 39 / 11 / 12 / 28 paradas |
+| `commands-check` / `flow` | mismo digest / IDENTICAL |
+| capturas 1366×768, 1024×700 y 1024×640, claro y oscuro | `docs/screenshots/parity-p4-todos-*.png`, 16 filas, sin desbordes |
+| `cargo fmt` / `clippy -D warnings` / `check -p sqlt-desktop` / `test` | 0 / 0 / 0 / 0 (19 ok) |
+| `npm run build` / `npm test` | 0 / **98 passed** |
+
+**Límites declarados:** el comparador cubre unidades de programa (paquetes, procedimientos, funciones,
+triggers, tipos y cuerpos), no tablas ni vistas (su DDL exige MetaDictionary y sería lento por objeto); el
+diálogo nativo de archivos no lo puede manejar CDP, así que la prueba invoca los comandos con una ruta fija y
+solo verifica la presencia de las entradas del menú.
+
