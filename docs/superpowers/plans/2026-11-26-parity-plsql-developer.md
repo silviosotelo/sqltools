@@ -337,3 +337,50 @@ triggers, tipos y cuerpos), no tablas ni vistas (su DDL exige MetaDictionary y s
 diálogo nativo de archivos no lo puede manejar CDP, así que la prueba invoca los comandos con una ruta fija y
 solo verifica la presencia de las entradas del menú.
 
+### P5 — cerrada (2026-11-26)
+
+**Infraestructura nueva en `sqlt-oracle`:** `Session::execute_block(block, binds, out_positions)` corre un
+bloque anónimo y **lee sus binds de salida** con `Statement::bind_value` (lo que `execute_with` descartaba).
+Es la base que P6 necesita para `DBMS_DEBUG`. Respeta el modo solo lectura (`guard`).
+
+**Profiler (`crates/sqlt-app/src/profiler.rs`):** arranca `DBMS_PROFILER`, ejecuta la sentencia, **siempre** lo
+detiene (aunque la sentencia falle, para no perfilar lo que venga después) y lee las líneas más costosas de esa
+corrida desde `PLSQL_PROFILER_DATA`/`_UNITS` con el texto de `USER_SOURCE`. Devuelve unidad, línea, nanosegundos,
+ocurrencias y texto, ordenado por costo. Formato de duración con test propio.
+
+**Hallazgo de entorno (real y bloqueante):** `DBMS_PROFILER` está instalado y las tres tablas del profiler
+existen en el esquema, pero **faltaba la secuencia `PLSQL_PROFILER_RUNNUMBER`** que crea `profload.sql`; sin
+ella `start_profiler` falla con `ORA-06528` (comprobado con tres variantes de bind, incluida sin binds). La app
+la crea si falta, de forma idempotente, y lo informa en el estado (`ProfileResult.prepared`).
+
+**UI:** entrada **Perfilar sentencia** en "Más acciones": corre la sentencia del editor bajo el profiler y deja
+el resultado por línea en la pestaña Salida, con el resumen `N linea(s) con tiempo · X ms`.
+
+**Verificación contra Oracle (sonda temporal):**
+
+```
+run 2: 7 line(s), 5.516 ms total
+       1911987 ns x20000 SQLT_P5_PROBE:8 l := l + j * 2;
+       1584397 ns x20000 SQLT_P5_PROBE:5 l := l + i;
+       1039900 ns x20001 SQLT_P5_PROBE:4 for i in 1 .. p_rows loop
+        847094 ns x20001 SQLT_P5_PROBE:7 for j in 1 .. p_rows loop
+P5 PROBE OK
+```
+
+**Evidencia en la app instalada** (22:50, firmada autofirmada):
+
+| Comando | Resultado |
+|---|---|
+| `node e2e/phase-p5.mjs` | `P5 CHECKS OK (3)`: el menú ofrece **Perfilar sentencia**; perfilar `begin sqlt_p5_e2e(20000); end;` devuelve `4 linea(s) con tiempo · 5.325 ms` y la salida muestra `SQLT_P5_E2E:1 5.162 ms x80004 …`; la prueba borra su procedimiento y las filas del profiler |
+| `phase-p1` / `phase-p2` / `phase-p3` / `phase-p4` | 15 / 11 / 4 / 5 |
+| `axe-cdp.mjs` | 0 violaciones, 9 vistas × 2 temas |
+| `phase-f1` / `phase-f2` / `phase-f5` / `tree` / `env` / `keyboard-walk` | 19 / 3 / 39 / 11 / 12 / 28 paradas |
+| `commands-check` / `flow` | mismo digest / IDENTICAL |
+| capturas 1366×768, 1024×700 y 1024×640, claro y oscuro | `docs/screenshots/parity-p5-profiler-*.png`, la salida del profiler visible en las seis |
+| `cargo fmt` / `clippy -D warnings` / `check -p sqlt-desktop` / `test` | 0 / 0 / 0 / 0 (19 ok) |
+| `npm run build` / `npm test` | 0 / **98 passed** |
+
+**Límites declarados:** el profiler mide **una** sentencia por corrida y no agrega varias corridas; si la
+sentencia no es PL/SQL, `DBMS_PROFILER` no registra líneas y la app lo dice. Las filas del profiler quedan en
+las tablas `PLSQL_PROFILER_*` del usuario (la app no las borra en uso normal).
+

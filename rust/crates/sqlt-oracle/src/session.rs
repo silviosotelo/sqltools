@@ -176,6 +176,34 @@ impl Session {
         Ok(stmt.row_count()?)
     }
 
+    /// Runs one anonymous block and returns the OUT binds given by position, as text. `execute_with`
+    /// drops the statement, so anything that answers through an OUT parameter (DBMS_PROFILER's run
+    /// number, DBMS_DEBUG) needs this path: the caller declares those binds with an `OracleType`.
+    pub fn execute_block(
+        &self,
+        block: &str,
+        binds: &[&dyn oracle::sql_type::ToSql],
+        out_positions: &[usize],
+    ) -> Result<Vec<String>, String> {
+        self.guard(block).map_err(|error| error.to_string())?;
+        let mut statement = self
+            .conn
+            .statement(block)
+            .build()
+            .map_err(|error| error.to_string())?;
+        statement
+            .execute(binds)
+            .map_err(|error| error.to_string())?;
+        let mut values = Vec::with_capacity(out_positions.len());
+        for position in out_positions {
+            let value: String = statement
+                .bind_value(*position)
+                .map_err(|error| error.to_string())?;
+            values.push(value);
+        }
+        Ok(values)
+    }
+
     /// `DBMS_OUTPUT.ENABLE(NULL)`; lines are collected by `dbms_output_lines`.
     pub fn enable_dbms_output(&self) -> Result<(), OciError> {
         self.execute("begin dbms_output.enable(null); end;")?;

@@ -3,7 +3,9 @@
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use sqlt_app::{browser, catalog, compare, grid, AppState, ConnectionConfig, HistoryEntry};
+use sqlt_app::{
+    browser, catalog, compare, grid, profiler, AppState, ConnectionConfig, HistoryEntry,
+};
 use sqlt_core::{Batch, ColumnMeta};
 use tauri::ipc::Channel;
 use tauri::State;
@@ -519,6 +521,16 @@ fn compare_with_snapshot(
     let entries = compare::compare_snapshot(&wanted, &current);
     let script = compare::apply_script(&wanted, &entries);
     Ok(compare::CompareResult { entries, script })
+}
+
+#[tauri::command]
+fn profile_sql(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    sql: String,
+) -> Result<profiler::ProfileResult, String> {
+    let session = state.session(&connection_id)?;
+    profiler::profile(&session, &sql, 200, state.query_options(&connection_id))
 }
 
 #[tauri::command]
@@ -1140,6 +1152,7 @@ fn main() {
             list_todos,
             save_sources_snapshot,
             compare_with_snapshot,
+            profile_sql,
             count_objects,
             list_columns,
             load_ddl,

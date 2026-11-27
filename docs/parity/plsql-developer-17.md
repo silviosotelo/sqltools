@@ -43,7 +43,7 @@ Method and limits:
 | 13 | File Browser | Docked tree over user-defined locations; open/save/rename/delete; VCS actions with the plug-in | **Partial** | File open/save/close (`File.*`), `View.FilePanel`. Missing: docked browser over locations |
 | 14 | Connection List | Multiple connections at once, hierarchical, windows per connection | **Have** | `ConnectionsView`, environment badge (F4), per-connection sessions |
 | 15 | DBMS Scheduler | Manage `DBMS_SCHEDULER` jobs, programs, windows; query run info | **Missing** | — |
-| 16 | Performance Optimizing | PL/SQL Profiler per line; statistics of executed SQL and programs (CPU, I/O, sorts…) | **Partial** | `Session.EnableSessionStatistics` + Statistics view. Missing: line-level profiler |
+| 16 | Performance Optimizing | PL/SQL Profiler per line; statistics of executed SQL and programs (CPU, I/O, sorts…) | **Partial** | Since P5: a real per-line profiler over DBMS_PROFILER (unit, line, nanoseconds, occurrences, source text) with a Profile-statement action. Plus session statistics. Missing: aggregated runs and SQL-level statistics per statement |
 | 17 | Oracle Manuals | PDF/HTML manuals integrated for context help | **Partial** | `Help.Help`, `Help.SqlHelp`, `Help.ContextHelp` |
 | 18 | Non-PL/SQL Objects | Forms to create/alter tables, sequences, synonyms, libraries, directories, jobs, queues, users, roles generating the SQL | **Missing** | — (DDL is read-only today) |
 | 19 | Template List | Insert standard code, create new program files from templates | **Have** | `templates` module (`save_list_load_delete`), `Edit.CreateTemplate`, `Edit.ExpandTemplate`, `View.Snippets` |

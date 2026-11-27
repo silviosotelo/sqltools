@@ -9,6 +9,7 @@ pub mod export;
 pub mod fileio;
 pub mod grid;
 pub mod migrate;
+pub mod profiler;
 pub mod profiles;
 pub mod script;
 pub mod sqlplus;
@@ -32,6 +33,7 @@ pub use compare::{
     CompareStatus, Snapshot, SnapshotObject, TodoItem,
 };
 pub use grid::update_cell;
+pub use profiler::{profile, read_lines, ProfileLine, ProfileResult};
 pub use state::{AppState, HistoryEntry};
 pub use store::{
     config_dir, ConnectionConfig, ConnectionStore, Environment, StoreError, ENV_COLORS,

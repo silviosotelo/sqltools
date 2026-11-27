@@ -204,3 +204,20 @@ export type CompareEntry = {
 };
 
 export type CompareResult = { entries: CompareEntry[]; script: string };
+
+export type ProfileLine = {
+  unit: string;
+  unitType: string;
+  line: number;
+  totalTime: number;
+  totalOccur: number;
+  text: string;
+};
+
+export type ProfileResult = {
+  runId: number;
+  /** True when the profiler sequence had to be created for this run. */
+  prepared: boolean;
+  lines: ProfileLine[];
+  totalTime: number;
+};

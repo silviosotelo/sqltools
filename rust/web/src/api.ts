@@ -14,6 +14,7 @@ import type {
   Dependency,
   ObjectCount,
   ObjectInfo,
+  ProfileResult,
   TodoItem,
   QueryEvent,
   StatEntry,
@@ -162,6 +163,8 @@ export const api = {
       schema,
       objectType,
     }),
+  profileSql: (connectionId: string, sql: string) =>
+    invoke<ProfileResult>("profile_sql", { connectionId, sql }),
   listTodos: (connectionId: string, schema: string | null) =>
     invoke<TodoItem[]>("list_todos", { connectionId, schema }),
   saveSourcesSnapshot: (connectionId: string, schema: string | null, path: string) =>

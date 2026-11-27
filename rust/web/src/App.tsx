@@ -780,6 +780,43 @@ export default function App() {
     else setSideView(view);
   };
 
+  const formatNanos = (nanos: number) => {
+    if (nanos >= 1e9) return `${(nanos / 1e9).toFixed(3)} s`;
+    if (nanos >= 1e6) return `${(nanos / 1e6).toFixed(3)} ms`;
+    if (nanos >= 1e3) return `${(nanos / 1e3).toFixed(3)} us`;
+    return `${nanos} ns`;
+  };
+
+  /** Runs the editor's statement under DBMS_PROFILER and shows the per-line times in Output. */
+  const profileStatement = async () => {
+    if (!isConnected) {
+      setStatus(t("noConnection"));
+      return;
+    }
+    const text = sql.trim();
+    if (!text) {
+      setStatus(t("profileEmpty"));
+      return;
+    }
+    try {
+      const result = await api.profileSql(selected, text);
+      const lines = result.lines.map(
+        (line) =>
+          `${line.unit}:${line.line}  ${formatNanos(line.totalTime)}  x${line.totalOccur}  ${line.text.trim()}`,
+      );
+      setOutput(lines.length ? lines : [t("profileNoLines")]);
+      setPanel("output");
+      setStatus(
+        t("profileSummary")
+          .replace("{lines}", String(result.lines.length))
+          .replace("{time}", formatNanos(result.totalTime)) +
+          (result.prepared ? t("profilerPrepared") : ""),
+      );
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
   const loadTodos = async () => {
     if (!isConnected) {
       setTodos([]);
@@ -2896,6 +2933,7 @@ export default function App() {
             { id: "ws-save", label: t("workspaceSave"), onClick: () => void saveWorkspace() },
             { id: "ws-load", label: t("workspaceLoad"), onClick: () => void loadWorkspace() },
             { id: "cache", label: t("refresh"), onClick: () => void refreshObjectCache(), disabled: !isConnected },
+            { id: "profile", label: t("profileStatement"), onClick: () => void profileStatement(), disabled: !isConnected },
             { id: "snapshot-save", label: t("saveSnapshot"), onClick: () => void saveSourcesSnapshot(), disabled: !isConnected },
             { id: "snapshot-compare", label: t("compareSnapshot"), onClick: () => void compareWithSnapshot(), disabled: !isConnected },
             ...(updateInfo
