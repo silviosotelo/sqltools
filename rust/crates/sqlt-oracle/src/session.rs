@@ -176,7 +176,8 @@ impl Session {
         Ok(stmt.row_count()?)
     }
 
-    /// Runs one anonymous block and returns the OUT binds given by position, as text. `execute_with`
+    /// Runs one anonymous block and returns the OUT binds given by position, as text (`None` when NULL).
+    /// `execute_with`
     /// drops the statement, so anything that answers through an OUT parameter (DBMS_PROFILER's run
     /// number, DBMS_DEBUG) needs this path: the caller declares those binds with an `OracleType`.
     pub fn execute_block(
@@ -184,7 +185,7 @@ impl Session {
         block: &str,
         binds: &[&dyn oracle::sql_type::ToSql],
         out_positions: &[usize],
-    ) -> Result<Vec<String>, String> {
+    ) -> Result<Vec<Option<String>>, String> {
         self.guard(block).map_err(|error| error.to_string())?;
         let mut statement = self
             .conn
@@ -196,7 +197,8 @@ impl Session {
             .map_err(|error| error.to_string())?;
         let mut values = Vec::with_capacity(out_positions.len());
         for position in out_positions {
-            let value: String = statement
+            // A NULL is a valid answer (DBMS_DEBUG leaves fields unset); `String` would fail on it.
+            let value: Option<String> = statement
                 .bind_value(*position)
                 .map_err(|error| error.to_string())?;
             values.push(value);

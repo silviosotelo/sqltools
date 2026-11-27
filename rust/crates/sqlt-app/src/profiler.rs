@@ -76,6 +76,7 @@ pub fn profile(
     )?;
     let run_id: i64 = started
         .first()
+        .and_then(|value| value.as_deref())
         .and_then(|value| value.trim().parse().ok())
         .ok_or_else(|| "DBMS_PROFILER did not return a run number".to_string())?;
 

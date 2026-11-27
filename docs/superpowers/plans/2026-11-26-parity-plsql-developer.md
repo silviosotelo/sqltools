@@ -409,3 +409,32 @@ Se deja **P6 sin implementar** y se pide la decisión del dueño: invertir los t
 debugger, o sacarlo del alcance y seguir con P7–P10. La sesión de prueba quedó terminada y no hay objetos
 creados (el procedimiento de prueba se borró).
 
+### P6 — en progreso: el protocolo de dos sesiones funciona (2026-11-26)
+
+Prototipo ejecutado contra `anamnesis@desa02` (dos sesiones OCI, `abort_on_timeout` en el objetivo):
+
+```
+debug id: 007CC8190001
+target debug_on: Ok("ok")
+synchronize: [Some("0"), None, Some("0"), Some("2"), None]     # ret=0, line=NULL, terminated=0, reason=2
+set_breakpoint: ret=Some("16") number=None                     # 16 = error_bad_handle
+target run: Ok("ok") after 1.2128463s
+step 0: [Some("0"), None, Some("1"), Some("25"), None]         # ret=0, terminated=1, reason=25
+target finished cleanly
+P6 PROTO OK
+```
+
+Lo que quedó probado:
+- `DBMS_DEBUG.INITIALIZE` (VARCHAR2) y `DEBUG_ON` funcionan; **no hace falta matar la sesión**: con
+  `set_timeout_behaviour(abort_on_timeout)` el objetivo termina limpio.
+- `ATTACH_SESSION` + `SYNCHRONIZE` dejan el objetivo suspendido en el evento de arranque (ret=0, terminated=0).
+- `CONTINUE` desde la sesión debugger corre el programa hasta el final y devuelve `terminated=1`: **el ida y
+  vuelta entre las dos sesiones no se cuelga**.
+- La API real se leyó del diccionario (`all_arguments`) y del texto del paquete (`all_source`):
+  `set_breakpoint(program, line#, breakpoint# OUT)` — mi primer intento omitía `line#`.
+
+Lo que falta para cerrar P6: los **valores numéricos de `breakflags`** (para paso a paso) y por qué
+`set_breakpoint` devuelve `error_bad_handle` (16) sobre un procedimiento propio; después, el módulo
+`debugger.rs` con `start/step/stop/watch`, la UI de paso y variables, y las verificaciones de la compuerta.
+El prototipo se borró; la evidencia queda acá.
+
