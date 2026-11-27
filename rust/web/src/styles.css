@@ -1681,3 +1681,26 @@ kbd {
   border-radius: 3px;
   background: var(--surface);
 }
+
+/* Reports list inside the dialog. */
+.report-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px;
+}
+
+.report-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.report-name em {
+  color: var(--muted);
+  font-style: normal;
+  font-size: 11px;
+}

@@ -16,6 +16,7 @@ import { EnvBadge } from "./components/EnvBadge";
 import { HistoryView } from "./components/HistoryView";
 import { StatsView } from "./components/StatsView";
 import { ToDoView } from "./components/ToDoView";
+import { FilesView } from "./components/FilesView";
 import { useObjectTree } from "./tree/useObjectTree";
 import { ROWID_COLUMN, prepareEditable, queryByExample } from "./grid/editable";
 import { objectId, type TreeGroup } from "./tree/treeModel";
@@ -30,6 +31,8 @@ import type {
   ConstraintInfo,
   DebugPosition,
   Dependency,
+  FileEntry,
+  Report as SavedReport,
   FormatOptions,
   GrantInfo,
   HistoryEntry,
@@ -337,6 +340,12 @@ export default function App() {
   const [debugWatches, setDebugWatches] = useState<
     Array<{ name: string; value: string | null }>
   >([]);
+  const [fileRoots, setFileRoots] = useState<string[]>([]);
+  const [fileDir, setFileDir] = useState("");
+  const [fileEntries, setFileEntries] = useState<FileEntry[]>([]);
+  const [reportsOpen, setReportsOpen] = useState(false);
+  const [reports, setReports] = useState<SavedReport[]>([]);
+  const [reportName, setReportName] = useState("");
   const [helpOpen, setHelpOpen] = useState(false);
   const [showToolbar, setShowToolbar] = useState(true);
   // null = unknown (never queried, or the last query failed).
@@ -861,6 +870,72 @@ export default function App() {
     }
   };
 
+  const openDirectory = async (path: string) => {
+    try {
+      setFileEntries(await api.listDirectory(path));
+      setFileDir(path);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const openFileFromBrowser = async (entry: FileEntry) => {
+    try {
+      const file = await api.readSqlFile(entry.path);
+      openDoc(entry.name, file.text, { path: entry.path, eol: file.eol });
+      setStatus(entry.path);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const addFileLocation = async () => {
+    try {
+      const folder = await api.pickFolder();
+      if (!folder) return;
+      setFileRoots(await api.addFileLocation(folder));
+      await openDirectory(folder);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const openReports = async () => {
+    try {
+      setReports(await api.listReports());
+      setReportsOpen(true);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const runReport = (report: SavedReport) => {
+    setReportsOpen(false);
+    setSql(report.sql);
+    setSubstitution(report.params.length > 0);
+    void run(report.sql);
+  };
+
+  const saveReport = async () => {
+    try {
+      await api.saveReport(reportName, sql);
+      setReportName("");
+      setReports(await api.listReports());
+      setStatus(`${t("reports")}: ${reportName}`);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const removeReport = async (name: string) => {
+    try {
+      await api.deleteReport(name);
+      setReports(await api.listReports());
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
   const formatNanos = (nanos: number) => {
     if (nanos >= 1e9) return `${(nanos / 1e9).toFixed(3)} s`;
     if (nanos >= 1e6) return `${(nanos / 1e6).toFixed(3)} ms`;
@@ -985,6 +1060,11 @@ export default function App() {
     if (sideView !== "todos") return;
     void loadTodos();
   }, [sideView, selected, schema, isConnected]);
+
+  useEffect(() => {
+    if (sideView !== "files" || fileRoots.length > 0) return;
+    void api.listFileLocations().then(setFileRoots).catch(() => setFileRoots([]));
+  }, [sideView, fileRoots.length]);
 
   const loadSuggestions = async (connectionId: string) => {
     try {
@@ -3016,6 +3096,7 @@ export default function App() {
             { id: "cache", label: t("refresh"), onClick: () => void refreshObjectCache(), disabled: !isConnected },
             { id: "profile", label: t("profileStatement"), onClick: () => void profileStatement(), disabled: !isConnected },
             { id: "debug", label: t("debugStatement"), onClick: () => void startDebug(), disabled: !isConnected },
+            { id: "reports", label: t("reportsOpen"), onClick: () => void openReports() },
             { id: "snapshot-save", label: t("saveSnapshot"), onClick: () => void saveSourcesSnapshot(), disabled: !isConnected },
             { id: "snapshot-compare", label: t("compareSnapshot"), onClick: () => void compareWithSnapshot(), disabled: !isConnected },
             ...(updateInfo
@@ -3178,6 +3259,23 @@ export default function App() {
           )}
 
           {sideView === "stats" && <StatsView stats={stats} />}
+
+          {sideView === "files" && (
+            <FilesView
+              roots={fileRoots}
+              dir={fileDir}
+              entries={fileEntries}
+              onRoot={(path) => void openDirectory(path)}
+              onUp={() =>
+                void openDirectory(
+                  fileDir.replace(/[\\/][^\\/]+$/, "") || fileDir,
+                )
+              }
+              onEnter={(path) => void openDirectory(path)}
+              onOpen={(entry) => void openFileFromBrowser(entry)}
+              onAddLocation={() => void addFileLocation()}
+            />
+          )}
 
           {sideView === "todos" && (
             <ToDoView items={todos} onOpen={(item) => void openTodo(item)} />
@@ -3377,6 +3475,52 @@ export default function App() {
                 {t("copyValue")}
               </button>
               <button onClick={() => setCellView(null)}>{t("close")}</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {reportsOpen && (
+        <div className="palette-backdrop" onClick={() => setReportsOpen(false)}>
+          <div
+            className="palette"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("reports")}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="panel-title">{t("reports")}</div>
+            <div className="palette-list">
+              {reports.length === 0 && <p className="side-empty">{t("reportsEmpty")}</p>}
+              {reports.map((report) => (
+                <div key={report.name} className="report-row">
+                  <span className="report-name">
+                    {report.name}
+                    {report.params.length > 0 && (
+                      <em>
+                        {" "}
+                        · {report.params.length} {t("reportParams")}
+                      </em>
+                    )}
+                  </span>
+                  <button className="plain" onClick={() => runReport(report)}>
+                    {t("reportsRun")}
+                  </button>
+                  <button className="plain" onClick={() => void removeReport(report.name)}>
+                    {t("delete")}
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="row">
+              <input
+                value={reportName}
+                placeholder={t("reportName")}
+                aria-label={t("reportName")}
+                onChange={(event) => setReportName(event.target.value)}
+              />
+              <button className="plain" onClick={() => void saveReport()} disabled={!reportName.trim()}>
+                {t("reportSave")}
+              </button>
             </div>
           </div>
         </div>

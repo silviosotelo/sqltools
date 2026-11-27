@@ -4,7 +4,8 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use sqlt_app::{
-    browser, catalog, compare, debugger, grid, profiler, AppState, ConnectionConfig, HistoryEntry,
+    browser, catalog, compare, debugger, grid, profiler, reports, AppState, ConnectionConfig,
+    HistoryEntry,
 };
 use sqlt_core::{Batch, ColumnMeta};
 use tauri::ipc::Channel;
@@ -632,6 +633,56 @@ fn debug_stop(state: State<'_, Arc<AppState>>, connection_id: String) -> Result<
 }
 
 #[tauri::command]
+fn list_reports() -> Result<Vec<reports::Report>, String> {
+    reports::list(&reports::reports_dir())
+}
+
+#[tauri::command]
+fn save_report(name: String, sql: String) -> Result<(), String> {
+    reports::save(&reports::reports_dir(), &name, &sql)
+}
+
+#[tauri::command]
+fn delete_report(name: String) -> Result<(), String> {
+    reports::remove(&reports::reports_dir(), &name)
+}
+
+#[tauri::command]
+fn list_file_locations() -> Vec<String> {
+    reports::locations()
+}
+
+#[tauri::command]
+fn add_file_location(path: String) -> Result<Vec<String>, String> {
+    let mut list = reports::locations();
+    if !list.iter().any(|known| known.eq_ignore_ascii_case(&path)) {
+        list.push(path);
+    }
+    reports::save_locations(&list)?;
+    Ok(list)
+}
+
+#[tauri::command]
+fn list_directory(path: String) -> Result<Vec<reports::FileEntry>, String> {
+    reports::list_dir(std::path::Path::new(&path))
+}
+
+/// Folder picker for the file browser's locations.
+#[tauri::command]
+async fn pick_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (sender, mut receiver) = tauri::async_runtime::channel(1);
+    app.dialog().file().pick_folder(move |path| {
+        let _ = sender.try_send(path);
+    });
+    let chosen = receiver
+        .recv()
+        .await
+        .ok_or_else(|| "The dialog was closed".to_string())?;
+    Ok(chosen.and_then(dialog_path))
+}
+
+#[tauri::command]
 fn history(state: State<'_, Arc<AppState>>) -> Vec<HistoryEntry> {
     state.history()
 }
@@ -1256,6 +1307,13 @@ fn main() {
             debug_watch,
             debug_breakpoint,
             debug_stop,
+            list_reports,
+            save_report,
+            delete_report,
+            list_file_locations,
+            add_file_location,
+            list_directory,
+            pick_folder,
             count_objects,
             list_columns,
             load_ddl,

@@ -230,3 +230,7 @@ export type DebugPosition = {
   terminated: boolean;
   status: number;
 };
+
+export type Report = { name: string; sql: string; params: string[] };
+
+export type FileEntry = { name: string; path: string; isDir: boolean; size: number };

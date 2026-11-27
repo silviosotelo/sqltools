@@ -12,6 +12,8 @@ import type {
   CompileError,
   CompareResult,
   DebugPosition,
+  FileEntry,
+  Report,
   Dependency,
   ObjectCount,
   ObjectInfo,
@@ -164,6 +166,13 @@ export const api = {
       schema,
       objectType,
     }),
+  listReports: () => invoke<Report[]>("list_reports"),
+  saveReport: (name: string, sql: string) => invoke<void>("save_report", { name, sql }),
+  deleteReport: (name: string) => invoke<void>("delete_report", { name }),
+  listFileLocations: () => invoke<string[]>("list_file_locations"),
+  addFileLocation: (path: string) => invoke<string[]>("add_file_location", { path }),
+  listDirectory: (path: string) => invoke<FileEntry[]>("list_directory", { path }),
+  pickFolder: () => invoke<string | null>("pick_folder"),
   debugStart: (connectionId: string, sql: string) =>
     invoke<DebugPosition>("debug_start", { connectionId, sql }),
   debugStep: (connectionId: string, mode: "over" | "into" | "out") =>

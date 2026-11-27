@@ -490,3 +490,36 @@ la sesión que la compila; la app lo activa al iniciar la depuración, no recomp
 breakpoints (el comando existe y lo usa la prueba); una sesión de depuración por vez; el timeout es de 15 s y
 al detener se cierra la sesión objetivo.
 
+### P7 — cerrada (2026-11-27)
+
+**Qué cambió:** `crates/sqlt-app/src/reports.rs` (nuevo) con dos cosas:
+
+- **Informes**: archivos `.sql` en `<config>/reports`, con los parámetros `&nombre`/`&&nombre` que el
+  ejecutor ya sustituye (`parameters` los extrae en orden, sin repetir e ignorando literales). Guardar, listar
+  (ordenado) y borrar, con nombres saneados (sin separadores ni `..`). **4 tests.**
+- **Explorador de archivos**: `list_dir` (carpetas primero, ocultos fuera, tamaño incluido) y las ubicaciones
+  del usuario en `locations.json`, con `Documentos` y el perfil como valores por defecto.
+
+Comandos: `list_reports`, `save_report`, `delete_report`, `list_file_locations`, `add_file_location`,
+`list_directory`, `pick_folder`. UI: sexta vista lateral **Archivos** (ubicaciones + navegación + abrir `.sql`
+en el editor, botón agregar carpeta) y diálogo **Informes…** en el menú (ejecutar, eliminar, guardar el editor
+con un nombre y el conteo de parámetros). El diálogo se marcó `role="dialog"` con etiqueta porque `axe` lo
+reportaba fuera de todo landmark.
+
+**Evidencia en la app instalada** (27/11, firmada autofirmada):
+
+| Comando | Resultado |
+|---|---|
+| `node e2e/phase-p7.mjs` | `P7 CHECKS OK (9)`: la barra tiene Archivos; lista las ubicaciones y el contenido de una carpeta (carpetas primero); el menú abre Informes; guardar el editor crea `sqlt_p7_e2e` y aparece en la lista; **Ejecutar** corre su SQL (`1 fila · 4 ms`); un informe con `&n` muestra `· 1 parámetro(s)`; borrar deja la lista vacía |
+| `axe-cdp.mjs` | **0 violaciones, 11 vistas × 2 temas** (incluye Archivos e Informes) |
+| `phase-p1` … `phase-p6` | 15 / 11 / 4 / 5 / 3 / 6 |
+| `phase-f1` / `phase-f2` / `phase-f5` / `tree` / `env` / `keyboard-walk` | 19 / 3 / 39 / 11 / 12 / 29 paradas |
+| `commands-check` / `flow` | mismo digest / IDENTICAL |
+| capturas 1366×768, 1024×700 y 1024×640, claro y oscuro | `docs/screenshots/parity-p7-files-*.png` (66 entradas, sin desbordes) y `parity-p7-reports-*.png` |
+| `cargo fmt` / `clippy -D warnings` / `check -p sqlt-desktop` / `test` | 0 / 0 / 0 / 0 (19 ok; +4 tests de informes) |
+| `npm run build` / `npm test` | 0 / **98 passed** |
+
+**Límites declarados:** un informe con parámetros abre el diálogo de sustitución por `window.prompt`, que CDP
+no puede manejar, así que la prueba verifica el conteo de parámetros y ejecuta uno sin parámetros; no hay
+exportación de informes a PDF/HTML ni vista de informe paginada.
+

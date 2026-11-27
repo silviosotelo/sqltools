@@ -79,6 +79,24 @@ const VIEWS = {
     },
     expect: `document.querySelectorAll('.objects-panel .history-row').length > 0`,
   },
+  files: {
+    steps: async (cdp) => {
+      await cdp.click('.activity .act[aria-label="Archivos"]');
+      await cdp.waitFor(`document.querySelectorAll('.objects-panel .conn-item').length > 0`, 15000);
+      await cdp.evaluate(`document.querySelector('.objects-panel .conn-item')?.click()`);
+      await cdp.wait(800);
+    },
+    expect: `document.querySelectorAll('.objects-panel .conn-item').length > 0`,
+  },
+  reports: {
+    steps: async (cdp) => {
+      await cdp.click('.actionstrip button[aria-label="Más acciones"]');
+      await cdp.wait(300);
+      await cdp.evaluate(`Array.from(document.querySelectorAll('[role=menuitem]')).find(b => b.innerText.trim() === 'Informes…')?.click()`);
+      await cdp.waitFor(`Boolean(document.querySelector('.palette input[aria-label="Nombre del informe"]'))`, 8000);
+    },
+    expect: `Boolean(document.querySelector('.palette input[aria-label="Nombre del informe"]'))`,
+  },
   menu: {
     steps: async (cdp) => {
       await cdp.click('.actionstrip button[aria-label="Más acciones"]');
