@@ -74,7 +74,11 @@ pub fn save(dir: &Path, project: &Project) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
     let path = dir.join(project_file_name(&project.name)?);
     let json = serde_json::to_string_pretty(project).map_err(|error| error.to_string())?;
-    std::fs::write(path, json).map_err(|error| error.to_string())
+    // A crash half-way through a direct write would truncate a project the user already had: write a
+    // sibling first and replace the file in one step.
+    let temp = path.with_extension("json.tmp");
+    std::fs::write(&temp, json).map_err(|error| error.to_string())?;
+    std::fs::rename(&temp, &path).map_err(|error| error.to_string())
 }
 
 pub fn load(dir: &Path, name: &str) -> Result<Project, String> {

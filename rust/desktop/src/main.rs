@@ -365,6 +365,23 @@ fn list_invalid_objects(
     )
 }
 
+/// The owner the catalogue actually read: with no schema selected the queries use `USER_*`, whose owner is
+/// the login user. Qualifying the DDL with it keeps an `ALTER SESSION SET CURRENT_SCHEMA` from pointing the
+/// statement at a homonym.
+fn catalog_owner(
+    session: &sqlt_oracle::Session,
+    schema: Option<String>,
+    options: sqlt_oracle::QueryOptions,
+) -> Result<Option<String>, String> {
+    if let Some(schema) = schema
+        .map(|schema| schema.trim().to_string())
+        .filter(|schema| !schema.is_empty())
+    {
+        return Ok(Some(schema));
+    }
+    Ok(Some(browser::session_user(session, options)?))
+}
+
 #[tauri::command]
 fn compile_object(
     state: State<'_, Arc<AppState>>,
@@ -374,7 +391,8 @@ fn compile_object(
     object_type: String,
 ) -> Result<(), String> {
     let session = state.session(&connection_id)?;
-    browser::compile_object(&session, schema.as_deref(), &name, &object_type)
+    let owner = catalog_owner(&session, schema, state.query_options(&connection_id))?;
+    browser::compile_object(&session, owner.as_deref(), &name, &object_type)
 }
 
 /// Compiles every invalid unit and returns `[attempted, still_invalid]`.
@@ -385,9 +403,10 @@ fn compile_invalid_objects(
     schema: Option<String>,
 ) -> Result<Vec<usize>, String> {
     let session = state.session(&connection_id)?;
+    let owner = catalog_owner(&session, schema, state.query_options(&connection_id))?;
     browser::compile_invalid_objects(
         &session,
-        schema.as_deref(),
+        owner.as_deref(),
         state.query_options(&connection_id),
     )
     .map(|(attempted, remaining)| vec![attempted, remaining])
@@ -420,7 +439,8 @@ fn toggle_trigger(
     enabled: bool,
 ) -> Result<(), String> {
     let session = state.session(&connection_id)?;
-    browser::set_trigger_enabled(&session, schema.as_deref(), &name, enabled)
+    let owner = catalog_owner(&session, schema, state.query_options(&connection_id))?;
+    browser::set_trigger_enabled(&session, owner.as_deref(), &name, enabled)
 }
 
 #[tauri::command]
@@ -433,7 +453,8 @@ fn toggle_constraint(
     enabled: bool,
 ) -> Result<(), String> {
     let session = state.session(&connection_id)?;
-    browser::set_constraint_enabled(&session, schema.as_deref(), &table, &name, enabled)
+    let owner = catalog_owner(&session, schema, state.query_options(&connection_id))?;
+    browser::set_constraint_enabled(&session, owner.as_deref(), &table, &name, enabled)
 }
 
 #[tauri::command]
@@ -520,18 +541,25 @@ fn compare_with_snapshot(
         state.query_options(&connection_id),
     )?;
     let entries = compare::compare_snapshot(&wanted, &current);
-    let script = compare::apply_script(&wanted, &entries);
+    let script = compare::apply_script(&wanted, &entries, schema.as_deref());
     Ok(compare::CompareResult { entries, script })
 }
 
 #[tauri::command]
-fn profile_sql(
+async fn profile_sql(
     state: State<'_, Arc<AppState>>,
     connection_id: String,
     sql: String,
 ) -> Result<profiler::ProfileResult, String> {
-    let session = state.session(&connection_id)?;
-    profiler::profile(&session, &sql, 200, state.query_options(&connection_id))
+    // The cycle waits for the execution lock and runs the statement: never on the Tauri main thread, or
+    // Cancelar cannot even be dispatched.
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let session = state.session(&connection_id)?;
+        profiler::profile(&session, &sql, 200, state.query_options(&connection_id))
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// Starts debugging `sql` on a second connection. The statement usually calls the unit under test.
@@ -556,7 +584,8 @@ async fn debug_start(
             .lock()
             .map_err(|_| "Debugger lock poisoned".to_string())?;
         if let Some(previous) = slot.take() {
-            previous.stop();
+            // Same reason as `debug_stop`: the close can wait for the target's own timeout.
+            tauri::async_runtime::spawn_blocking(move || previous.stop());
         }
         let debugger = debugger::Debugger::start(&session, &spec, sql, 15)?;
         let position = debugger.position.clone();
@@ -583,10 +612,19 @@ async fn debug_step(
             .debug
             .lock()
             .map_err(|_| "Debugger lock poisoned".to_string())?;
-        let active = slot
-            .as_mut()
-            .ok_or_else(|| "There is no debug session".to_string())?;
-        active.step(step)
+        let result = {
+            let active = slot
+                .as_mut()
+                .ok_or_else(|| "There is no debug session".to_string())?;
+            active.step(step)
+        };
+        if result.is_err() {
+            // The target is unusable after a failed `continue`: detach and close it now.
+            if let Some(debugger) = slot.take() {
+                debugger.stop();
+            }
+        }
+        result
     })
     .await
     .map_err(|error| error.to_string())?
@@ -638,18 +676,19 @@ async fn debug_breakpoint(
 #[tauri::command]
 async fn debug_stop(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let active = {
         let mut slot = state
             .debug
             .lock()
             .map_err(|_| "Debugger lock poisoned".to_string())?;
-        if let Some(active) = slot.take() {
-            active.stop();
-        }
-        Ok(())
-    })
-    .await
-    .map_err(|error| error.to_string())?
+        slot.take()
+    };
+    if let Some(active) = active {
+        // Closing the target waits for the suspended OCI call to return (about 15 s against Oracle).
+        // The session is already out of the slot, so the UI can clear the debug strip now.
+        tauri::async_runtime::spawn_blocking(move || active.stop());
+    }
+    Ok(())
 }
 
 /// True when the table accepts a ROWID: the grid only rewrites the query when it does.
@@ -753,17 +792,22 @@ fn delete_project(name: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn list_scheduler_jobs(
+async fn list_scheduler_jobs(
     state: State<'_, Arc<AppState>>,
     connection_id: String,
     schema: Option<String>,
 ) -> Result<Vec<scheduler::SchedulerJob>, String> {
-    let session = state.session(&connection_id)?;
-    scheduler::list_jobs(
-        &session,
-        schema.as_deref(),
-        state.query_options(&connection_id),
-    )
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let session = state.session(&connection_id)?;
+        scheduler::list_jobs(
+            &session,
+            schema.as_deref(),
+            state.query_options(&connection_id),
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -779,20 +823,27 @@ fn ai_set_config(config: ai::AiConfig) -> Result<(), String> {
 /// Whether a key is stored. The key itself never travels to the UI.
 #[tauri::command]
 fn ai_has_key() -> Result<bool, String> {
-    Ok(ai::stored_key()?.is_some())
+    let config = ai::load_config(&ai::config_file());
+    Ok(ai::stored_key_for(&config)?.is_some())
 }
 
 #[tauri::command]
 fn ai_set_key(key: Option<String>) -> Result<(), String> {
-    ai::set_key(key.as_deref())
+    let config = ai::load_config(&ai::config_file());
+    ai::set_key(key.as_deref(), &config.base_url)
 }
 
 #[tauri::command]
-fn ai_run(function: String, code: String) -> Result<String, String> {
-    let config = ai::load_config(&ai::config_file());
-    let key = ai::stored_key()?
-        .ok_or_else(|| "No API key: set one in the assistant settings".to_string())?;
-    ai::run(&config, &key, &function, &code)
+async fn ai_run(function: String, code: String) -> Result<String, String> {
+    // DNS and the request itself can take the whole timeout: keep them off the webview thread.
+    tauri::async_runtime::spawn_blocking(move || {
+        let config = ai::load_config(&ai::config_file());
+        let key = ai::stored_key_for(&config)?
+            .ok_or_else(|| "No API key: set one in the assistant settings".to_string())?;
+        ai::run(&config, &key, &function, &code)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -1078,6 +1129,24 @@ fn write_sql_file(path: String, text: String, eol: String) -> Result<(), String>
 
 fn dialog_path(path: tauri_plugin_dialog::FilePath) -> Option<String> {
     path.into_path().ok().map(|path| path.display().to_string())
+}
+
+/// A saved snapshot is JSON, not SQL: its own filter, because the SQL picker hides it.
+#[tauri::command]
+async fn pick_json_file(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (sender, mut receiver) = tauri::async_runtime::channel(1);
+    app.dialog()
+        .file()
+        .add_filter("JSON snapshot", &["json"])
+        .pick_file(move |path| {
+            let _ = sender.try_send(path);
+        });
+    let chosen = receiver
+        .recv()
+        .await
+        .ok_or_else(|| "File dialog closed unexpectedly".to_string())?;
+    Ok(chosen.and_then(dialog_path))
 }
 
 #[tauri::command]
@@ -1459,6 +1528,7 @@ fn main() {
             read_sql_file,
             write_sql_file,
             pick_sql_file,
+            pick_json_file,
             pick_sql_save_path,
             save_workspace,
             save_workspace_to,

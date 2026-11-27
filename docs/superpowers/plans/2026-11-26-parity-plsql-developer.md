@@ -726,3 +726,51 @@ Mitigación aplicada: al terminar P10 se corrió **una revisión de `codex` sobr
 "Ronda de revisión externa"). Es una cobertura equivalente sobre el conjunto, no la consulta por fase que el
 goal pedía: queda como **desviación conocida**, no como cumplimiento.
 
+### Revisión por fase (codex `gpt-6.2-sol`, 2026-11-27) y correcciones
+
+El goal pide una consulta al `advisor` o a `codex` **por fase**. Las de P1–P9 no se hicieron en su momento
+(cuota agotada, declarado arriba). Para cerrar esa brecha se corrieron **tres revisiones de solo lectura sobre
+la rama `rust` en `aefc3e2`**, cada una con una sección y un veredicto por fase: P1–P4 (225 s), P5–P7 (165 s) y
+P8–P10 (167 s). No son las consultas *previas* a cada cierre —eso no se puede recuperar— sino una revisión
+independiente por fase sobre el código final. Todos los bloqueos se verificaron contra el código y se
+corrigieron; los menores que quedaron se listan al final.
+
+| Fase | Hallazgos del revisor | Corrección aplicada |
+|---|---|---|
+| **P1** | `ALTER VIEW … COMPILE REUSE SETTINGS` no es sintaxis Oracle; el DDL sin dueño apunta al `CURRENT_SCHEMA`; `ddl_ident` recortaba los espacios de un nombre citado | `alter view <v> compile`; el dueño se lee del **servidor** (`select user from dual`, con su caso exacto: `"anamnesis"` daba ORA-01435) y califica compilar y alternar trigger/constraint; `ddl_ident` ya no recorta |
+| **P2** | al reconstruir la cola por tokens se colapsaban los espacios dentro de literales y se perdía el salto que cierra un `--`; el UPDATE compara DATE/TIMESTAMP como texto; el `ORDER BY` de QBE quedaba fuera de la subconsulta | la cola se toma por offsets (byte por byte); las celdas de tipos que no son texto/número quedan de solo lectura (`typeNotEditable`); el `ORDER BY` va dentro de la vista en línea |
+| **P3** | el tope de 100 se aplicaba antes de filtrar por lo tipeado; `alias.pre` caía al listado general | se filtra por prefijo antes del tope y `alias.pre` resuelve las columnas de esa tabla |
+| **P4** | el script emitía `PACKAGE BODY` antes que `PACKAGE`; el DDL no llevaba el esquema; el diálogo ocultaba el `.json` que la app guarda | orden por rango (especificación → cuerpo); el dueño comparado se inserta en la cabecera del unit; comando `pick_json_file` para comparar; los marcadores `todo`/`fixme` en minúscula también se encuentran |
+| **P5** | `profile_sql` corría en el hilo principal de Tauri; un fallo al leer el OUT dejaba el profiler encendido; el mensaje mandaba a `profload.sql` | `async` + `spawn_blocking`; el lock se toma **antes** de consultar el diccionario y se comprueba `is_closed()`; `STOP_PROFILER` también cuando falla el arranque; el mensaje pide `proftab.sql` (y avisa que recrea las tablas) |
+| **P6** | detener podía dejar el objetivo corriendo; `SET_TIMEOUT` se llamaba como procedimiento y su error se descartaba; los códigos de `SYNCHRONIZE`/`CONTINUE` no se validaban | `shutdown` cierra el objetivo (una sola ruta para `stop` y para los fallos de `attach`/`synchronize`); `SET_TIMEOUT` se llama como función y su excepción se propaga; los códigos se validan; `debug_step` limpia la sesión cuando falla |
+| **P7** | un apóstrofo en un comentario ocultaba un `&param`; reabrir un archivo pisaba ediciones sin guardar; el import perdía la fila `,,` y aceptaba comillas sin cerrar | el escaneo de parámetros salta `--` y `/* */`; reabrir activa la pestaña existente; el parser conserva las filas de campos vacíos y rechaza el fin de archivo dentro de comillas |
+| **P8** | `confirmDiscard` miraba solo la pestaña activa; las notas no se restauraban; guardar truncaba el JSON; la consola ignoraba el evento `error` | `confirmDiscardAll` para abrir un proyecto; se restauran nombre y notas; guardado atómico (temporal + rename); `error` se registra en la consola |
+| **P9** | `CREATE TABLE` aceptaba tipos inexistentes y `DEFAULT` sin control; la secuencia convertía 0 en 1 y truncaba decimales; el scheduler mostraba datos del contexto anterior y corría en el hilo principal | lista blanca de tipos con tamaño y validación de la expresión por defecto; enteros obligatorios y límites de `NOMAXVALUE`; el scheduler descarta respuestas viejas, limpia al fallar y la consulta va a `spawn_blocking` |
+| **P10** | la comprobación de HTTP podía leer un host distinto del real y no cubría redirecciones; la clave era global y se reutilizaba al cambiar de proveedor; la red corría en el hilo principal | `origin()` quita el *userinfo* (`http://localhost@evil.com` no es loopback), el agente no sigue redirecciones, la clave se guarda con el origen y solo se usa en él, `ai_run` es `async` |
+
+**Dos regresiones que aparecieron al aplicar los arreglos, y su causa real:**
+
+1. `phase-p1` falló con **ORA-01435** al calificar el DDL: el usuario configurado (`anamnesis`) no es el
+   dueño (`ANAMNESIS`) y las comillas conservan el caso. Ahora el dueño lo responde la sesión
+   (`select user from dual`) y se pasa tal cual.
+2. `phase-p6` falló en «detener quita la barra»: medido contra Oracle, `DETACH_SESSION` espera a que el
+   objetivo llegue a un evento (~13 s) y `OCIClose`/`OCIBreak` desde otro hilo espera la llamada suspendida
+   (~15 s). Por eso `debug_stop` saca la sesión del slot, **responde en 4 ms** y deja el cierre en segundo
+   plano; `shutdown` ya no llama `detach_session` (cerrar la conexión termina la sesión de depuración).
+
+**Menores que quedan declarados, no corregidos:** P1 no muestra `REFERENCED_LINK_NAME` en las dependencias
+(una referencia remota se ve como local); P3 no distingue un `;` dentro de un literal al cortar la sentencia
+ni resuelve un alias repetido en una subconsulta; P8 no guarda la identidad del objeto de cada buffer, así que
+un proyecto reabre los textos pero no sus pestañas de objeto.
+
+**Evidencia tras esta ronda** (app instalada 27/11 03:2x, firmada autofirmada):
+
+| Comando | Resultado |
+|---|---|
+| `phase-p1` … `phase-p10` | 15 / 11 / 4 / 5 / 3 / **10** / 13 / 5 / 6 / 9 |
+| `axe-cdp.mjs` | 0 violaciones, 16 vistas × 2 temas |
+| `phase-f1` / `phase-f5` / `keyboard-walk` | 19 / 39 / 30 paradas |
+| `commands-check` / `flow` | mismo digest / IDENTICAL |
+| `cargo fmt` / `clippy -D warnings` / `check -p sqlt-desktop` / `test` | 0 / 0 / 0 / 0 (**19 grupos**, 74+ tests en la lib) |
+| `npm run build` / `npm test` | 0 / **104 passed** |
+

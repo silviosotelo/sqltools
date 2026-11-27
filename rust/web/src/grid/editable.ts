@@ -78,9 +78,12 @@ export function prepareEditable(sql: string): EditableQuery | null {
   if (/\bdistinct\b/i.test(list)) return null;
   if (FORBIDDEN.some((pattern) => pattern.test(rest))) return null;
 
-  const [tableToken, ...afterTable] = rest.split(/\s+/);
+  // The tail is taken by offset, not rebuilt from tokens: splitting on whitespace would collapse spaces
+  // inside a string literal and drop the newline that ends a `--` comment.
+  const separator = rest.search(/\s/);
+  const tableToken = separator < 0 ? rest : rest.slice(0, separator);
   if (!TOKEN.test(tableToken) && !QUALIFIED.test(tableToken)) return null;
-  const tail = afterTable.join(" ");
+  const tail = separator < 0 ? "" : rest.slice(separator).trimStart();
   // After the table only `where ...` or `order by ...` (or nothing): an alias, a second table or a hint
   // would change what the ROWID refers to.
   if (tail !== "" && !/^where\b/i.test(tail) && !/^order\s+by\b/i.test(tail)) return null;
@@ -99,6 +102,8 @@ export function queryByExample(sql: string, condition: string): string {
   const inner = (orderBy < 0 ? body : body.slice(0, orderBy)).trim();
   const order = orderBy < 0 ? "" : body.slice(orderBy).trim();
   const where = condition.trim();
-  const wrapped = where ? `select * from (${inner}) where ${where}` : inner;
-  return order ? `${wrapped} ${order}` : wrapped;
+  if (!where) return body;
+  // The ORDER BY stays inside the inline view: an alias declared in the query is out of scope outside it.
+  const view = order ? `${inner} ${order}` : inner;
+  return `select * from (${view}) where ${where}`;
 }

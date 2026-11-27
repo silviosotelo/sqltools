@@ -238,6 +238,7 @@ export const api = {
     invoke<StatEntry[]>("session_stats", { connectionId }),
   listCommands: () => invoke<CommandSpec[]>("list_commands"),
   pickSqlFile: () => invoke<string | null>("pick_sql_file"),
+  pickJsonFile: () => invoke<string | null>("pick_json_file"),
   pickSqlSavePath: (suggested: string | null) =>
     invoke<string | null>("pick_sql_save_path", { suggested }),
   statementRanges: (sql: string) =>

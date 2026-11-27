@@ -65,7 +65,11 @@ pub fn parse_rows(text: &str) -> Result<Vec<Vec<String>>, String> {
         row.push(field);
         rows.push(row);
     }
-    rows.retain(|row| row.iter().any(|field| !field.trim().is_empty()));
+    if quoted {
+        return Err("The file ends inside a quoted field".to_string());
+    }
+    // A blank line is not a row, but `,,` is: a record whose fields are all empty still has columns.
+    rows.retain(|row| row.len() > 1 || row.iter().any(|field| !field.trim().is_empty()));
     if rows.is_empty() {
         return Err("The file has no rows".to_string());
     }
@@ -239,5 +243,24 @@ mod tests {
         let script = insert_script("T", text, true, 2).unwrap();
         assert_eq!(script.matches("insert into").count(), 2, "{script}");
         assert!(script.contains("1 more rows"), "{script}");
+    }
+
+    #[test]
+    fn an_unterminated_quote_is_refused() {
+        assert!(parse_rows("\"a,b\n1,2\n")
+            .unwrap_err()
+            .contains("quoted field"));
+    }
+
+    #[test]
+    fn a_row_of_empty_fields_is_kept() {
+        let rows = parse_rows("a,b,c\n,,\n1,2,3\n").unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(
+            rows[1],
+            vec!["".to_string(), "".to_string(), "".to_string()]
+        );
+        let script = insert_script("T", "a,b,c\n,,\n", true, 10).unwrap();
+        assert!(script.contains("values (NULL, NULL, NULL);"), "{script}");
     }
 }

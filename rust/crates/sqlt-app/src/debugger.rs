@@ -98,6 +98,20 @@ pub struct Debugger {
     pub position: DebugPosition,
 }
 
+/// Ends a debug session from any path. Detaching is not enough: Oracle keeps the target running and the
+/// worker thread holds its own `Arc`, so the connection is only released when it is closed.
+fn shutdown(target: &Session, finished: &AtomicBool) {
+    // Closing the target is what ends the debug session: an OCI logoff terminates the target's database
+    // session, and the server drops its `DBMS_DEBUG` session with it. Calling `detach_session` here instead
+    // waits for the target to reach a debug event and costs ~13 s (measured against Oracle), which is
+    // exactly the wait this function exists to avoid. The next `attach_session` works without it.
+    target.close();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while !finished.load(Ordering::Relaxed) && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
 fn number(value: Option<String>) -> i32 {
     value
         .and_then(|text| text.trim().parse().ok())
@@ -173,33 +187,50 @@ impl Debugger {
             });
         }
 
-        debugger
-            .execute_block(
-                "begin dbms_debug.attach_session(:1); end;",
-                &[&id as &dyn ToSql],
-                &[],
-            )
-            .map_err(|error| error.to_string())?;
-        debugger
-            .execute_with(
-                &format!("begin dbms_debug.set_timeout({timeout_secs}); end;"),
-                &[],
-            )
-            .ok();
-        let values = debugger
-            .execute_block(
-                SYNCHRONIZE,
-                &[
-                    &OracleType::Number(0, 0),
-                    &OracleType::Varchar2(128),
-                    &OracleType::Number(0, 0),
-                    &OracleType::Number(0, 0),
-                    &OracleType::Number(0, 0),
-                ],
-                &[1, 2, 3, 4, 5],
-            )
-            .map_err(|error| error.to_string())?;
+        if let Err(error) = debugger.execute_block(
+            "begin dbms_debug.attach_session(:1); end;",
+            &[&id as &dyn ToSql],
+            &[],
+        ) {
+            // The target is already running: an early return here would leave it suspended forever.
+            shutdown(&target, &finished);
+            return Err(error.to_string());
+        }
+        // `set_timeout` is a function, but it returns the *previous* timeout, not a status: only its
+        // exception matters (verified against Oracle: it answers 15 when the timeout is 15).
+        if let Err(error) = debugger.execute_block(
+            "begin :1 := dbms_debug.set_timeout(:2); end;",
+            &[&OracleType::Number(0, 0), &timeout_secs as &dyn ToSql],
+            &[1],
+        ) {
+            shutdown(&target, &finished);
+            return Err(error.to_string());
+        }
+        let values = match debugger.execute_block(
+            SYNCHRONIZE,
+            &[
+                &OracleType::Number(0, 0),
+                &OracleType::Varchar2(128),
+                &OracleType::Number(0, 0),
+                &OracleType::Number(0, 0),
+                &OracleType::Number(0, 0),
+            ],
+            &[1, 2, 3, 4, 5],
+        ) {
+            Ok(values) => values,
+            Err(error) => {
+                shutdown(&target, &finished);
+                return Err(error.to_string());
+            }
+        };
         let position = position(&values, 0);
+        if position.status != 0 {
+            shutdown(&target, &finished);
+            return Err(format!(
+                "DBMS_DEBUG.SYNCHRONIZE returned {} ({})",
+                position.status, position.reason_name
+            ));
+        }
         Ok(Debugger {
             target,
             supervisor: Arc::clone(debugger),
@@ -227,6 +258,13 @@ impl Debugger {
             )
             .map_err(|error| error.to_string())?;
         self.position = position(&values, 0);
+        // A failed `continue` (a timeout, say) used to look like a normal stop: report it instead.
+        if self.position.status != 0 && self.position.reason == 0 {
+            return Err(format!(
+                "DBMS_DEBUG.CONTINUE returned {}",
+                self.position.status
+            ));
+        }
         Ok(self.position.clone())
     }
 
@@ -288,17 +326,10 @@ impl Debugger {
         self.finished.load(Ordering::Relaxed)
     }
 
-    /// Detaches and drops the target connection, which also releases the thread if it is still suspended.
+    /// Detaches, interrupts the target and waits for the worker thread. Dropping the `Arc` alone does not
+    /// end it: the thread keeps another clone while it is suspended.
     pub fn stop(self) {
-        let _ = self
-            .supervisor
-            .execute_with("begin dbms_debug.detach_session; end;", &[]);
-        // The target thread may be suspended in the debug loop: give it a moment to end, then close the
-        // connection, which releases the thread and the database session either way.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-        while !self.finished.load(Ordering::Relaxed) && std::time::Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
+        shutdown(&self.target, &self.finished);
         drop(self.target);
     }
 }

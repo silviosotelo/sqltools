@@ -914,6 +914,13 @@ export default function App() {
   };
 
   const openFileFromBrowser = async (entry: FileEntry) => {
+    // Reopening must not replace unsaved edits: activate the tab, and reload only after closing it.
+    const existing = docs.find((doc) => doc.path === entry.path);
+    if (existing) {
+      setActiveDocId(existing.id);
+      setStatus(entry.path);
+      return;
+    }
     try {
       const file = await api.readSqlFile(entry.path);
       openDoc(entry.name, file.text, { path: entry.path, eol: file.eol });
@@ -1005,13 +1012,17 @@ export default function App() {
   };
 
   const openProject = async (name: string) => {
-    if (!confirmDiscard()) return;
+    if (!confirmDiscardAll()) return;
     try {
       const project = await api.loadProject(name);
       const fresh = project.files.map((file) => makeDoc(file.title || "SQL", file.sql));
-      setDocs(fresh.length ? fresh : [makeDoc("SQL", "")]);
-      setActiveDocId((fresh.length ? fresh : [makeDoc("SQL", "")])[0].id);
+      const opened = fresh.length ? fresh : [makeDoc("SQL", "")];
+      setDocs(opened);
+      setActiveDocId(opened[0].id);
       setSchema(project.schema ?? "");
+      // The notes are part of the project: losing them on reopen made them pointless.
+      setProjectName(project.name);
+      setProjectNotes(project.notes ?? "");
       setProjectsOpen(false);
       setStatus(`${t("projects")}: ${project.name}`);
     } catch (error) {
@@ -1056,6 +1067,9 @@ export default function App() {
           setCommandLog((entries) => [...entries, `ERROR: ${event.data.message}`]);
         } else if (event.type === "output") {
           setCommandLog((entries) => [...entries, ...event.data]);
+        } else if (event.type === "error") {
+          // The runner reports a failed statement here, not only in `statementerror`.
+          setCommandLog((entries) => [...entries, `ERROR: ${event.data}`]);
         }
       });
     } catch (error) {
@@ -1063,15 +1077,22 @@ export default function App() {
     }
   };
 
+  const schedulerRequest = useRef(0);
   const loadScheduler = async () => {
+    const request = ++schedulerRequest.current;
     if (!isConnected) {
       setSchedulerJobs([]);
       return;
     }
     try {
-      setSchedulerJobs(await api.listSchedulerJobs(selected, schema.trim() || null));
+      const jobs = await api.listSchedulerJobs(selected, schema.trim() || null);
+      // A reply for a connection or schema the user already left must not overwrite the panel.
+      if (request === schedulerRequest.current) setSchedulerJobs(jobs);
     } catch (error) {
-      setStatus(String(error));
+      if (request === schedulerRequest.current) {
+        setSchedulerJobs([]);
+        setStatus(String(error));
+      }
     }
   };
 
@@ -1279,7 +1300,7 @@ export default function App() {
       setStatus(t("noConnection"));
       return;
     }
-    const path = await api.pickSqlFile();
+    const path = await api.pickJsonFile();
     if (!path) return;
     try {
       const result = await api.compareWithSnapshot(selected, schema.trim() || null, path);
@@ -1798,6 +1819,13 @@ export default function App() {
       return;
     }
     const columnIndex = columns.findIndex((column) => column.name === cell.column);
+    // The UPDATE compares the old value as text: a DATE or a TIMESTAMP would depend on NLS and could stop
+    // matching (or lose precision), so those cells stay read-only.
+    const type = (columns[columnIndex]?.typeName ?? "").toUpperCase();
+    if (type && !/^(CHAR|NCHAR|VARCHAR|VARCHAR2|NVARCHAR2|NUMBER|INTEGER|INT|SMALLINT|FLOAT|BINARY_FLOAT|BINARY_DOUBLE)\b/.test(type)) {
+      setStatus(`${cell.column}: ${t("typeNotEditable")}`);
+      return;
+    }
     const isNull = columnIndex >= 0 && rows[cell.row]?.[columnIndex]?.kind === "null";
     // The viewer shows a NULL cell as "NULL"; an untouched value must stay NULL, not become that word.
     const unchangedNull = isNull && value === cell.value;
@@ -2105,6 +2133,10 @@ export default function App() {
   const activeDirty =
     activeDoc.sql !== activeDoc.cleanSql || activeDoc.eol !== activeDoc.cleanEol;
   const confirmDiscard = () => !activeDirty || window.confirm(t("discardChanges"));
+  /** Opening a project replaces every buffer, so every buffer has to be checked, not only the active one. */
+  const confirmDiscardAll = () =>
+    !docs.some((doc) => doc.sql !== doc.cleanSql || doc.eol !== doc.cleanEol) ||
+    window.confirm(t("discardChanges"));
 
   const newFile = () => {
     const doc = makeDoc("SQL", "");
@@ -4017,7 +4049,7 @@ export default function App() {
                     value={newSequence.startWith}
                     aria-label={t("sequenceStart")}
                     onChange={(event) =>
-                      setNewSequence((current) => ({ ...current, startWith: Number(event.target.value) || 1 }))
+                      setNewSequence((current) => ({ ...current, startWith: Number(event.target.value) }))
                     }
                   />
                 </label>
@@ -4028,7 +4060,7 @@ export default function App() {
                     value={newSequence.incrementBy}
                     aria-label={t("sequenceIncrement")}
                     onChange={(event) =>
-                      setNewSequence((current) => ({ ...current, incrementBy: Number(event.target.value) || 1 }))
+                      setNewSequence((current) => ({ ...current, incrementBy: Number(event.target.value) }))
                     }
                   />
                 </label>

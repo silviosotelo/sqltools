@@ -521,18 +521,22 @@ function completionSource(
     const doc = context.state.doc.toString();
     const statement = statementAt(doc, context.pos);
 
-    // `alias.` (or `table.`): columns of that table, resolved lexically.
-    const dot = context.matchBefore(/[A-Za-z0-9_$#"]+\.$/);
+    // `alias.` or `alias.pre`: columns of that table, resolved lexically. The prefix is filtered here so a
+    // big schema does not bury the match past the cap.
+    const dot = context.matchBefore(/[A-Za-z0-9_$#"]+\.[A-Za-z0-9_$#"]*$/);
     if (dot) {
-      const qualifier = dot.text.slice(0, -1);
+      const cut = dot.text.lastIndexOf(".");
+      const qualifier = dot.text.slice(0, cut);
+      const prefix = dot.text.slice(cut + 1).toUpperCase();
       const table = tableForQualifier(statement, qualifier);
       if (!table) return null;
       try {
         const columns = await getColumns(table);
+        const matching = columns.filter((label) => label.toUpperCase().startsWith(prefix));
         return {
-          from: context.pos,
+          from: context.pos - prefix.length,
           options: limitSuggestions(
-            columns.map((label) => ({ label, type: "property", boost: 1 })),
+            matching.map((label) => ({ label, type: "property", boost: 1 })),
           ),
         };
       } catch {
@@ -556,20 +560,26 @@ function completionSource(
         columns = [];
       }
     }
+    const all = [
+      ...columns.map((label) => ({ label, type: "property", boost: 1 })),
+      ...objects.map((object) => ({
+        label: object.name,
+        type: typeOf(object.objectType),
+        detail: object.objectType,
+      })),
+      ...getTables().map((label) => ({ label, type: "class" })),
+      ...keywords.map((label) => ({ label, type: "keyword" })),
+    ];
+    // Filtering before the cap is what makes the cap harmless: a match in the 500th object is still found.
+    const typed = doc.slice(word.from, word.to).toUpperCase();
+    const matching = typed
+      ? all.filter((option) => option.label.toUpperCase().includes(typed))
+      : all;
     return {
       from: word.from,
       // Columns of the tables already in the statement first, then the catalogue: the cap keeps the
       // most useful entries visible instead of the alphabetical start of the schema.
-      options: limitSuggestions([
-        ...columns.map((label) => ({ label, type: "property", boost: 1 })),
-        ...objects.map((object) => ({
-          label: object.name,
-          type: typeOf(object.objectType),
-          detail: object.objectType,
-        })),
-        ...getTables().map((label) => ({ label, type: "class" })),
-        ...keywords.map((label) => ({ label, type: "keyword" })),
-      ]),
+      options: limitSuggestions(matching),
     };
   };
 }

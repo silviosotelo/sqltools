@@ -57,6 +57,27 @@ fn entry() -> Result<keyring::Entry, String> {
     keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT).map_err(|error| error.to_string())
 }
 
+/// `scheme://host` with the host as the HTTP client will resolve it: userinfo is stripped (a URL like
+/// `http://localhost@evil.com` connects to evil.com) and the port is dropped.
+pub fn origin(base_url: &str) -> Option<String> {
+    let (scheme, rest) = base_url.trim().split_once("://")?;
+    let authority = rest.split(['/', '?', '#']).next()?;
+    let host_port = authority.rsplit('@').next()?;
+    let host = if let Some(inner) = host_port.strip_prefix('[') {
+        format!("[{}]", inner.split(']').next()?)
+    } else {
+        host_port.split(':').next()?.to_string()
+    };
+    if host.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{}://{}",
+        scheme.to_ascii_lowercase(),
+        host.to_ascii_lowercase()
+    ))
+}
+
 /// The stored key, if any. It never leaves the keyring except to sign one request.
 pub fn stored_key() -> Result<Option<String>, String> {
     match entry()?.get_password() {
@@ -67,11 +88,34 @@ pub fn stored_key() -> Result<Option<String>, String> {
     }
 }
 
-pub fn set_key(key: Option<&str>) -> Result<(), String> {
+/// The key for this configuration. A key is stored with the origin it was typed for, so changing the
+/// provider endpoint never sends the previous provider's credential.
+pub fn stored_key_for(config: &AiConfig) -> Result<Option<String>, String> {
+    let Some(value) = stored_key()? else {
+        return Ok(None);
+    };
+    match value.split_once('\n') {
+        Some((stored, key)) => {
+            let same = origin(&config.base_url).as_deref() == Some(stored);
+            Ok(if same && !key.is_empty() {
+                Some(key.to_string())
+            } else {
+                None
+            })
+        }
+        // Keys stored before the origin was recorded keep working: the user typed them for this config.
+        None => Ok(Some(value)),
+    }
+}
+
+pub fn set_key(key: Option<&str>, base_url: &str) -> Result<(), String> {
     match key.map(str::trim).filter(|key| !key.is_empty()) {
-        Some(key) => entry()?
-            .set_password(key)
-            .map_err(|error| error.to_string()),
+        Some(key) => {
+            let origin = origin(base_url).ok_or_else(|| "Invalid base URL".to_string())?;
+            entry()?
+                .set_password(&format!("{origin}\n{key}"))
+                .map_err(|error| error.to_string())
+        }
         None => match entry()?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(error) => Err(error.to_string()),
@@ -128,12 +172,9 @@ pub fn parse_response(json: &str) -> Result<String, String> {
 
 /// True for a loopback host, where plain HTTP is acceptable (the local mock and local runtimes).
 pub fn is_loopback(base_url: &str) -> bool {
-    let rest = match base_url.split_once("://") {
-        Some((_, rest)) => rest,
-        None => return false,
-    };
-    let host = rest.split(['/', ':']).next().unwrap_or_default();
-    matches!(host, "127.0.0.1" | "localhost" | "[::1]" | "::1")
+    let host = origin(base_url)
+        .and_then(|value| value.split_once("://").map(|(_, host)| host.to_string()));
+    matches!(host.as_deref(), Some("127.0.0.1" | "localhost" | "[::1]"))
 }
 
 /// Removes the credential from anything that will be shown or stored.
@@ -161,6 +202,8 @@ pub fn run(config: &AiConfig, api_key: &str, function: &str, code: &str) -> Resu
     }
     let url = format!("{}/chat/completions", config.base_url.trim_end_matches('/'));
     let agent = ureq::AgentBuilder::new()
+        // A redirect would carry the Authorization header to whatever host it points at.
+        .redirects(0)
         .timeout(std::time::Duration::from_secs(config.timeout_secs.max(5)))
         .build();
     let response = agent
@@ -331,5 +374,19 @@ mod tests {
         assert!(request.contains("Authorization: Bearer test-key"));
         assert!(request.contains("\"model\":\"mock\""));
         assert!(request.contains("select 1"));
+    }
+
+    #[test]
+    fn userinfo_is_not_mistaken_for_the_host() {
+        assert!(!is_loopback("http://localhost@evil.example.com/v1"));
+        assert_eq!(
+            origin("http://localhost@evil.example.com/v1").unwrap(),
+            "http://evil.example.com"
+        );
+        assert!(is_loopback("http://[::1]:8080/v1"));
+        assert_eq!(
+            origin("HTTPS://API.Example.com/v1").unwrap(),
+            "https://api.example.com"
+        );
     }
 }

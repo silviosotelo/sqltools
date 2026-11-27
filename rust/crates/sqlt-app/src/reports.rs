@@ -40,6 +40,22 @@ pub fn parameters(sql: &str) -> Vec<String> {
             i += 1;
             continue;
         }
+        // Comments are skipped like the runner's substitutor does: an apostrophe in `-- it's` must not
+        // hide the parameters of the next line.
+        if ch == b'-' && bytes.get(i + 1) == Some(&b'-') {
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if ch == b'/' && bytes.get(i + 1) == Some(&b'*') {
+            i += 2;
+            while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                i += 1;
+            }
+            i = (i + 2).min(bytes.len());
+            continue;
+        }
         if ch == b'&' {
             // `&&name` is the same parameter for the user; skip the extra marker.
             let mut start = i + 1;
@@ -187,6 +203,15 @@ pub fn save_locations(list: &[String]) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_comment_does_not_hide_the_next_parameter() {
+        let sql = "-- don't run this yet\nselect * from a11 where n = &n";
+        assert_eq!(parameters(sql), vec!["n".to_string()]);
+        let sql = "/* it's a note */ select &&x from dual -- &ignored";
+        assert_eq!(parameters(sql), vec!["x".to_string()]);
+    }
+
     use super::*;
 
     #[test]

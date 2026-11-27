@@ -44,13 +44,20 @@ describe("prepareEditable", () => {
   it("accepts a where clause with commas or strings", () => {
     expect(prepareEditable("select a from t where b in (1, 2) and c = 'x,y'")).not.toBeNull();
   });
+  it("keeps the where clause byte for byte", () => {
+    const result = prepareEditable("select a from t where c = 'a  b'");
+    expect(result!.sql).toContain("where c = 'a  b'");
+    const commented = prepareEditable("select a from t -- note\nwhere c = 1");
+    expect(commented).toBeNull();
+  });
 });
 
 describe("queryByExample", () => {
-  it("wraps the query and keeps ORDER BY outside the filter", () => {
+  it("wraps the query and keeps ORDER BY inside the inline view", () => {
     expect(queryByExample("select a, b from t order by a", "b > 2")).toBe(
-      "select * from (select a, b from t) where b > 2 order by a",
+      "select * from (select a, b from t order by a) where b > 2",
     );
+    expect(queryByExample("select a from t order by t.a", "a > 1")).toContain("order by t.a)");
   });
   it("returns the query unchanged when the condition is empty", () => {
     expect(queryByExample("select * from t order by a", "  ")).toBe("select * from t order by a");

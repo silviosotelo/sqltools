@@ -49,8 +49,10 @@ fn ensure_ready(session: &Session, options: QueryOptions) -> Result<(), String> 
     }
     Err(
         "DBMS_PROFILER is not installed for this schema: the sequence PLSQL_PROFILER_RUNNUMBER is missing. \
-         Run $ORACLE_HOME/rdbms/admin/profload.sql as this user (it creates the profiler tables and the \
-         sequence) and try again. The app does not run that DDL for you: it would commit your open transaction."
+         Run $ORACLE_HOME/rdbms/admin/proftab.sql as this user: it creates the profiler tables and the \
+         sequence (it drops and recreates them, so it is not safe if you are already using them). Run \
+         profload.sql only when the DBMS_PROFILER package itself is missing. The app does not run that DDL \
+         for you: it would commit your open transaction."
             .to_string(),
     )
 }
@@ -63,13 +65,24 @@ pub fn profile(
     limit: u32,
     options: QueryOptions,
 ) -> Result<ProfileResult, String> {
-    ensure_ready(session, options)?;
+    // The lock comes first: the check below queries the dictionary, and nothing else may run meanwhile.
     let _guard = session.lock_execution();
-    let started = session.execute_block(
+    if session.is_closed() {
+        return Err("The session is closed".to_string());
+    }
+    ensure_ready(session, options)?;
+    let started = match session.execute_block(
         "begin dbms_profiler.start_profiler(run_number => :1); end;",
         &[&OracleType::Number(0, 0)],
         &[1],
-    )?;
+    ) {
+        Ok(values) => values,
+        Err(error) => {
+            // START_PROFILER may have run before the OUT bind failed to read: stop it either way.
+            let _ = session.execute_block("begin dbms_profiler.stop_profiler; end;", &[], &[]);
+            return Err(error.to_string());
+        }
+    };
     let run_id: Option<i64> = started
         .first()
         .and_then(|value| value.as_deref())

@@ -39,11 +39,12 @@ const COMPILABLE: [&str; 8] = [
 /// Quotes an identifier for DDL. Dictionary names can contain almost anything, so a double quote is
 /// refused instead of escaped: no object created by a sane tool has one, and this cannot be injected.
 pub fn ddl_ident(name: &str) -> Result<String, String> {
-    let trimmed = name.trim();
-    if trimmed.is_empty() || trimmed.contains('"') || trimmed.contains('\0') {
+    // No trim: a quoted identifier may legitimately have leading or trailing spaces, and trimming would
+    // point the statement at a different object.
+    if name.trim().is_empty() || name.contains('"') || name.contains('\0') {
         return Err(format!("Unsafe identifier: {name}"));
     }
-    Ok(format!("\"{trimmed}\""))
+    Ok(format!("\"{name}\""))
 }
 
 fn qualified(owner: Option<&str>, name: &str) -> Result<String, String> {
@@ -119,6 +120,17 @@ pub fn list_dependencies(
         .collect())
 }
 
+/// The exact owner of the login schema, as the `USER_*` catalogues report it. Quoting preserves case, and
+/// `"anamnesis"` is not `ANAMNESIS`: the name has to come from the session, not from the configuration.
+pub fn session_user(session: &Session, options: QueryOptions) -> Result<String, String> {
+    let rows = fetch_rows(session, "select user from dual", &[], options)?;
+    let owner = rows.first().map(|row| cell(row, 0)).unwrap_or_default();
+    if owner.is_empty() {
+        return Err("The session did not report its user".to_string());
+    }
+    Ok(owner)
+}
+
 /// Objects of the schema whose last compile failed.
 pub fn list_invalid_objects(
     session: &Session,
@@ -154,6 +166,8 @@ pub fn compile_statement(
 ) -> Result<String, String> {
     let target = qualified(schema, name)?;
     match compile_type(object_type)? {
+        // Oracle has no `ALTER VIEW ... COMPILE REUSE SETTINGS`: views take the bare form.
+        "VIEW" => Ok(format!("alter view {target} compile")),
         "PACKAGE BODY" => Ok(format!(
             "alter package {target} compile body reuse settings"
         )),
@@ -304,6 +318,24 @@ mod tests {
             "alter procedure \"P\" compile reuse settings"
         );
         assert!(compile_statement(None, "T", "TABLE").is_err());
+    }
+
+    #[test]
+    fn a_view_is_compiled_without_reuse_settings() {
+        assert_eq!(
+            compile_statement(None, "V", "VIEW").unwrap(),
+            "alter view \"V\" compile"
+        );
+        assert_eq!(
+            compile_statement(Some("S"), "V", "view").unwrap(),
+            "alter view \"S\".\"V\" compile"
+        );
+    }
+
+    #[test]
+    fn a_quoted_name_keeps_its_spaces() {
+        assert_eq!(ddl_ident(" A ").unwrap(), "\" A \"");
+        assert!(ddl_ident("   ").is_err());
     }
 
     #[test]
