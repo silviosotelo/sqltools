@@ -234,3 +234,13 @@ export type DebugPosition = {
 export type Report = { name: string; sql: string; params: string[] };
 
 export type FileEntry = { name: string; path: string; isDir: boolean; size: number };
+
+export type ProjectFile = { title: string; sql: string };
+
+export type Project = {
+  name: string;
+  schema: string | null;
+  notes: string;
+  files: ProjectFile[];
+  objects: string[];
+};

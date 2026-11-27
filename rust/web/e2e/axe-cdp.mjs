@@ -97,6 +97,25 @@ const VIEWS = {
     },
     expect: `Boolean(document.querySelector('.palette input[aria-label="Nombre del informe"]'))`,
   },
+  projects: {
+    steps: async (cdp) => {
+      await cdp.click('.actionstrip button[aria-label="Más acciones"]');
+      await cdp.wait(300);
+      await cdp.evaluate(`Array.from(document.querySelectorAll('[role=menuitem]')).find(b => b.innerText.trim() === 'Proyectos…')?.click()`);
+      await cdp.waitFor(`Boolean(document.querySelector('.palette input[aria-label="Nombre del proyecto"]'))`, 8000);
+    },
+    expect: `Boolean(document.querySelector('.palette input[aria-label="Nombre del proyecto"]'))`,
+  },
+  commandWindow: {
+    steps: async (cdp) => {
+      await cdp.key("Escape", "Escape", 27);
+      await cdp.click('.actionstrip button[aria-label="Más acciones"]');
+      await cdp.wait(300);
+      await cdp.evaluate(`Array.from(document.querySelectorAll('[role=menuitem]')).find(b => b.innerText.trim() === 'Ventana de comandos')?.click()`);
+      await cdp.waitFor(`Boolean(document.querySelector('[data-e2e="command-log"]'))`, 8000);
+    },
+    expect: `Boolean(document.querySelector('[data-e2e="command-log"]'))`,
+  },
   menu: {
     steps: async (cdp) => {
       await cdp.click('.actionstrip button[aria-label="Más acciones"]');

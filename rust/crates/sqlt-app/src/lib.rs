@@ -12,6 +12,7 @@ pub mod grid;
 pub mod migrate;
 pub mod profiler;
 pub mod profiles;
+pub mod projects;
 pub mod reports;
 pub mod script;
 pub mod sqlplus;
@@ -37,6 +38,7 @@ pub use compare::{
 pub use debugger::{DebugPosition, Debugger, StepMode};
 pub use grid::update_cell;
 pub use profiler::{profile, read_lines, ProfileLine, ProfileResult};
+pub use projects::{Project, ProjectFile};
 pub use reports::{parameters as report_parameters, FileEntry, Report};
 pub use state::{AppState, HistoryEntry};
 pub use store::{

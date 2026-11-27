@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use sqlt_app::{
-    browser, catalog, compare, debugger, grid, profiler, reports, AppState, ConnectionConfig,
-    HistoryEntry,
+    browser, catalog, compare, debugger, grid, profiler, projects, reports, AppState,
+    ConnectionConfig, HistoryEntry,
 };
 use sqlt_core::{Batch, ColumnMeta};
 use tauri::ipc::Channel;
@@ -683,6 +683,26 @@ async fn pick_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
+fn list_projects() -> Result<Vec<projects::Project>, String> {
+    projects::list(&projects::projects_dir())
+}
+
+#[tauri::command]
+fn save_project(project: projects::Project) -> Result<(), String> {
+    projects::save(&projects::projects_dir(), &project)
+}
+
+#[tauri::command]
+fn load_project(name: String) -> Result<projects::Project, String> {
+    projects::load(&projects::projects_dir(), &name)
+}
+
+#[tauri::command]
+fn delete_project(name: String) -> Result<(), String> {
+    projects::remove(&projects::projects_dir(), &name)
+}
+
+#[tauri::command]
 fn history(state: State<'_, Arc<AppState>>) -> Vec<HistoryEntry> {
     state.history()
 }
@@ -1313,6 +1333,10 @@ fn main() {
             list_file_locations,
             add_file_location,
             list_directory,
+            list_projects,
+            save_project,
+            load_project,
+            delete_project,
             pick_folder,
             count_objects,
             list_columns,

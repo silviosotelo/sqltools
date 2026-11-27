@@ -32,6 +32,7 @@ import type {
   DebugPosition,
   Dependency,
   FileEntry,
+  Project,
   Report as SavedReport,
   FormatOptions,
   GrantInfo,
@@ -346,6 +347,12 @@ export default function App() {
   const [reportsOpen, setReportsOpen] = useState(false);
   const [reports, setReports] = useState<SavedReport[]>([]);
   const [reportName, setReportName] = useState("");
+  const [projectsOpen, setProjectsOpen] = useState(false);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectName, setProjectName] = useState("");
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [commandText, setCommandText] = useState("");
+  const [commandLog, setCommandLog] = useState<string[]>([]);
   const [helpOpen, setHelpOpen] = useState(false);
   const [showToolbar, setShowToolbar] = useState(true);
   // null = unknown (never queried, or the last query failed).
@@ -933,6 +940,95 @@ export default function App() {
       setReports(await api.listReports());
     } catch (error) {
       setStatus(String(error));
+    }
+  };
+
+  const openProjects = async () => {
+    try {
+      setProjects(await api.listProjects());
+      setProjectsOpen(true);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  /** Saves every open buffer, the schema, the DDL objects that are open and the notes of the dialog. */
+  const saveCurrentProject = async () => {
+    const objects = docs
+      .map((doc) => /^ddl:[^.]*\.(.*)\.([^.]+)$/.exec(doc.key))
+      .filter((match): match is RegExpExecArray => Boolean(match))
+      .map((match) => `${match[2]} ${match[1]}`);
+    try {
+      await api.saveProject({
+        name: projectName,
+        schema: schema.trim() || null,
+        notes: "",
+        files: docs.map((doc) => ({ title: doc.title, sql: doc.sql })),
+        objects,
+      });
+      setProjectName("");
+      setProjects(await api.listProjects());
+      setStatus(`${t("projects")}: ${projectName}`);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const openProject = async (name: string) => {
+    try {
+      const project = await api.loadProject(name);
+      const fresh = project.files.map((file) => makeDoc(file.title || "SQL", file.sql));
+      setDocs(fresh.length ? fresh : [makeDoc("SQL", "")]);
+      setActiveDocId((fresh.length ? fresh : [makeDoc("SQL", "")])[0].id);
+      setSchema(project.schema ?? "");
+      setProjectsOpen(false);
+      setStatus(`${t("projects")}: ${project.name}`);
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  const removeProject = async (name: string) => {
+    try {
+      await api.deleteProject(name);
+      setProjects(await api.listProjects());
+    } catch (error) {
+      setStatus(String(error));
+    }
+  };
+
+  /** Command window: one statement per Enter, output appended, same runner as the editor. */
+  const runCommand = async () => {
+    const text = commandText.trim();
+    if (!text) return;
+    if (!isConnected) {
+      setStatus(t("noConnection"));
+      return;
+    }
+    setCommandText("");
+    setCommandLog((entries) => [...entries, `SQL> ${text}`]);
+    try {
+      await api.execute(selected, text, 100, null, false, (event: QueryEvent) => {
+        if (event.type === "columns") {
+          setCommandLog((entries) => [...entries, event.data.map((c) => c.name).join(" | ")]);
+        } else if (event.type === "batch") {
+          setCommandLog((entries) => [
+            ...entries,
+            ...event.data.rows.map((row) => row.map((value) => cellText(value)).join(" | ")),
+          ]);
+        } else if (event.type === "done") {
+          setCommandLog((entries) => [
+            ...entries,
+            `${event.data.rows} fila(s) · ${event.data.elapsedMs} ms`,
+          ]);
+        } else if (event.type === "statementerror") {
+          setCommandLog((entries) => [...entries, `ERROR: ${event.data.message}`]);
+        } else if (event.type === "output") {
+          setCommandLog((entries) => [...entries, ...event.data]);
+        }
+      });
+    } catch (error) {
+      setCommandLog((entries) => [...entries, String(error)]);
     }
   };
 
@@ -3097,6 +3193,8 @@ export default function App() {
             { id: "profile", label: t("profileStatement"), onClick: () => void profileStatement(), disabled: !isConnected },
             { id: "debug", label: t("debugStatement"), onClick: () => void startDebug(), disabled: !isConnected },
             { id: "reports", label: t("reportsOpen"), onClick: () => void openReports() },
+            { id: "projects", label: t("projectsOpen"), onClick: () => void openProjects() },
+            { id: "command", label: t("commandWindow"), onClick: () => setCommandOpen(true) },
             { id: "snapshot-save", label: t("saveSnapshot"), onClick: () => void saveSourcesSnapshot(), disabled: !isConnected },
             { id: "snapshot-compare", label: t("compareSnapshot"), onClick: () => void compareWithSnapshot(), disabled: !isConnected },
             ...(updateInfo
@@ -3479,6 +3577,83 @@ export default function App() {
           </div>
         </div>
       )}
+      {projectsOpen && (
+        <div className="palette-backdrop" onClick={() => setProjectsOpen(false)}>
+          <div
+            className="palette"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("projects")}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="panel-title">{t("projects")}</div>
+            <div className="palette-list">
+              {projects.length === 0 && <p className="side-empty">{t("projectsEmpty")}</p>}
+              {projects.map((project) => (
+                <div key={project.name} className="report-row">
+                  <span className="report-name">
+                    {project.name}
+                    <em>
+                      {" "}
+                      · {project.files.length} {t("projectFiles")} · {project.objects.length}{" "}
+                      {t("projectObjects")}
+                    </em>
+                  </span>
+                  <button className="plain" onClick={() => void openProject(project.name)}>
+                    {t("projectOpen")}
+                  </button>
+                  <button className="plain" onClick={() => void removeProject(project.name)}>
+                    {t("delete")}
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="row">
+              <input
+                value={projectName}
+                placeholder={t("projectName")}
+                aria-label={t("projectName")}
+                onChange={(event) => setProjectName(event.target.value)}
+              />
+              <button
+                className="plain"
+                onClick={() => void saveCurrentProject()}
+                disabled={!projectName.trim()}
+              >
+                {t("projectSaveCurrent")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {commandOpen && (
+        <div className="palette-backdrop" onClick={() => setCommandOpen(false)}>
+          <div
+            className="palette command-window"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("commandWindow")}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="panel-title">{t("commandWindow")}</div>
+            <pre className="command-log" data-e2e="command-log">
+              {commandLog.length === 0 ? t("commandPrompt") : commandLog.join("\n")}
+            </pre>
+            <input
+              autoFocus
+              value={commandText}
+              placeholder={t("commandInput")}
+              aria-label={t("commandInput")}
+              onChange={(event) => setCommandText(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void runCommand();
+              }}
+            />
+          </div>
+        </div>
+      )}
+
       {reportsOpen && (
         <div className="palette-backdrop" onClick={() => setReportsOpen(false)}>
           <div

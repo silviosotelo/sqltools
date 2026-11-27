@@ -523,3 +523,39 @@ reportaba fuera de todo landmark.
 no puede manejar, así que la prueba verifica el conteo de parámetros y ejecuta uno sin parámetros; no hay
 exportación de informes a PDF/HTML ni vista de informe paginada.
 
+### P8 — cerrada (2026-11-27)
+
+**Proyectos (`crates/sqlt-app/src/projects.rs`):** un JSON por proyecto en `<config>/projects` con
+`{ name, schema, notes, files: [{title, sql}], objects }`; `files` son los buffers abiertos y `objects` sale de
+las pestañas de DDL abiertas (`TIPO nombre`). Guardar, listar ordenado (un archivo roto se salta en vez de
+romper la lista), cargar y borrar, con nombres saneados. **4 tests** (ida y vuelta, orden y archivo roto,
+nombres inseguros, proyecto mínimo sin campos opcionales).
+
+**Ventana de comandos:** diálogo con un log tipo SQL*Plus y una línea de entrada; cada Enter corre la sentencia
+con el **mismo** `api.execute` del editor (columnas, filas, tiempo y errores al log). No se agregó una pestaña
+inferior nueva: la decisión de F5 de dejar cuatro pestañas sigue en pie.
+
+**UI:** dos entradas nuevas en "Más acciones": **Proyectos…** (abrir / eliminar / guardar el proyecto actual con
+nombre) y **Ventana de comandos**. Abrir un proyecto reemplaza los buffers y el esquema.
+
+**Hallazgo propio corregido en la fase:** `phase-p1` era intermitente (2 de 3 fallos): el primer `F5` podía
+caer antes de que `isConnected` se propagara y la ejecución devolvía "sin conexión". La prueba ahora espera a
+que el botón **Ejecutar** quede habilitado; 3 corridas seguidas en verde.
+
+**Evidencia en la app instalada** (27/11, firmada autofirmada):
+
+| Comando | Resultado |
+|---|---|
+| `node e2e/phase-p8.mjs` | `P8 CHECKS OK (5)`: guardar el buffer actual como `sqlt_p8_e2e` → aparece con `1 archivo(s)`; cambiar el editor y abrir el proyecto **restaura** `select 1 as proyecto from dual`; la ventana de comandos corre `select 7 as siete from dual` y muestra `SIETE / 7 / 1 fila(s) · 1 ms`; borrar lo elimina |
+| `axe-cdp.mjs` | **0 violaciones, 13 vistas × 2 temas** (incluye Proyectos y Ventana de comandos) |
+| `phase-p1` … `phase-p7` | 15 / 11 / 4 / 5 / 3 / 6 / 9 |
+| `phase-f1` / `phase-f5` / `keyboard-walk` | 19 / 39 / 29 paradas |
+| `commands-check` / `flow` | mismo digest / IDENTICAL |
+| capturas 1366×768, 1024×700 y 1024×640, claro y oscuro | `docs/screenshots/parity-p8-command-window-*.png` (log con 28–29 líneas) y `parity-p8-projects-*.png` |
+| `cargo fmt` / `clippy -D warnings` / `check -p sqlt-desktop` / `test` | 0 / 0 / 0 / 0 (19 ok; +4 tests de proyectos) |
+| `npm run build` / `npm test` | 0 / **98 passed** |
+
+**Límites declarados:** el proyecto guarda los buffers y el esquema, no ejecuta "compilar todos los objetos"
+ni compara versiones; la ventana de comandos ejecuta una sentencia por Enter (no interpreta `SQL*Plus`
+como `SET SERVEROUTPUT`), y los `objects` del proyecto son los que estaban abiertos en pestañas de DDL.
+

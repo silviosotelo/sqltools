@@ -40,6 +40,8 @@ await cdp.wait(1200);
 await cdp.clickTitle("Conectar");
 await cdp.waitFor(`/(Conectado|anamnesis@)/.test(document.querySelector("[data-e2e='conn-chip']")?.innerText ?? '')`, 20000);
 await cdp.waitFor(`document.querySelectorAll('.tree-count').length > 0`, 20000);
+// The chip text can appear a moment before the session is usable: wait for the Run button to enable.
+await cdp.waitFor(`(() => { const b = document.querySelector('.actionstrip button[aria-label^="Ejecutar"]'); return Boolean(b) && !b.disabled; })()`, 20000);
 
 // Names that exist in this database right now (no hardcoded tables).
 const constraintTable = await runSql(
